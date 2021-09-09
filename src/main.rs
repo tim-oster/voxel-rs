@@ -333,10 +333,12 @@ fn main() {
         }
 
         if key_states.contains(&glfw::Key::W) {
-            cam_pos = cam_pos + cam_dir * cam_speed * delta;
+            let dir = cam_dir.mul_element_wise(Vector3::new(1.0, 0.0, 1.0));
+            cam_pos = cam_pos + dir * cam_speed * delta;
         }
         if key_states.contains(&glfw::Key::S) {
-            cam_pos = cam_pos - cam_dir * cam_speed * delta;
+            let dir = cam_dir.mul_element_wise(Vector3::new(1.0, 0.0, 1.0));
+            cam_pos = cam_pos - dir * cam_speed * delta;
         }
         if key_states.contains(&glfw::Key::A) {
             let right = cam_dir.cross(cam_up);
