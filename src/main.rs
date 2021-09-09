@@ -11,13 +11,14 @@ use std::ffi::{c_void, CString};
 use std::{mem, ptr};
 
 use cgmath;
-use cgmath::{InnerSpace, Matrix, MetricSpace, Vector3, ElementWise};
+use cgmath::{InnerSpace, Matrix, MetricSpace, ElementWise, Array};
 use image::GenericImageView;
 use std::collections::HashSet;
 use std::path::Path;
 
 type Point3 = cgmath::Point3<f32>;
 type Point2 = cgmath::Point2<f32>;
+type Vector3 = cgmath::Vector3<f32>;
 
 unsafe fn gl_check_error_(file: &str, line: u32) -> u32 {
     let mut error_code = gl::GetError();
@@ -145,41 +146,42 @@ fn main() {
         struct Vertex {
             position: cgmath::Point3<f32>,
             uv: cgmath::Point2<f32>,
+            normal: cgmath::Vector3<f32>,
         }
 
         let pos = cgmath::Point3::new(0.0, 0.0, -5.0);
         let scl = 0.5;
         let vertices = vec![
             // front
-            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z + scl), uv: Point2::new(1.0, 1.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z + scl), uv: Point2::new(0.0, 1.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z + scl), uv: Point2::new(0.0, 0.0) },
-            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z + scl), uv: Point2::new(1.0, 0.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z + scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, 0.0, 1.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z + scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(0.0, 0.0, 1.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z + scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(0.0, 0.0, 1.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z + scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(0.0, 0.0, 1.0) },
             // back
-            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z - scl), uv: Point2::new(0.0, 1.0) },
-            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z - scl), uv: Point2::new(0.0, 0.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z - scl), uv: Point2::new(1.0, 0.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z - scl), uv: Point2::new(1.0, 1.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z - scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(0.0, 0.0, -1.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z - scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(0.0, 0.0, -1.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z - scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(0.0, 0.0, -1.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z - scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, 0.0, -1.0) },
             // left
-            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z + scl), uv: Point2::new(1.0, 1.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z - scl), uv: Point2::new(0.0, 1.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z - scl), uv: Point2::new(0.0, 0.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z + scl), uv: Point2::new(1.0, 0.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z + scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(-1.0, 0.0, 0.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z - scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(-1.0, 0.0, 0.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z - scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(-1.0, 0.0, 0.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z + scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(-1.0, 0.0, 0.0) },
             // right
-            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z + scl), uv: Point2::new(0.0, 1.0) },
-            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z + scl), uv: Point2::new(0.0, 0.0) },
-            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z - scl), uv: Point2::new(1.0, 0.0) },
-            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z - scl), uv: Point2::new(1.0, 1.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z + scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(1.0, 0.0, 0.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z + scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(1.0, 0.0, 0.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z - scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(1.0, 0.0, 0.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z - scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(1.0, 0.0, 0.0) },
             // top
-            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z + scl), uv: Point2::new(1.0, 0.0) },
-            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z - scl), uv: Point2::new(1.0, 1.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z - scl), uv: Point2::new(0.0, 1.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z + scl), uv: Point2::new(0.0, 0.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z + scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(0.0, 1.0, 0.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z - scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, 1.0, 0.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z - scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(0.0, 1.0, 0.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z + scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(0.0, 1.0, 0.0) },
             // bottom
-            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z + scl), uv: Point2::new(1.0, 1.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z + scl), uv: Point2::new(0.0, 1.0) },
-            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z - scl), uv: Point2::new(0.0, 0.0) },
-            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z - scl), uv: Point2::new(1.0, 0.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z + scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, -1.0, 0.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z + scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(0.0, -1.0, 0.0) },
+            Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z - scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(0.0, -1.0, 0.0) },
+            Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z - scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(0.0, -1.0, 0.0) },
         ];
 
         let mut indices = Vec::<i32>::new();
@@ -214,24 +216,15 @@ fn main() {
         );
 
         let stride = mem::size_of::<Vertex>() as i32;
-        gl::VertexAttribPointer(
-            0,
-            3,
-            gl::FLOAT,
-            gl::FALSE,
-            stride,
-            offset_of!(Vertex, position) as *const c_void,
-        );
+
+        gl::VertexAttribPointer(0, 3, gl::FLOAT, gl::FALSE, stride, offset_of!(Vertex, position) as *const c_void);
         gl::EnableVertexAttribArray(0);
-        gl::VertexAttribPointer(
-            1,
-            2,
-            gl::FLOAT,
-            gl::FALSE,
-            stride,
-            offset_of!(Vertex, uv) as *const c_void,
-        );
+
+        gl::VertexAttribPointer(1, 2, gl::FLOAT, gl::FALSE, stride, offset_of!(Vertex, uv) as *const c_void);
         gl::EnableVertexAttribArray(1);
+
+        gl::VertexAttribPointer(2, 3, gl::FLOAT, gl::FALSE, stride, offset_of!(Vertex, normal) as *const c_void);
+        gl::EnableVertexAttribArray(2);
 
         gl::BindBuffer(gl::ARRAY_BUFFER, 0);
         gl::BindVertexArray(0);
@@ -287,6 +280,9 @@ fn main() {
     let mut last_mouse_pos = cgmath::Point2::new(0.0, 0.0);
     let mut mouse_delta = cgmath::Vector2::new(0.0, 0.0);
 
+    let ambient_intensity = 0.3f32;
+    let mut light_dir = Vector3::new(-1.0, -1.0, -1.0).normalize();
+
     unsafe {
         gl::Enable(gl::DEPTH_TEST);
         gl::DepthFunc(gl::LESS);
@@ -333,11 +329,11 @@ fn main() {
         }
 
         if key_states.contains(&glfw::Key::W) {
-            let dir = cam_dir.mul_element_wise(Vector3::new(1.0, 0.0, 1.0));
+            let dir = cam_dir.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
             cam_pos = cam_pos + dir * cam_speed * delta;
         }
         if key_states.contains(&glfw::Key::S) {
-            let dir = cam_dir.mul_element_wise(Vector3::new(1.0, 0.0, 1.0));
+            let dir = cam_dir.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
             cam_pos = cam_pos - dir * cam_speed * delta;
         }
         if key_states.contains(&glfw::Key::A) {
@@ -353,6 +349,9 @@ fn main() {
         }
         if key_states.contains(&glfw::Key::LeftShift) {
             cam_pos.y -= cam_speed * delta;
+        }
+        if key_states.contains(&glfw::Key::R) {
+            light_dir = cam_dir;
         }
 
         if mouse_delta.x.abs() > 0.01 {
@@ -384,20 +383,16 @@ fn main() {
 
             gl::UseProgram(shader);
 
-            let uni_name = CString::new("projection").unwrap();
-            gl::UniformMatrix4fv(
-                gl::GetUniformLocation(shader, uni_name.as_ptr()),
-                1,
-                gl::FALSE,
-                projection.as_ptr(),
-            );
-            let uni_name = CString::new("view").unwrap();
-            gl::UniformMatrix4fv(
-                gl::GetUniformLocation(shader, uni_name.as_ptr()),
-                1,
-                gl::FALSE,
-                view.as_ptr(),
-            );
+            let uni_name = CString::new("u_projection").unwrap();
+            gl::UniformMatrix4fv(gl::GetUniformLocation(shader, uni_name.as_ptr()), 1, gl::FALSE, projection.as_ptr());
+            let uni_name = CString::new("u_view").unwrap();
+            gl::UniformMatrix4fv(gl::GetUniformLocation(shader, uni_name.as_ptr()), 1, gl::FALSE, view.as_ptr());
+            let uni_name = CString::new("u_ambient").unwrap();
+            gl::Uniform1f(gl::GetUniformLocation(shader, uni_name.as_ptr()), ambient_intensity);
+            let uni_name = CString::new("u_ligth_dir").unwrap();
+            gl::Uniform3fv(gl::GetUniformLocation(shader, uni_name.as_ptr()), 1, light_dir.as_ptr());
+            let uni_name = CString::new("u_cam_pos").unwrap();
+            gl::Uniform3fv(gl::GetUniformLocation(shader, uni_name.as_ptr()), 1, cam_pos.as_ptr());
 
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, texture);
