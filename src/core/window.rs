@@ -11,6 +11,7 @@ pub struct Window {
     window: RefCell<glfw::Window>,
     events: std::sync::mpsc::Receiver<(f64, glfw::WindowEvent)>,
 
+    was_resized: bool,
     current_stats: FrameStats,
     input: Input,
 }
@@ -45,6 +46,7 @@ impl Window {
             context,
             window: RefCell::new(window),
             events,
+            was_resized: false,
             current_stats: FrameStats { last_frame: 0.0, delta_time: 1.0 },
             input: Input::new(),
         }
@@ -62,13 +64,15 @@ impl Window {
         }
         self.current_stats.last_frame = current_time;
 
+        self.was_resized = false;
         self.input.update();
 
         for (_, event) in glfw::flush_messages(&self.events) {
             match event {
-                glfw::WindowEvent::FramebufferSize(width, height) => unsafe {
-                    gl::Viewport(0, 0, width, height)
-                },
+                glfw::WindowEvent::FramebufferSize(width, height) => {
+                    unsafe { gl::Viewport(0, 0, width, height); }
+                    self.was_resized = true;
+                }
                 _ => self.input.handle_event(event),
             }
         }
@@ -77,6 +81,10 @@ impl Window {
         self.window.borrow_mut().swap_buffers();
 
         true
+    }
+
+    pub fn was_resized(&self) -> bool {
+        self.was_resized
     }
 
     pub fn get_frame_stats(&self) -> &FrameStats {
@@ -102,6 +110,11 @@ impl Window {
 
     pub fn get_size(&self) -> (i32, i32) {
         self.window.borrow().get_size()
+    }
+
+    pub fn get_aspect(&self) -> f32 {
+        let (w, h) = self.get_size();
+        w as f32 / h as f32
     }
 }
 

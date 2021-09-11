@@ -53,12 +53,11 @@ fn main() {
     let (vao, indices_count) = build_vao();
     let texture = build_texture();
 
+    let mut camera = graphics::Camera::new(72.0, window.get_aspect(), 0.01, 1024.0);
+
     let cam_speed = 0.2f32;
     let cam_rot_speed = 0.005f32;
-    let mut cam_pos = cgmath::Point3::new(0.0, 0.0, 0.0);
-    let mut cam_dir = cgmath::Vector3::new(0.0, 0.0, 0.0);
-    let mut cam_rotation = cgmath::Vector3::new(0.0, -90f32.to_radians(), 0.0);
-    let cam_up = cgmath::Vector3::new(0.0, 1.0, 0.0);
+    let mut cam_rot = cgmath::Vector3::new(0.0, -90f32.to_radians(), 0.0);
 
     let ambient_intensity = 0.3f32;
     let mut light_dir = Vector3::new(-1.0, -1.0, -1.0).normalize();
@@ -78,33 +77,35 @@ fn main() {
         let stats = window.get_frame_stats();
         let input = window.get_input();
 
+        if window.was_resized() {
+            camera.update_projection(72.0, window.get_aspect(), 0.01, 1024.0);
+        }
+
         if input.was_key_pressed(&glfw::Key::Escape) {
             window.close();
         }
         if input.is_key_pressed(&glfw::Key::W) {
-            let dir = cam_dir.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-            cam_pos = cam_pos + dir * cam_speed * stats.delta_time;
+            let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
+            camera.position += dir * cam_speed * stats.delta_time;
         }
         if input.is_key_pressed(&glfw::Key::S) {
-            let dir = cam_dir.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-            cam_pos = cam_pos - dir * cam_speed * stats.delta_time;
+            let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
+            camera.position -= dir * cam_speed * stats.delta_time;
         }
         if input.is_key_pressed(&glfw::Key::A) {
-            let right = cam_dir.cross(cam_up);
-            cam_pos = cam_pos - right * cam_speed * stats.delta_time;
+            camera.position -= camera.right() * cam_speed * stats.delta_time;
         }
         if input.is_key_pressed(&glfw::Key::D) {
-            let right = cam_dir.cross(cam_up);
-            cam_pos = cam_pos + right * cam_speed * stats.delta_time;
+            camera.position += camera.right() * cam_speed * stats.delta_time;
         }
         if input.is_key_pressed(&glfw::Key::Space) {
-            cam_pos.y += cam_speed * stats.delta_time;
+            camera.position.y += cam_speed * stats.delta_time;
         }
         if input.is_key_pressed(&glfw::Key::LeftShift) {
-            cam_pos.y -= cam_speed * stats.delta_time;
+            camera.position.y -= cam_speed * stats.delta_time;
         }
         if input.was_key_pressed(&glfw::Key::E) {
-            light_dir = cam_dir;
+            light_dir = camera.forward;
         }
         if input.was_key_pressed(&glfw::Key::R) {
             if let Err(err) = shader.reload() {
@@ -121,39 +122,24 @@ fn main() {
         if use_mouse_input {
             let delta = input.get_mouse_delta();
             if delta.x.abs() > 0.01 {
-                cam_rotation.y += delta.x * cam_rot_speed * stats.delta_time;
+                cam_rot.y += delta.x * cam_rot_speed * stats.delta_time;
             }
             if delta.y.abs() > 0.01 {
-                cam_rotation.x -= delta.y * cam_rot_speed * stats.delta_time;
+                cam_rot.x -= delta.y * cam_rot_speed * stats.delta_time;
             }
+            camera.set_forward_from_euler(cam_rot);
         }
-        cam_dir = cgmath::Vector3::new(
-            (cam_rotation.y.cos() * cam_rotation.x.cos()) as f32,
-            (cam_rotation.x.sin()) as f32,
-            (cam_rotation.y.sin() * cam_rotation.x.cos()) as f32,
-        ).normalize();
 
         unsafe {
             gl::ClearColor(0.0, 0.0, 0.0, 1.0);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
-            let projection = {
-                let fov = 72.0f32;
-                let (width, height) = window.get_size();
-                let aspect_ratio = width as f32 / height as f32;
-                let zfar = 1024.0;
-                let znear = 0.1;
-                cgmath::perspective(cgmath::Deg(fov), aspect_ratio, znear, zfar)
-            };
-
-            let view = cgmath::Matrix4::look_to_rh(cam_pos, cam_dir, cam_up);
-
             shader.bind();
-            shader.set_f32mat4("u_projection", &projection);
-            shader.set_f32mat4("u_view", &view);
+            shader.set_f32mat4("u_projection", camera.get_projection_matrix());
+            shader.set_f32mat4("u_view", &camera.get_view_matrix());
             shader.set_f32("u_ambient", ambient_intensity);
             shader.set_f32vec3("u_light_dir", &light_dir);
-            shader.set_f32vec3("u_cam_pos", &cam_pos.to_vec());
+            shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
 
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, texture);
