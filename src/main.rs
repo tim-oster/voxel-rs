@@ -1,20 +1,21 @@
+extern crate gl;
+extern crate glfw;
 #[macro_use]
 extern crate memoffset;
 
-extern crate gl;
-extern crate glfw;
-
-use self::gl::types::*;
-use glfw::{Action, Context, Key};
-
-use std::ffi::{c_void, CString};
 use std::{mem, ptr};
+use std::collections::HashSet;
+use std::ffi::{c_void};
+use std::path::Path;
 
 use cgmath;
-use cgmath::{InnerSpace, Matrix, MetricSpace, ElementWise, Array};
+use cgmath::{ElementWise, EuclideanSpace, InnerSpace, MetricSpace};
+use glfw::{Action, Context, Key};
 use image::GenericImageView;
-use std::collections::HashSet;
-use std::path::Path;
+
+use self::gl::types::*;
+
+mod graphics;
 
 type Point3 = cgmath::Point3<f32>;
 type Point2 = cgmath::Point2<f32>;
@@ -71,77 +72,11 @@ fn main() {
 
     let mut last_frame_time = glfw.get_time();
 
-    let (shader, vao) = unsafe {
-        let vertex_shader = gl::CreateShader(gl::VERTEX_SHADER);
-        let c_str_vert =
-            CString::new(include_bytes!("../assets/shaders/shader.vert").to_vec()).unwrap();
-        gl::ShaderSource(vertex_shader, 1, &c_str_vert.as_ptr(), ptr::null());
-        gl::CompileShader(vertex_shader);
+    let mut shader = graphics::Resource::new(
+        || graphics::ShaderProgram::new_from_files("assets/shaders/shader.vert", "assets/shaders/shader.frag"),
+    ).unwrap();
 
-        let mut success = gl::FALSE as GLint;
-        let mut length = 0;
-        let mut info_log = [0; 512];
-        gl::GetShaderiv(vertex_shader, gl::COMPILE_STATUS, &mut success);
-        if success != gl::TRUE as GLint {
-            gl::GetShaderInfoLog(
-                vertex_shader,
-                512,
-                &mut length,
-                info_log.as_mut_ptr() as *mut GLchar,
-            );
-            panic!(
-                "error compiling shader: {}",
-                String::from_utf8_lossy(&info_log[..(length as usize)])
-            );
-        }
-
-        let fragment_shader = gl::CreateShader(gl::FRAGMENT_SHADER);
-        let c_str_vert =
-            CString::new(include_bytes!("../assets/shaders/shader.frag").to_vec()).unwrap();
-        gl::ShaderSource(fragment_shader, 1, &c_str_vert.as_ptr(), ptr::null());
-        gl::CompileShader(fragment_shader);
-
-        let mut success = gl::FALSE as GLint;
-        let mut length = 0;
-        let mut info_log = [0; 512];
-        gl::GetShaderiv(fragment_shader, gl::COMPILE_STATUS, &mut success);
-        if success != gl::TRUE as GLint {
-            gl::GetShaderInfoLog(
-                fragment_shader,
-                512,
-                &mut length,
-                info_log.as_mut_ptr() as *mut GLchar,
-            );
-            panic!(
-                "error compiling shader: {}",
-                String::from_utf8_lossy(&info_log[..(length as usize)])
-            );
-        }
-
-        let shader_program = gl::CreateProgram();
-        gl::AttachShader(shader_program, vertex_shader);
-        gl::AttachShader(shader_program, fragment_shader);
-        gl::LinkProgram(shader_program);
-        let mut success = gl::FALSE as GLint;
-        let mut length = 0;
-        let mut info_log = [0; 512];
-        gl::GetProgramiv(shader_program, gl::LINK_STATUS, &mut success);
-        if success != gl::TRUE as GLint {
-            gl::GetProgramInfoLog(
-                shader_program,
-                512,
-                &mut length,
-                info_log.as_mut_ptr() as *mut GLchar,
-            );
-            panic!(
-                "error linking program: {}",
-                String::from_utf8_lossy(&info_log[..(length as usize)])
-            );
-        }
-
-        gl::DeleteShader(vertex_shader);
-        gl::DeleteShader(fragment_shader);
-
+    let vao = unsafe {
         #[repr(C)]
         struct Vertex {
             position: cgmath::Point3<f32>,
@@ -229,7 +164,7 @@ fn main() {
         gl::BindBuffer(gl::ARRAY_BUFFER, 0);
         gl::BindVertexArray(0);
 
-        (shader_program, vao)
+        vao
     };
 
     let texture = unsafe {
@@ -277,11 +212,14 @@ fn main() {
     let cam_up = cgmath::Vector3::new(0.0, 1.0, 0.0);
 
     let mut key_states = HashSet::new();
+    let mut old_key_states = HashSet::new();
     let mut last_mouse_pos = cgmath::Point2::new(0.0, 0.0);
-    let mut mouse_delta = cgmath::Vector2::new(0.0, 0.0);
+    let mut mouse_delta;
 
     let ambient_intensity = 0.3f32;
     let mut light_dir = Vector3::new(-1.0, -1.0, -1.0).normalize();
+
+    let mut use_mouse_input = true;
 
     unsafe {
         gl::Enable(gl::DEPTH_TEST);
@@ -300,6 +238,7 @@ fn main() {
 
         mouse_delta = cgmath::Vector2::new(0.0, 0.0);
 
+        old_key_states = key_states.clone();
         for (_, event) in glfw::flush_messages(&events) {
             match event {
                 glfw::WindowEvent::FramebufferSize(width, height) => unsafe {
@@ -350,15 +289,32 @@ fn main() {
         if key_states.contains(&glfw::Key::LeftShift) {
             cam_pos.y -= cam_speed * delta;
         }
-        if key_states.contains(&glfw::Key::R) {
+        if key_states.contains(&glfw::Key::E) {
             light_dir = cam_dir;
         }
-
-        if mouse_delta.x.abs() > 0.01 {
-            cam_rotation.y += mouse_delta.x * cam_rot_speed * delta;
+        if key_states.contains(&glfw::Key::R) && !old_key_states.contains(&glfw::Key::R) {
+            if let Err(err) = shader.reload() {
+                println!("error loading shader: {:?}", err);
+            } else {
+                println!("reload shader");
+            }
         }
-        if mouse_delta.y.abs() > 0.01 {
-            cam_rotation.x -= mouse_delta.y * cam_rot_speed * delta;
+        if key_states.contains(&glfw::Key::T) && !old_key_states.contains(&glfw::Key::T) {
+            use_mouse_input = !use_mouse_input;
+            if use_mouse_input {
+                window.set_cursor_mode(glfw::CursorMode::Disabled);
+            } else {
+                window.set_cursor_mode(glfw::CursorMode::Normal);
+            }
+        }
+
+        if use_mouse_input {
+            if mouse_delta.x.abs() > 0.01 {
+                cam_rotation.y += mouse_delta.x * cam_rot_speed * delta;
+            }
+            if mouse_delta.y.abs() > 0.01 {
+                cam_rotation.x -= mouse_delta.y * cam_rot_speed * delta;
+            }
         }
         cam_dir = cgmath::Vector3::new(
             (cam_rotation.y.cos() * cam_rotation.x.cos()) as f32,
@@ -381,26 +337,21 @@ fn main() {
 
             let view = cgmath::Matrix4::look_to_rh(cam_pos, cam_dir, cam_up);
 
-            gl::UseProgram(shader);
-
-            let uni_name = CString::new("u_projection").unwrap();
-            gl::UniformMatrix4fv(gl::GetUniformLocation(shader, uni_name.as_ptr()), 1, gl::FALSE, projection.as_ptr());
-            let uni_name = CString::new("u_view").unwrap();
-            gl::UniformMatrix4fv(gl::GetUniformLocation(shader, uni_name.as_ptr()), 1, gl::FALSE, view.as_ptr());
-            let uni_name = CString::new("u_ambient").unwrap();
-            gl::Uniform1f(gl::GetUniformLocation(shader, uni_name.as_ptr()), ambient_intensity);
-            let uni_name = CString::new("u_ligth_dir").unwrap();
-            gl::Uniform3fv(gl::GetUniformLocation(shader, uni_name.as_ptr()), 1, light_dir.as_ptr());
-            let uni_name = CString::new("u_cam_pos").unwrap();
-            gl::Uniform3fv(gl::GetUniformLocation(shader, uni_name.as_ptr()), 1, cam_pos.as_ptr());
+            shader.bind();
+            shader.set_f32mat4("u_projection", &projection);
+            shader.set_f32mat4("u_view", &view);
+            shader.set_f32("u_ambient", ambient_intensity);
+            shader.set_f32vec3("u_ligth_dir", &light_dir);
+            shader.set_f32vec3("u_cam_pos", &cam_pos.to_vec());
 
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, texture);
-            let uni_name = CString::new("u_texture").unwrap();
-            gl::Uniform1i(gl::GetUniformLocation(shader, uni_name.as_ptr()), 0);
+            shader.set_i32("u_texture", 0);
 
             gl::BindVertexArray(vao);
             gl::DrawElements(gl::TRIANGLES, 6 * 6, gl::UNSIGNED_INT, ptr::null());
+
+            shader.unbind();
 
             gl_check_error!();
         }
