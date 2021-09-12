@@ -32,8 +32,12 @@ impl Camera {
         &self.projection
     }
 
-    pub fn get_view_matrix(&self) -> cgmath::Matrix4<f32> {
+    pub fn get_world_to_camera_matrix(&self) -> cgmath::Matrix4<f32> {
         cgmath::Matrix4::look_to_rh(self.position, self.forward, self.up)
+    }
+
+    pub fn get_camera_to_world_matrix(&self) -> cgmath::Matrix4<f32> {
+        self.get_world_to_camera_matrix().invert().unwrap()
     }
 
     pub fn set_forward_from_euler(&mut self, euler: Vector3<f32>) {
