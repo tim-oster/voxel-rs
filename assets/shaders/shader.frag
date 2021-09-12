@@ -8,6 +8,11 @@ uniform mat4 u_view;
 uniform float u_fovy;
 uniform float u_aspect;
 
+// lighting
+uniform float u_ambient;
+uniform vec3 u_light_dir;
+uniform vec3 u_cam_pos;
+
 const float specular_strength = 0.5;
 
 // https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Buffer_backed
@@ -35,16 +40,6 @@ vec2 boxIntersection(in vec3 ro, in vec3 rd, in vec3 rad, out vec3 oN) {
     return vec2(tN, tF);
 }
 
-float sphIntersect(vec3 ro, vec3 rd, vec4 sph) {
-    vec3 oc = ro - sph.xyz;
-    float b = dot(oc, rd);
-    float c = dot(oc, oc) - sph.w*sph.w;
-    float h = b*b - c;
-    if (h<0.0) return -1.0;
-    h = sqrt(h);
-    return -b - h;
-}
-
 void main() {
     vec2 uv = v_uv * 2.0 - 1.0;
     uv.x *= u_aspect;
@@ -56,7 +51,17 @@ void main() {
     look_at = (u_view * vec4(look_at, 1.0)).xyz;
     vec3 rd = normalize(look_at - ro);
 
-    float d = sphIntersect(ro, rd, vec4(0.0, 0.0, -4.0, 1.0));
+    vec3 normal;
+    vec2 d = boxIntersection(ro + vec3(0.0, 0.0, 4.0), rd, vec3(0.5), normal);
+    vec3 frag_pos = ro + rd * d.x;
 
-    color = vec4(d, 0.0, 0.0, 1.0);
+    float diffuse = max(dot(normal, -u_light_dir), 0.0);
+
+    vec3 view_dir = normalize(frag_pos - u_cam_pos);
+    vec3 reflect_dir = reflect(-u_light_dir, normal);
+    float specular = pow(max(dot(view_dir, reflect_dir), 0.0), 256) * specular_strength;
+
+    float light = u_ambient + diffuse + specular;
+
+    color = vec4(vec3(step(0.0, d.x) * light), 1.0);
 }

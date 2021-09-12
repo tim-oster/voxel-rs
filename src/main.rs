@@ -137,9 +137,9 @@ fn main() {
             shader.bind();
             // shader.set_f32mat4("u_projection", camera.get_projection_matrix());
             // shader.set_f32mat4("u_view", &camera.get_view_matrix());
-            // shader.set_f32("u_ambient", ambient_intensity);
-            // shader.set_f32vec3("u_light_dir", &light_dir);
-            // shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
+            shader.set_f32("u_ambient", ambient_intensity);
+            shader.set_f32vec3("u_light_dir", &light_dir);
+            shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
 
             shader.set_f32mat4("u_view", &camera.get_camera_to_world_matrix());
             shader.set_f32("u_fovy", 70.0f32.to_radians());
