@@ -43,12 +43,12 @@ vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 rad, out vec3 oN) {
 const vec3 octree_pos = vec3(0.0);
 const float octree_scale = 4;
 const uint octree_desc[] = uint[](
-0x00010400,
-0x00000404
+0x00010200,
+0x00000202
 );
 
 const vec3 octant_debug_colors[] = vec3[](
-vec3(0.0, 0.0, 0.0),
+vec3(0.2, 0.2, 0.2),
 vec3(0.0, 1.0, 0.0),
 vec3(0.0, 0.0, 1.0),
 vec3(0.0, 1.0, 1.0),
@@ -60,32 +60,70 @@ vec3(1.0, 1.0, 1.0)
 
 const float EPS = 0.00001;
 
-float intersect_octree(in vec3 ro, in vec3 rd, out vec3 oN) {
+float intersect_plane(vec3 ro, vec3 rd, vec3 po, vec3 pn) {
+    float denom = dot(rd, pn);
+    if (abs(denom) < EPS) return -1.0;
+    float t = dot(po - ro, pn) / denom;
+    if (t < 0.0) return -1.0;
+    return t;
+}
+
+float intersect_octree(in vec3 ro, in vec3 rd, out vec3 oN, int ptr, float scale, vec3 pos) {
     // intersect against root octree first to find octant
-    vec3 root_pos = octree_pos - vec3(octree_scale * 0.5);
+    vec3 root_pos = pos - vec3(scale * 0.5);
     ro += root_pos;
 
-    float hit = intersect_box(ro, rd, vec3(octree_scale * 0.5), oN).x;
+    vec2 hit_2d = intersect_box(ro, rd, vec3(scale * 0.5), oN);
+    float hit = hit_2d.x;
     if (hit < 0.0) return hit;
 
     vec3 hit_pos = ro + rd * hit;
-    vec3 idx_3d = floor(clamp((hit_pos - root_pos) / octree_scale * 2.0, EPS, 2.0-EPS));
+    vec3 idx_3d = floor(clamp((hit_pos - root_pos) / scale * 2.0, EPS, 2.0-EPS));
     uint idx = uint(idx_3d.x) | (uint(idx_3d.y) << 1) | (uint(1-idx_3d.z) << 2);
 
-    int ptr = 0;
-    uint octant_bit = 1u << (idx + 1);
+    uint octant_bit = 1u << (idx);
     bool is_child = (octree_desc[ptr] & (octant_bit << 8)) != 0;
     bool is_leaf = (octree_desc[ptr] & octant_bit) != 0;
 
     if (is_child) {
-        int offset = int(octree_desc[ptr] & 0xffu);
+        if (is_leaf) {
+            oN = vec3(1.0);
+            return hit;
+        }
 
-        // TODO color if leaf
-        // TODO push if child
-        oN = vec3(1.0);
+//        oN = vec3(octant_debug_colors[idx]);
+        oN = vec3(0.5);
+        int offset = int(octree_desc[ptr] & 0xffu);
+        // TODO recursion not allowed
+//        return intersect_octree(ro, rd, oN, ptr + offset, scale * 0.5, pos + idx_3d * scale * 0.5);
     } else {
         // TODO advance to sibling
-        oN = vec3(0.2);
+
+        float x0 = intersect_plane(ro, rd, root_pos + scale * 0.5, vec3(1.0, 0.0, 0.0)) + EPS;
+        if (x0 < hit_2d.x) x0 = 3e38;
+        float y0 = intersect_plane(ro, rd, root_pos + scale * 0.5, vec3(0.0, 1.0, 0.0)) + EPS;
+        if (y0 < hit_2d.x) y0 = 3e38;
+        float z0 = intersect_plane(ro, rd, root_pos + scale * 0.5, vec3(0.0, 0.0, 1.0)) + EPS;
+        if (z0 < hit_2d.x) z0 = 3e38;
+
+        float hit = min(x0, min(z0, y0));
+        if (hit > hit_2d.y) {
+            // TODO exit the cube
+            oN = vec3(0.0);
+            return hit_2d.x;
+        }
+
+        vec3 hit_pos = ro + rd * hit;
+        vec3 dst = (hit_pos - root_pos) / scale;
+
+        vec3 idx_3d = floor(clamp(dst * 2.0, EPS, 2.0-EPS));
+        uint idx = uint(idx_3d.x) | (uint(idx_3d.y) << 1) | (uint(1-idx_3d.z) << 2);
+
+        uint octant_bit = 1u << (idx);
+        bool is_child = (octree_desc[ptr] & (octant_bit << 8)) != 0;
+        bool is_leaf = (octree_desc[ptr] & octant_bit) != 0;
+
+        oN = vec3(octant_debug_colors[idx]);
     }
 
     return hit;
@@ -103,7 +141,7 @@ void main() {
     vec3 rd = normalize(look_at - ro);
 
     vec3 normal;
-    float d = intersect_octree(ro, rd, normal);
+    float d = intersect_octree(ro, rd, normal, 0, octree_scale, octree_pos);
 
     color = vec4(normal, 1.0);
 
