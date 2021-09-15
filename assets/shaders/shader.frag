@@ -23,7 +23,9 @@ layout (std430, binding = 0) buffer root_node {
 };
 
 // source: https://www.iquilezles.org/www/articles/boxfunctions/boxfunctions.htm
-vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 rad, out vec3 oN) {
+vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 pos, in vec3 rad, out vec3 oN) {
+    ro -= pos + rad;
+
     vec3 m = 1.0/rd;
     vec3 n = m*ro;
     vec3 k = abs(m)*rad;
@@ -40,11 +42,13 @@ vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 rad, out vec3 oN) {
     return vec2(tN, tF);
 }
 
-const vec3 octree_pos = vec3(0.0);
+const vec3 octree_pos = vec3(-3.0, 0.0, 4.0);
 const float octree_scale = 4;
 const uint octree_desc[] = uint[](
-0x00010600,
-0x00000606
+0x00011600,
+0x00011600,
+0x00011600,
+0x00000202
 );
 
 const vec3 octant_debug_colors[] = vec3[](
@@ -60,7 +64,7 @@ vec3(1.0, 1.0, 1.0)
 
 const float EPS = 0.00001;
 const float MAX_FLOAT = 3e38;
-const int MAX_STEPS = 10;
+const int MAX_STEPS = 100;
 
 float intersect_plane(vec3 ro, vec3 rd, vec3 po, vec3 pn) {
     float denom = dot(rd, pn);
@@ -73,8 +77,12 @@ float intersect_plane(vec3 ro, vec3 rd, vec3 po, vec3 pn) {
 uint get_octant_idx(vec3 hit_pos, vec3 octree_pos, float scale) {
     vec3 to = hit_pos - octree_pos;
     vec3 in_octree = floor(clamp(to / scale * 2.0, EPS, 2.0-EPS));
-    uint idx = uint(in_octree.x) | (uint(in_octree.y) << 1) | (uint(1-in_octree.z) << 2);
+    uint idx = uint(in_octree.x) | (uint(in_octree.y) << 1) | (uint(1-in_octree.z) << 2);// TODO do 1-x on z?
     return idx;
+}
+
+vec3 get_offset_from_octant_idx(uint idx) {
+    return vec3(idx & 0x1u, (idx >> 1) & 0x1u, 1.0 - float((idx >> 2) & 0x1u));
 }
 
 void get_octant_flags(uint desc, uint idx, out bool is_child, out bool is_leaf) {
@@ -84,31 +92,34 @@ void get_octant_flags(uint desc, uint idx, out bool is_child, out bool is_leaf) 
 }
 
 float intersect_octree(in vec3 ro, in vec3 rd, out vec3 oN) {
+    // TODO does is work for negative coordinates?
+
     // TODO figure out proper stack size
-    const int STACK_SIZE = 32;
+    const int STACK_SIZE = 100;
     int[STACK_SIZE] ptr_stack;
-    float[STACK_SIZE] t_max_stack;
+    float[STACK_SIZE] t_max_stack;// TODO can be removed by raycasting again in POP?
+    vec3[STACK_SIZE] pos_stack;// TODO can be removed because it is a relative calculation?
     int stack_ptr = 0;
 
     int ptr = 0;
     float scale = octree_scale;
     float half_scale = scale * 0.5;
-    vec3 pos = octree_pos;
+
+    // TODO remove
+    vec3 dummy_normal;
 
     // TODO move this into the loop as well? code dupliation?
     // offset the ray so that the octree center is at (0,0,0)
-    vec3 root_pos = pos - vec3(scale * 0.5);
-    ro += root_pos;
-
-    vec2 minmax = intersect_box(ro, rd, vec3(half_scale), oN);
+    vec3 pos = octree_pos;
+    vec2 minmax = intersect_box(ro, rd, pos, vec3(half_scale), dummy_normal);
     if (minmax.x < 0.0) return -1.0;
 
-    float t_max = minmax.y;
     float t = minmax.x;
+    float t_max = minmax.y;
 
     for (int i = 0; i < MAX_STEPS; ++i) {
         vec3 hit_pos = ro + rd * t;
-        uint idx = get_octant_idx(hit_pos, root_pos, scale);
+        uint idx = get_octant_idx(hit_pos, pos, scale);
         bool is_child, is_leaf;
         get_octant_flags(octree_desc[ptr], idx, is_child, is_leaf);
 
@@ -120,20 +131,23 @@ float intersect_octree(in vec3 ro, in vec3 rd, out vec3 oN) {
             }
 
             // PUSH: if it is not a leaf node, enter the child octree and continue ray tracing.
-            // TODO simplify this?
+            vec3 old_pos = pos;// TODO clean code
+            vec3 offset = get_offset_from_octant_idx(idx) * half_scale;
+            pos += offset;
+
+            // TODO simplify this?t
             scale *= 0.5;
             half_scale *= 0.5;
 
-            // TODO figure out center of child octree
-            vec3 root_pos = pos - vec3(scale * 0.5);
-            vec3 new_ro = ro + root_pos;
-            vec2 minmax = intersect_box(ro, rd, vec3(half_scale), oN);
-
-            int offset = int(octree_desc[ptr] & 0xffu);
+            int ptr_incr = int((octree_desc[ptr] & 0xffff0000u) >> 16);
             ptr_stack[stack_ptr] = ptr;
             t_max_stack[stack_ptr] = t_max;
+            pos_stack[stack_ptr] = old_pos;
             ++stack_ptr;
-            ptr += offset;
+            ptr += ptr_incr;
+
+            vec2 minmax = intersect_box(ro, rd, pos, vec3(half_scale), dummy_normal);
+            t = minmax.x;
             t_max = minmax.y;
         } else {
             // ADVANCE: if the no child is found in the current octant, skip to the next octant along the ray
@@ -142,30 +156,52 @@ float intersect_octree(in vec3 ro, in vec3 rd, out vec3 oN) {
             // Intersect against every "middle-plane" of the cube. Sort results in ascending order to find the
             // next intersecting octant along the ray. Discard all results that are below the initial hit against
             // the octree as they are outside the encapsulating cube.
-            // TODO vec3(0.0) for plane origin?
-            float x0 = intersect_plane(ro, rd, /*root_pos + scale * 0.5*/ vec3(0.0), vec3(1.0, 0.0, 0.0)) + EPS;
+            float x0 = intersect_plane(ro, rd, pos + half_scale, vec3(1.0, 0.0, 0.0)) + EPS;
             if (x0 < t + EPS) x0 = MAX_FLOAT;
-            float y0 = intersect_plane(ro, rd, /*root_pos + scale * 0.5*/ vec3(0.0), vec3(0.0, 1.0, 0.0)) + EPS;
+            float y0 = intersect_plane(ro, rd, pos + half_scale, vec3(0.0, 1.0, 0.0)) + EPS;
             if (y0 < t + EPS) y0 = MAX_FLOAT;
-            float z0 = intersect_plane(ro, rd, /*root_pos + scale * 0.5*/ vec3(0.0), vec3(0.0, 0.0, 1.0)) + EPS;
+            float z0 = intersect_plane(ro, rd, pos + half_scale, vec3(0.0, 0.0, 1.0)) + EPS;
             if (z0 < t + EPS) z0 = MAX_FLOAT;
 
             float t_next = min(x0, min(z0, y0));
             if (t_next > t_max) {
-                // TODO exit the octree
-                // TODO usually pop here?
-                oN = vec3(0.0);
-                return minmax.y;
+                if (stack_ptr > 0) {
+                    // POP: move up one layer into the parent octree and restore the old state from the stack.
+                    t = t_max + EPS;
+
+                    --stack_ptr;
+                    ptr = ptr_stack[stack_ptr];
+                    t_max = t_max_stack[stack_ptr];
+                    pos = pos_stack[stack_ptr];
+
+                    // TODO simplify this?
+                    scale *= 2.0;
+                    half_scale *= 2.0;
+
+                    // TODO do any cast here?
+//                                        vec2 minmax = intersect_box(ro, rd, pos, vec3(half_scale), dummy_normal);
+//                                        t = minmax.x;
+                    //                    t_max = minmax.y;
+
+//                    if (t_next > t_max) {
+//                        oN = vec3(0.0);
+//                        return minmax.y;
+//                    }
+//                    t = t_next;
+                } else {
+                    oN = vec3(0.0);
+                    return minmax.y;
+                }
+            } else {
+                t = t_next;
             }
 
             // TODO debug stuff
-//            vec3 hit_pos = ro + rd * t_next;
-//            uint idx = get_octant_idx(hit_pos, root_pos, scale);
-//            bool is_child, is_leaf;
-//            get_octant_flags(octree_desc[ptr], idx, is_child, is_leaf);
-//            oN = octant_debug_colors[idx];
-
-            t = t_next;
+            //                        vec3 hit_pos = ro + rd * t_next;
+            //                        uint idx = get_octant_idx(hit_pos, pos, scale);
+            //                        bool is_child, is_leaf;
+            //                        get_octant_flags(octree_desc[ptr], idx, is_child, is_leaf);
+            //                        oN = octant_debug_colors[idx];
         }
     }
 
