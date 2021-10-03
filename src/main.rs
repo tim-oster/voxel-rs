@@ -55,7 +55,7 @@ fn main() {
 
     let mut camera = graphics::Camera::new(72.0, window.get_aspect(), 0.01, 1024.0);
 
-    let cam_speed = 0.2f32;
+    let cam_speed = 0.1f32;
     let cam_rot_speed = 0.005f32;
     let mut cam_rot = cgmath::Vector3::new(0.0, -90f32.to_radians(), 0.0);
 
