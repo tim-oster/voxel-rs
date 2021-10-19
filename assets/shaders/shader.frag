@@ -44,20 +44,22 @@ vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 pos, in vec3 rad) {
 
 const vec3 octree_pos = vec3(0.0, 0.0, 0.0);
 const float octree_scale = 1;
+
+// pointer offset      children  leaves
+// 0000_0000 0000_0000 0000_0000 0000_0000
 const uint octree_desc[] = uint[](
-0x00011600,
-0x00011600,
-0x00000202
+0x00010300,
+0x00000101
 );
 
 const vec3 octant_debug_colors[] = vec3[](
 vec3(0.2, 0.2, 0.2),
-vec3(0.0, 1.0, 0.0),
-vec3(0.0, 0.0, 1.0),
-vec3(0.0, 1.0, 1.0),
 vec3(1.0, 0.0, 0.0),
+vec3(0.0, 1.0, 0.0),
 vec3(1.0, 1.0, 0.0),
+vec3(0.0, 0.0, 1.0),
 vec3(1.0, 0.0, 1.0),
+vec3(0.0, 1.0, 1.0),
 vec3(1.0, 1.0, 1.0)
 );
 
@@ -65,270 +67,156 @@ const float EPS = 1e-5;
 const float MAX_FLOAT = 3e38;
 const int MAX_STEPS = 100;
 
-float intersect_plane(vec3 ro, vec3 rd, vec3 po, vec3 pn) {
-    float denom = dot(rd, pn);
-    if (abs(denom) < EPS) return -1.0;
-    float t = dot(po - ro, pn) / denom;
-    if (t < 0.0) return -1.0;
-    return t;
-}
-
-uint get_octant_idx(vec3 hit_pos, vec3 octree_pos, float scale) {
-    vec3 to = hit_pos - octree_pos;
-    vec3 in_octree = floor(clamp(to / scale * 2.0, EPS, 2.0-EPS));
-    uint idx = uint(in_octree.x) | (uint(in_octree.y) << 1) | (uint(1-in_octree.z) << 2);// TODO do 1-x on z?
-    return idx;
-}
-
-vec3 get_offset_from_octant_idx(uint idx) {
-    return vec3(idx & 0x1u, (idx >> 1) & 0x1u, 1.0 - float((idx >> 2) & 0x1u));
-}
-
-void get_octant_flags(uint desc, uint idx, out bool is_child, out bool is_leaf) {
-    uint bit = 1u << idx;
-    is_child = (desc & (bit << 8)) != 0;
-    is_leaf = (desc & bit) != 0;
-}
-
-vec3 intersect_octree_v1(in vec3 ro, in vec3 rd) {
-    // TODO does is work for negative coordinates?
-    // TODO support tracing from inside the octree
-
-    // TODO figure out proper stack size
-    const int STACK_SIZE = 100;
-    int[STACK_SIZE] ptr_stack;
-    float[STACK_SIZE] t_max_stack;// TODO can be removed by raycasting again in POP?
-    vec3[STACK_SIZE] pos_stack;// TODO can be removed because it is a relative calculation?
-    int stack_ptr = 0;
-
-    int ptr = 0;
-    float scale = octree_scale;
-    float half_scale = scale * 0.5;
-
-    vec3 pos = octree_pos;
-    vec2 minmax = intersect_box(ro, rd, pos, vec3(half_scale));
-    if (minmax.x < 0.0) return vec3(0);
-
-    float t = minmax.x;
-    float t_max = minmax.y;
-
-    for (int i = 0; i < MAX_STEPS; ++i) {
-        vec3 hit_pos = ro + rd * t;
-        uint idx = get_octant_idx(hit_pos, pos, scale);
-        bool is_child, is_leaf;
-        get_octant_flags(octree_desc[ptr], idx, is_child, is_leaf);
-
-        if (is_child) {
-            // If the hit child is a leaf node, stop the ray tracing and return t.
-            if (is_leaf) {
-                return vec3(1);
-            }
-
-            // PUSH: if it is not a leaf node, enter the child octree and continue ray tracing.
-            ptr_stack[stack_ptr] = ptr;
-            t_max_stack[stack_ptr] = t_max;
-            pos_stack[stack_ptr] = pos;
-            ++stack_ptr;
-
-            int ptr_incr = int((octree_desc[ptr] & 0xffff0000u) >> 16);
-            ptr += ptr_incr;
-
-            vec3 offset = get_offset_from_octant_idx(idx) * half_scale;
-            pos += offset;
-
-            // TODO simplify this?
-            scale *= 0.5;
-            half_scale *= 0.5;
-
-            vec2 minmax = intersect_box(ro, rd, pos, vec3(half_scale));
-            t = minmax.x + EPS;
-            t_max = minmax.y;
-        } else {
-            // ADVANCE: if the no child is found in the current octant, skip to the next octant along the ray
-            // while staying in the same parent octree
-
-            // Intersect against every "middle-plane" of the cube. Sort results in ascending order to find the
-            // next intersecting octant along the ray. Discard all results that are below the initial hit against
-            // the octree as they are outside the encapsulating cube.
-            float x0 = intersect_plane(ro, rd, pos + half_scale, vec3(1.0, 0.0, 0.0)) + EPS;
-            if (x0 < t + EPS) x0 = MAX_FLOAT;
-            float y0 = intersect_plane(ro, rd, pos + half_scale, vec3(0.0, 1.0, 0.0)) + EPS;
-            if (y0 < t + EPS) y0 = MAX_FLOAT;
-            float z0 = intersect_plane(ro, rd, pos + half_scale, vec3(0.0, 0.0, 1.0)) + EPS;
-            if (z0 < t + EPS) z0 = MAX_FLOAT;
-
-            t = min(t_max + EPS, min(x0, min(y0, z0)));
-
-            // POP: move up one layer into the parent octree and restore the old state from the stack.
-            while (t > t_max && stack_ptr > 0) {
-                --stack_ptr;
-                ptr = ptr_stack[stack_ptr];
-                t_max = t_max_stack[stack_ptr];
-                pos = pos_stack[stack_ptr];
-
-                // TODO simplify this?
-                scale *= 2.0;
-                half_scale *= 2.0;
-            }
-
-            if (t > t_max - EPS) {
-                return vec3(0);
-            }
-        }
-    }
-
-    return vec3(1, 0, 0);
-}
-
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
-vec3 intersect_octree_v2(in vec3 ro, in vec3 rd) {
-    // TODO does is work for negative coordinates?
-    // TODO support tracing from inside the octree
-    // TODO figure out proper stack size
-    const int STACK_SIZE = 100;
-    int[STACK_SIZE] ptr_stack;
-    float[STACK_SIZE] t_max_stack;// TODO can be removed by raycasting again in POP?
-    vec3[STACK_SIZE] pos_stack;// TODO can be removed because it is a relative calculation?
+vec3 intersect_octree(in vec3 ro, in vec3 rd) {
+    // TODO how to remove this?
+    vec2 minmax = intersect_box(ro, rd, octree_pos, vec3(0.5));
+    if (minmax.x < 0.0 && minmax.y < 0.0) return vec3(0);
+    vec3 hit = ro + minmax.x * rd;
+    //return vec3(1-hit.z,0,0);
+    ro += vec3(1);
+
+    const int MAX_STACK_DEPTH = 23;
+    int[MAX_STACK_DEPTH] ptr_stack;
+    float[MAX_STACK_DEPTH] t_max_stack;
     int stack_ptr = 0;
 
+    const float epsilon = exp2(-MAX_STACK_DEPTH);
+
     int ptr = 0;
-    float scale = octree_scale;
-    float half_scale = scale * 0.5;
+    int scale = MAX_STACK_DEPTH - 1;
+    float scale_exp2 = 0.5;
 
     // prevents divide by zero
-    if (abs(rd.x) < EPS) rd.x = EPS * sign(rd.x);
-    if (abs(rd.y) < EPS) rd.y = EPS * sign(rd.y);
-    if (abs(rd.z) < EPS) rd.z = EPS * sign(rd.z);
+    if (abs(rd.x) < epsilon) rd.x = epsilon * sign(rd.x);
+    if (abs(rd.y) < epsilon) rd.y = epsilon * sign(rd.y);
+    if (abs(rd.z) < epsilon) rd.z = epsilon * sign(rd.z);
 
     // abs to prevent negative directions from inversing the ordering of min(tx, ty, tz). Negative components
     // will reuslt in negative coefficients, which always leads to smaller t values, regardless of what the other
     // positive components are.
-    float tx_coef = 1.0 / abs(rd.x);
-    float ty_coef = 1.0 / abs(rd.y);
-    float tz_coef = 1.0 / abs(rd.z);
+    float tx_coef = 1.0 / -abs(rd.x);
+    float ty_coef = 1.0 / -abs(rd.y);
+    float tz_coef = 1.0 / -abs(rd.z);
 
     float tx_bias = tx_coef * ro.x;
     float ty_bias = ty_coef * ro.y;
     float tz_bias = tz_coef * ro.z;
 
-    // TODO how to remove this?
-    vec2 minmax = intersect_box(ro, rd, octree_pos, vec3(half_scale));
-    if (minmax.x < 0.0 && minmax.y < 0.0) return vec3(0);
-
     // Negative directions mirror the results, hence a flip mask is required to flip them back into
     // the actual, all postive directions, result. Biases are also flipped between a plane at t0 or t1
     // depending on the direction. This ensures that positive ray directions look at planes at 0 and negative
     // directions always look at planes at 1.
-    int octant_mask = 0;
-    if (rd.x < 0) octant_mask ^= 1, tx_bias = 1 * tx_coef - tx_bias;
-    if (rd.y < 0) octant_mask ^= 2, ty_bias = 1 * ty_coef - ty_bias;
-    if (rd.z < 0) octant_mask ^= 4, tz_bias = 1 * tz_coef - tz_bias;
+    int octant_mask = 7;
+    if (rd.x > 0) octant_mask ^= 1, tx_bias = 3.0 * tx_coef - tx_bias;
+    if (rd.y > 0) octant_mask ^= 2, ty_bias = 3.0 * ty_coef - ty_bias;
+    if (rd.z > 0) octant_mask ^= 4, tz_bias = 3.0 * tz_coef - tz_bias;
 
-    float t_min = max(max(-tx_bias, -ty_bias), -tz_bias);
-    float t_max = min(min(1 * tx_coef - tx_bias, 1 * ty_coef - ty_bias), 1 * tz_coef - tz_bias);
-    float h = t_max;// TODO what is h for?
+    float t_min = max(max(2.0 * tx_coef - tx_bias, 2.0 * ty_coef - ty_bias), 2.0 * tz_coef - tz_bias);
+    float t_max = min(min(tx_coef - tx_bias, ty_coef - ty_bias), tz_coef - tz_bias);
     t_min = max(0, t_min);
-    // TODO t_max = min(1, t_max); // does not work as expected
+    //t_max = min(1, t_max); // TODO why?
 
     int idx = 0;
-    vec3 pos = vec3(0);// TODO why exactely?
-    if (t_min > 0.5 * tx_coef - tx_bias) idx ^= 1, pos.x = 0.5;
-    if (t_min > 0.5 * ty_coef - ty_bias) idx ^= 2, pos.y = 0.5;
-    if (t_min > 0.5 * tz_coef - tz_bias) idx ^= 4, pos.z = 0.5;
+    vec3 pos = vec3(1.0);
+    if (t_min < 1.5 * tx_coef - tx_bias) idx ^= 1, pos.x = 1.5;
+    if (t_min < 1.5 * ty_coef - ty_bias) idx ^= 2, pos.y = 1.5;
+    if (t_min < 1.5 * tz_coef - tz_bias) idx ^= 4, pos.z = 1.5;
 
-    for (int i = 0; i < MAX_STEPS; ++i) {
-        float tx_corner = (pos.x + half_scale) * tx_coef - tx_bias;
-        float ty_corner = (pos.y + half_scale) * ty_coef - ty_bias;
-        float tz_corner = (pos.z + half_scale) * tz_coef - tz_bias;
+    for (int i = 0; i < MAX_STEPS && scale < MAX_STACK_DEPTH; ++i) {
+        float tx_corner = pos.x * tx_coef - tx_bias;
+        float ty_corner = pos.y * ty_coef - ty_bias;
+        float tz_corner = pos.z * tz_coef - tz_bias;
         float tc_max = min(min(tx_corner, ty_corner), tz_corner);
 
-        bool is_child, is_leaf;
-        get_octant_flags(octree_desc[ptr], idx ^ octant_mask, is_child, is_leaf);
+        uint bit = 1u << (idx ^ octant_mask);
+        bool is_child = (octree_desc[ptr] & (bit << 8)) != 0;
+        bool is_leaf = (octree_desc[ptr] & bit) != 0;
         if (is_child && t_min <= t_max) {
-            // TODO intersect & push
+            if (is_leaf) {
+                return vec3(1);
+            }
 
-            return vec3(1);
+            // INTERSECT
+            float tv_max = min(t_max, tc_max);
+            float half_scale = scale_exp2 * 0.5;
+            float tx_center = half_scale * tx_coef + tx_corner;
+            float ty_center = half_scale * ty_coef + ty_corner;
+            float tz_center = half_scale * tz_coef + tz_corner;
+
+            if (t_min <= tv_max) {
+                // PUSH
+
+                // TODO this is guarded in the original
+                ptr_stack[scale] = ptr;
+                t_max_stack[scale] = t_max;
+
+                int ptr_incr = int((octree_desc[ptr] & 0xffff0000u) >> 16);
+                ptr += ptr_incr;
+                // TODO increment some parent pointer to skip to next sibling in parent
+
+                idx = 0;
+                --scale;
+                scale_exp2 = half_scale;
+
+                if (t_min < tx_center) idx ^= 1, pos.x += scale_exp2;
+                if (t_min < ty_center) idx ^= 2, pos.y += scale_exp2;
+                if (t_min < tz_center) idx ^= 4, pos.z += scale_exp2;
+
+                t_max = tv_max;
+                continue;
+            }
         }
 
         // ADVANCE
         int step_mask = 0;
-        if (tx_corner <= tc_max) step_mask ^= 1, pos.x += half_scale;
-        if (ty_corner <= tc_max) step_mask ^= 2, pos.y += half_scale;
-        if (tz_corner <= tc_max) step_mask ^= 4, pos.z += half_scale;
+        if (tc_max >= tx_corner) step_mask ^= 1, pos.x -= scale_exp2;
+        if (tc_max >= ty_corner) step_mask ^= 2, pos.y -= scale_exp2;
+        if (tc_max >= tz_corner) step_mask ^= 4, pos.z -= scale_exp2;
 
         t_min = tc_max;
         idx ^= step_mask;
 
-        // TODO pop
-        // TODO why does bit mask check not work?
-        if (t_min >= t_max) {
-            return vec3(0.2);
-        }
+        if ((idx & step_mask) != 0) {
+            // POP
 
-        //        if (is_child) {
-        //            // If the hit child is a leaf node, stop the ray tracing and return t.
-        //            if (is_leaf) {
-        //                return t;
-        //            }
-        //
-        //            // PUSH: if it is not a leaf node, enter the child octree and continue ray tracing.
-        //            ptr_stack[stack_ptr] = ptr;
-        //            t_max_stack[stack_ptr] = t_max;
-        //            pos_stack[stack_ptr] = pos;
-        //            ++stack_ptr;
-        //
-        //            int ptr_incr = int((octree_desc[ptr] & 0xffff0000u) >> 16);
-        //            ptr += ptr_incr;
-        //
-        //            vec3 offset = get_offset_from_octant_idx(idx) * half_scale;
-        //            pos += offset;
-        //
-        //            // TODO simplify this?
-        //            scale *= 0.5;
-        //            half_scale *= 0.5;
-        //
-        //            vec2 minmax = intersect_box(ro, rd, pos, vec3(half_scale));
-        //            t = minmax.x + EPS;
-        //            t_max = minmax.y;
-        //        } else {
-        //            // ADVANCE: if the no child is found in the current octant, skip to the next octant along the ray
-        //            // while staying in the same parent octree
-        //
-        //            // Intersect against every "middle-plane" of the cube. Sort results in ascending order to find the
-        //            // next intersecting octant along the ray. Discard all results that are below the initial hit against
-        //            // the octree as they are outside the encapsulating cube.
-        //            float x0 = intersect_plane(ro, rd, pos + half_scale, vec3(1.0, 0.0, 0.0)) + EPS;
-        //            if (x0 < t + EPS) x0 = MAX_FLOAT;
-        //            float y0 = intersect_plane(ro, rd, pos + half_scale, vec3(0.0, 1.0, 0.0)) + EPS;
-        //            if (y0 < t + EPS) y0 = MAX_FLOAT;
-        //            float z0 = intersect_plane(ro, rd, pos + half_scale, vec3(0.0, 0.0, 1.0)) + EPS;
-        //            if (z0 < t + EPS) z0 = MAX_FLOAT;
-        //
-        //            t = min(t_max + EPS, min(x0, min(y0, z0)));
-        //
-        //            // POP: move up one layer into the parent octree and restore the old state from the stack.
-        //            while (t > t_max && stack_ptr > 0) {
-        //                --stack_ptr;
-        //                ptr = ptr_stack[stack_ptr];
-        //                t_max = t_max_stack[stack_ptr];
-        //                pos = pos_stack[stack_ptr];
-        //
-        //                // TODO simplify this?
-        //                scale *= 2.0;
-        //                half_scale *= 2.0;
-        //            }
-        //
-        //            if (t > t_max - EPS) {
-        //                return -1.0; // TODO
-        //            }
-        //        }
+            uint differing_bits = 0;
+            if ((step_mask & 1) != 0) differing_bits |= floatBitsToInt(pos.x) ^ floatBitsToInt(pos.x + scale_exp2);
+            if ((step_mask & 2) != 0) differing_bits |= floatBitsToInt(pos.y) ^ floatBitsToInt(pos.y + scale_exp2);
+            if ((step_mask & 4) != 0) differing_bits |= floatBitsToInt(pos.z) ^ floatBitsToInt(pos.z + scale_exp2);
+            scale = (floatBitsToInt(differing_bits) >> 23) - 127;
+            scale_exp2 = intBitsToFloat((scale - MAX_STACK_DEPTH + 127) << 23);
+
+            ptr = ptr_stack[scale];
+            t_max = t_max_stack[scale];
+
+            int shx = floatBitsToInt(pos.x) >> scale;
+            int shy = floatBitsToInt(pos.y) >> scale;
+            int shz = floatBitsToInt(pos.z) >> scale;
+            pos.x = intBitsToFloat(shx << scale);
+            pos.y = intBitsToFloat(shy << scale);
+            pos.z = intBitsToFloat(shz << scale);
+            idx = (shx & 1) | ((shy & 1) << 1) | ((shz & 1) << 2);
+        }
     }
 
     return vec3(1, 0, 0);
 }
 
 void main() {
+    // TODO next steps:
+    // 	- fix parent iteration issue
+    //  - remove debug box
+    //	- scale to world
+    //	- add normal & position information
+    //	- add basic lighting
+    //	- add material info
+    //	- generate model from magica voxel
+    //	- add sources & doc/explainations
+
+    // TODO test with https://sketchfab.com/3d-models/summer-hamlet-voxel-diorama-758293a06ecc4a9787107d554a497b06
+
     vec2 uv = v_uv * 2.0 - 1.0;
     uv.x *= u_aspect;
     uv *= tan(u_fovy * 0.5);
@@ -339,11 +227,7 @@ void main() {
     look_at = (u_view * vec4(look_at, 1.0)).xyz;
     vec3 rd = normalize(look_at - ro);
 
-    #if 0
-    color = vec4(intersect_octree_v1(ro, rd), 1);
-    #else
-    color = vec4(intersect_octree_v2(ro, rd), 1);
-    #endif
+    color = vec4(intersect_octree(ro, rd), 1);
 
     //    vec3 frag_pos = ro + rd * d.x;
     //
