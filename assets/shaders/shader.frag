@@ -1,5 +1,7 @@
 #version 460
 
+#define DEBUG 1
+
 in vec2 v_uv;
 
 layout (location = 0) out vec4 color;
@@ -22,6 +24,7 @@ layout (std430, binding = 0) buffer root_node {
     int descriptors[];
 };
 
+#if DEBUG
 // source: https://www.iquilezles.org/www/articles/boxfunctions/boxfunctions.htm
 vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 pos, in vec3 rad) {
     ro -= pos + rad;
@@ -41,15 +44,20 @@ vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 pos, in vec3 rad) {
 
     return vec2(tN, tF);
 }
+#endif
 
 const vec3 octree_pos = vec3(0.0, 0.0, 0.0);
 const float octree_scale = 1;
 
 // pointer offset      children  leaves
 // 0000_0000 0000_0000 0000_0000 0000_0000
-const uint octree_desc[] = uint[](
-0x00010300,
-0x00000101
+const int octree_desc[] = int[](
+0x00010500,
+0x00030101,
+0x0,
+0x00020101,
+0x00ff66,
+0x996666
 );
 
 const vec3 octant_debug_colors[] = vec3[](
@@ -63,18 +71,16 @@ vec3(0.0, 1.0, 1.0),
 vec3(1.0, 1.0, 1.0)
 );
 
-const float EPS = 1e-5;
-const float MAX_FLOAT = 3e38;
 const int MAX_STEPS = 100;
 
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
 vec3 intersect_octree(in vec3 ro, in vec3 rd) {
-    // TODO how to remove this?
+    // TODO try to what happens when using a positive coordinate system
+    #if DEBUG
     vec2 minmax = intersect_box(ro, rd, octree_pos, vec3(0.5));
     if (minmax.x < 0.0 && minmax.y < 0.0) return vec3(0);
-    vec3 hit = ro + minmax.x * rd;
-    //return vec3(1-hit.z,0,0);
+    #endif
     ro += vec3(1);
 
     const int MAX_STACK_DEPTH = 23;
@@ -130,12 +136,25 @@ vec3 intersect_octree(in vec3 ro, in vec3 rd) {
         float tz_corner = pos.z * tz_coef - tz_bias;
         float tc_max = min(min(tx_corner, ty_corner), tz_corner);
 
-        uint bit = 1u << (idx ^ octant_mask);
-        bool is_child = (octree_desc[ptr] & (bit << 8)) != 0;
+        int octant_idx = idx ^ octant_mask;
+        int bit = 1 << octant_idx;
+        int child_mask = (octree_desc[ptr] >> 8) & 0xff;
+        bool is_child = (child_mask & bit) != 0;
         bool is_leaf = (octree_desc[ptr] & bit) != 0;
         if (is_child && t_min <= t_max) {
+            int offset = (octree_desc[ptr] & 0xffff0000) >> 16;
+
             if (is_leaf) {
-                return vec3(1);
+                int leaf_mask = octree_desc[ptr] & 0xff;
+                ptr += offset;
+                ptr += octant_idx - findLSB(leaf_mask);
+
+                int color = octree_desc[ptr];
+                return vec3(
+                float((color >> 16) & 0xff) / 255.0,
+                float((color >> 8) & 0xff) / 255.0,
+                float(color & 0xff) / 255.0
+                );
             }
 
             // INTERSECT
@@ -152,9 +171,8 @@ vec3 intersect_octree(in vec3 ro, in vec3 rd) {
                 ptr_stack[scale] = ptr;
                 t_max_stack[scale] = t_max;
 
-                int ptr_incr = int((octree_desc[ptr] & 0xffff0000u) >> 16);
-                ptr += ptr_incr;
-                // TODO increment some parent pointer to skip to next sibling in parent
+                ptr += offset;
+                ptr += octant_idx - findLSB(child_mask);
 
                 idx = 0;
                 --scale;
@@ -201,17 +219,18 @@ vec3 intersect_octree(in vec3 ro, in vec3 rd) {
         }
     }
 
+    #if DEBUG
     return vec3(1, 0, 0);
+    #else
+    return vec3(0);
+    #endif
 }
 
 void main() {
     // TODO next steps:
-    // 	- fix parent iteration issue
-    //  - remove debug box
-    //	- scale to world
     //	- add normal & position information
     //	- add basic lighting
-    //	- add material info
+    //	- scale to world
     //	- generate model from magica voxel
     //	- add sources & doc/explainations
 
