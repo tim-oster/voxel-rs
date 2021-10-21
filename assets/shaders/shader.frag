@@ -55,7 +55,7 @@ const int octree_desc[] = int[](
 0x00010500,
 0x00030101,
 0x0,
-0x00020101,
+0x00020202,
 0x00ff66,
 0x996666
 );
@@ -78,6 +78,7 @@ struct octree_result {
     vec3 color;
     vec3 normal;
     vec3 pos;
+    vec2 uv;
 };
 
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
@@ -172,29 +173,46 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
                 float ty_corner = (pos.y + scale_exp2) * ty_coef - ty_bias;
                 float tz_corner = (pos.z + scale_exp2) * tz_coef - tz_bias;
                 float tc_min = max(max(tx_corner, ty_corner), tz_corner);
-                if (tc_min == tx_corner) {
-                    res.normal = vec3(1, 0, 0) * -sign(rd.x);
-                } else if (tc_min == ty_corner) {
-                    res.normal = vec3(0, 1, 0) * -sign(rd.y);
-                } else {
-                    res.normal = vec3(0, 0, 1) * -sign(rd.z);
-                }
-
-                res.color = vec3(
-                float((octree_desc[ptr] >> 16) & 0xff) / 255.0,
-                float((octree_desc[ptr] >> 8) & 0xff) / 255.0,
-                float(octree_desc[ptr] & 0xff) / 255.0
-                );
 
                 if ((octant_mask & 1) == 0) pos.x = 3.0 - scale_exp2 - pos.x;
                 if ((octant_mask & 2) == 0) pos.y = 3.0 - scale_exp2 - pos.y;
                 if ((octant_mask & 4) == 0) pos.z = 3.0 - scale_exp2 - pos.z;
+
+                // TODO can be optimized?
+                if (tc_min == tx_corner) {
+                    res.normal = vec3(1, 0, 0) * -sign(rd.x);
+                    res.uv = vec2(
+                    ((ro.z + rd.z * tx_corner) - pos.z) / scale_exp2,
+                    ((ro.y + rd.y * tx_corner) - pos.y) / scale_exp2
+                    );
+                    if (res.normal.x > 0) res.uv.x = 1 - res.uv.x;
+                } else if (tc_min == ty_corner) {
+                    res.normal = vec3(0, 1, 0) * -sign(rd.y);
+                    res.uv = vec2(
+                    ((ro.x + rd.x * ty_corner) - pos.x) / scale_exp2,
+                    ((ro.z + rd.z * ty_corner) - pos.z) / scale_exp2
+                    );
+                    if (res.normal.y < 0) res.uv.x = 1 - res.uv.x;
+                } else {
+                    res.normal = vec3(0, 0, 1) * -sign(rd.z);
+                    res.uv = vec2(
+                    ((ro.x + rd.x * tz_corner) - pos.x) / scale_exp2,
+                    ((ro.y + rd.y * tz_corner) - pos.y) / scale_exp2
+                    );
+                    if (res.normal.z < 0) res.uv.x = 1 - res.uv.x;
+                }
 
                 res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + epsilon), pos.x + scale_exp2 - epsilon);
                 res.pos.y = min(max(ro.y + t_min * rd.y, pos.y + epsilon), pos.y + scale_exp2 - epsilon);
                 res.pos.z = min(max(ro.z + t_min * rd.z, pos.z + epsilon), pos.z + scale_exp2 - epsilon);
                 // undo initial coordinate system shift
                 res.pos -= 1;
+
+                res.color = vec3(
+                float((octree_desc[ptr] >> 16) & 0xff) / 255.0,
+                float((octree_desc[ptr] >> 8) & 0xff) / 255.0,
+                float(octree_desc[ptr] & 0xff) / 255.0
+                );
 
                 return;
             }
@@ -264,12 +282,10 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
 
 void main() {
     // TODO next steps:
-    //  - add uv calculation
+    //  - try to optimize normal & uv calculation
+    //	- generate model from magica voxel (https://sketchfab.com/3d-models/summer-hamlet-voxel-diorama-758293a06ecc4a9787107d554a497b06)
     //	- scale to world
-    //	- generate model from magica voxel
     //	- add sources & doc/explainations
-
-    // TODO test with https://sketchfab.com/3d-models/summer-hamlet-voxel-diorama-758293a06ecc4a9787107d554a497b06
 
     vec2 uv = v_uv * 2.0 - 1.0;
     uv.x *= u_aspect;
@@ -291,7 +307,6 @@ void main() {
 
     float diffuse = max(dot(res.normal, -u_light_dir), 0.0);
 
-    // TODO fix
     vec3 view_dir = normalize(res.pos - u_cam_pos);
     vec3 reflect_dir = reflect(-u_light_dir, res.normal);
     float specular = pow(max(dot(view_dir, reflect_dir), 0.0), 265) * specular_strength;
