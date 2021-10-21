@@ -44,7 +44,7 @@ vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 pos, in vec3 rad) {
 
     return vec2(tN, tF);
 }
-#endif
+    #endif
 
 const vec3 octree_pos = vec3(0.0, 0.0, 0.0);
 const float octree_scale = 1;
@@ -77,6 +77,7 @@ struct octree_result {
     float t;
     vec3 color;
     vec3 normal;
+    vec3 pos;
 };
 
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
@@ -91,7 +92,9 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
     if (minmax.x < 0.0 && minmax.y < 0.0) return;
     res.color = vec3(1, 0, 0);
     #endif
-    ro += vec3(1);
+
+    // shift input coordinate system so that the octree spans from [1;2]
+    ro += 1;
 
     const int MAX_STACK_DEPTH = 23;
     int[MAX_STACK_DEPTH] ptr_stack;
@@ -155,8 +158,9 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
         if (is_child && t_min <= t_max) {
             int offset = (octree_desc[ptr] & 0xffff0000) >> 16;
 
-            // TODO intersection at back-face?!
             if (is_leaf) {
+                // TODO put after loop?
+
                 int leaf_mask = octree_desc[ptr] & 0xff;
                 ptr += offset;
                 ptr += octant_idx - findLSB(leaf_mask);
@@ -164,9 +168,13 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
                 res.t = t_min;
 
                 // TODO can be optimized?
-                if (tc_max == tx_corner) {
+                float tx_corner = (pos.x + scale_exp2) * tx_coef - tx_bias;
+                float ty_corner = (pos.y + scale_exp2) * ty_coef - ty_bias;
+                float tz_corner = (pos.z + scale_exp2) * tz_coef - tz_bias;
+                float tc_min = max(max(tx_corner, ty_corner), tz_corner);
+                if (tc_min == tx_corner) {
                     res.normal = vec3(1, 0, 0) * -sign(rd.x);
-                } else if (tc_max == ty_corner) {
+                } else if (tc_min == ty_corner) {
                     res.normal = vec3(0, 1, 0) * -sign(rd.y);
                 } else {
                     res.normal = vec3(0, 0, 1) * -sign(rd.z);
@@ -177,6 +185,16 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
                 float((octree_desc[ptr] >> 8) & 0xff) / 255.0,
                 float(octree_desc[ptr] & 0xff) / 255.0
                 );
+
+                if ((octant_mask & 1) == 0) pos.x = 3.0 - scale_exp2 - pos.x;
+                if ((octant_mask & 2) == 0) pos.y = 3.0 - scale_exp2 - pos.y;
+                if ((octant_mask & 4) == 0) pos.z = 3.0 - scale_exp2 - pos.z;
+
+                res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + epsilon), pos.x + scale_exp2 - epsilon);
+                res.pos.y = min(max(ro.y + t_min * rd.y, pos.y + epsilon), pos.y + scale_exp2 - epsilon);
+                res.pos.z = min(max(ro.z + t_min * rd.z, pos.z + epsilon), pos.z + scale_exp2 - epsilon);
+                // undo initial coordinate system shift
+                res.pos -= 1;
 
                 return;
             }
@@ -246,10 +264,7 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
 
 void main() {
     // TODO next steps:
-    //  - fix backface intersections
-    //	- add normal & position information
     //  - add uv calculation
-    //	- add basic lighting
     //	- scale to world
     //	- generate model from magica voxel
     //	- add sources & doc/explainations
@@ -269,19 +284,18 @@ void main() {
     octree_result res;
     intersect_octree(ro, rd, res);
 
-    float diffuse = max(dot(res.normal, -u_light_dir), 0.0);
-    float light = u_ambient + diffuse;
-    color = vec4(res.color, 1) * light;
+    if (res.t < 0) {
+        color = vec4(res.color, 1) * 0.2;
+        return;
+    }
 
-    //    vec3 frag_pos = ro + rd * d.x;
-    //
-    //    float diffuse = max(dot(normal, -u_light_dir), 0.0);
-    //
-    //    vec3 view_dir = normalize(frag_pos - u_cam_pos);
-    //    vec3 reflect_dir = reflect(-u_light_dir, normal);
-    //    float specular = pow(max(dot(view_dir, reflect_dir), 0.0), 256) * specular_strength;
-    //
-    //    float light = u_ambient + diffuse + specular;
-    //
-    //    color = vec4(vec3(step(0.0, d) * light), 1.0);
+    float diffuse = max(dot(res.normal, -u_light_dir), 0.0);
+
+    // TODO fix
+    vec3 view_dir = normalize(res.pos - u_cam_pos);
+    vec3 reflect_dir = reflect(-u_light_dir, res.normal);
+    float specular = pow(max(dot(view_dir, reflect_dir), 0.0), 265) * specular_strength;
+
+    float light = u_ambient + diffuse + specular;
+    color = vec4(res.color, 1) * light;
 }
