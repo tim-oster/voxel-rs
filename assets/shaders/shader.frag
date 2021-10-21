@@ -73,13 +73,23 @@ vec3(1.0, 1.0, 1.0)
 
 const int MAX_STEPS = 100;
 
+struct octree_result {
+    float t;
+    vec3 color;
+    vec3 normal;
+};
+
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
-vec3 intersect_octree(in vec3 ro, in vec3 rd) {
+void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
+    res.t = -1;
+    res.color = vec3(0);
+
     // TODO try to what happens when using a positive coordinate system
     #if DEBUG
     vec2 minmax = intersect_box(ro, rd, octree_pos, vec3(0.5));
-    if (minmax.x < 0.0 && minmax.y < 0.0) return vec3(0);
+    if (minmax.x < 0.0 && minmax.y < 0.0) return;
+    res.color = vec3(1, 0, 0);
     #endif
     ro += vec3(1);
 
@@ -141,20 +151,34 @@ vec3 intersect_octree(in vec3 ro, in vec3 rd) {
         int child_mask = (octree_desc[ptr] >> 8) & 0xff;
         bool is_child = (child_mask & bit) != 0;
         bool is_leaf = (octree_desc[ptr] & bit) != 0;
+
         if (is_child && t_min <= t_max) {
             int offset = (octree_desc[ptr] & 0xffff0000) >> 16;
 
+            // TODO intersection at back-face?!
             if (is_leaf) {
                 int leaf_mask = octree_desc[ptr] & 0xff;
                 ptr += offset;
                 ptr += octant_idx - findLSB(leaf_mask);
 
-                int color = octree_desc[ptr];
-                return vec3(
-                float((color >> 16) & 0xff) / 255.0,
-                float((color >> 8) & 0xff) / 255.0,
-                float(color & 0xff) / 255.0
+                res.t = t_min;
+
+                // TODO can be optimized?
+                if (tc_max == tx_corner) {
+                    res.normal = vec3(1, 0, 0) * -sign(rd.x);
+                } else if (tc_max == ty_corner) {
+                    res.normal = vec3(0, 1, 0) * -sign(rd.y);
+                } else {
+                    res.normal = vec3(0, 0, 1) * -sign(rd.z);
+                }
+
+                res.color = vec3(
+                float((octree_desc[ptr] >> 16) & 0xff) / 255.0,
+                float((octree_desc[ptr] >> 8) & 0xff) / 255.0,
+                float(octree_desc[ptr] & 0xff) / 255.0
                 );
+
+                return;
             }
 
             // INTERSECT
@@ -218,17 +242,13 @@ vec3 intersect_octree(in vec3 ro, in vec3 rd) {
             idx = (shx & 1) | ((shy & 1) << 1) | ((shz & 1) << 2);
         }
     }
-
-    #if DEBUG
-    return vec3(1, 0, 0);
-    #else
-    return vec3(0);
-    #endif
 }
 
 void main() {
     // TODO next steps:
+    //  - fix backface intersections
     //	- add normal & position information
+    //  - add uv calculation
     //	- add basic lighting
     //	- scale to world
     //	- generate model from magica voxel
@@ -246,7 +266,12 @@ void main() {
     look_at = (u_view * vec4(look_at, 1.0)).xyz;
     vec3 rd = normalize(look_at - ro);
 
-    color = vec4(intersect_octree(ro, rd), 1);
+    octree_result res;
+    intersect_octree(ro, rd, res);
+
+    float diffuse = max(dot(res.normal, -u_light_dir), 0.0);
+    float light = u_ambient + diffuse;
+    color = vec4(res.color, 1) * light;
 
     //    vec3 frag_pos = ro + rd * d.x;
     //
