@@ -2,6 +2,7 @@ extern crate glfw;
 
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::time::{Instant, Duration};
 
 use cgmath::MetricSpace;
 use glfw::Context;
@@ -17,7 +18,10 @@ pub struct Window {
 }
 
 pub struct FrameStats {
-    last_frame: f64,
+    last_frame: Instant,
+    last_measurement: Instant,
+    frame_count: i32,
+    frame_time_accumulation: Duration,
     pub delta_time: f32,
 }
 
@@ -47,7 +51,13 @@ impl Window {
             window: RefCell::new(window),
             events,
             was_resized: false,
-            current_stats: FrameStats { last_frame: 0.0, delta_time: 1.0 },
+            current_stats: FrameStats {
+                last_frame: Instant::now(),
+                last_measurement: Instant::now(),
+                frame_count: 0,
+                frame_time_accumulation: Duration::new(0, 0),
+                delta_time: 1.0,
+            },
             input: Input::new(),
         }
     }
@@ -57,12 +67,21 @@ impl Window {
             return false;
         }
 
-        let current_time = self.context.get_time();
-        if self.current_stats.last_frame > 0.0 {
-            let delta_time = current_time - self.current_stats.last_frame;
-            self.current_stats.delta_time = (delta_time / (1.0 / 60.0)) as f32;
+        let delta_time = self.current_stats.last_frame.elapsed();
+        self.current_stats.frame_time_accumulation += delta_time;
+        self.current_stats.delta_time = (delta_time.as_secs_f32() / (1.0 / 60.0));
+        self.current_stats.last_frame = Instant::now();
+
+        self.current_stats.frame_count += 1;
+        if self.current_stats.last_measurement.elapsed() > Duration::from_secs(1) {
+            // TODO move to main?
+            let frame_time = self.current_stats.frame_time_accumulation.as_secs_f32() / self.current_stats.frame_count as f32;
+            println!("frames: {}, frame time: {}ms", self.current_stats.frame_count, frame_time * 1000.0);
+
+            self.current_stats.frame_count = 0;
+            self.current_stats.frame_time_accumulation = Duration::new(0, 0);
+            self.current_stats.last_measurement = Instant::now();
         }
-        self.current_stats.last_frame = current_time;
 
         self.was_resized = false;
         self.input.update();

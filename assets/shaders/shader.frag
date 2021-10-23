@@ -19,8 +19,7 @@ const float specular_strength = 0.5;
 
 // https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Buffer_backed
 // https://www.khronos.org/opengl/wiki/Shader_Storage_Buffer_Object
-layout (std430, binding = 0) buffer root_node {
-    vec3 position;
+layout (std430, binding = 3) buffer root_node {
     int descriptors[];
 };
 
@@ -49,17 +48,6 @@ vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 pos, in vec3 rad) {
 const vec3 octree_pos = vec3(0.0, 0.0, 0.0);
 const float octree_scale = 1;
 
-// pointer offset      children  leaves
-// 0000_0000 0000_0000 0000_0000 0000_0000
-const int octree_desc[] = int[](
-0x00010500,
-0x00030101,
-0x0,
-0x00020202,
-0x00ff66,
-0x996666
-);
-
 const vec3 octant_debug_colors[] = vec3[](
 vec3(0.2, 0.2, 0.2),
 vec3(1.0, 0.0, 0.0),
@@ -84,6 +72,8 @@ struct octree_result {
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
 void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
+    int[] octree_desc = descriptors;
+
     res.t = -1;
     res.color = vec3(0);
 
@@ -157,11 +147,11 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
         bool is_leaf = (octree_desc[ptr] & bit) != 0;
 
         if (is_child && t_min <= t_max) {
-            int offset = (octree_desc[ptr] & 0xffff0000) >> 16;
 
             if (is_leaf) {
                 // TODO put after loop?
 
+                int offset = octree_desc[ptr] >> 17;
                 int leaf_mask = octree_desc[ptr] & 0xff;
                 ptr += offset;
                 ptr += octant_idx - findLSB(leaf_mask);
@@ -209,9 +199,9 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
                 res.pos -= 1;
 
                 res.color = vec3(
-                float((octree_desc[ptr] >> 16) & 0xff) / 255.0,
+                float(octree_desc[ptr] & 0xff) / 255.0,
                 float((octree_desc[ptr] >> 8) & 0xff) / 255.0,
-                float(octree_desc[ptr] & 0xff) / 255.0
+                float((octree_desc[ptr] >> 16) & 0xff) / 255.0
                 );
 
                 return;
@@ -231,6 +221,10 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
                 ptr_stack[scale] = ptr;
                 t_max_stack[scale] = t_max;
 
+                int offset = octree_desc[ptr] >> 17;
+                if ((octree_desc[ptr] & 0x10000) != 0) {
+                    offset = octree_desc[ptr + offset];
+                }
                 ptr += offset;
                 ptr += octant_idx - findLSB(child_mask);
 

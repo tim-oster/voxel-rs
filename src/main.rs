@@ -3,11 +3,13 @@ extern crate gl;
 extern crate memoffset;
 
 use std::{mem, ptr};
+use std::borrow::Borrow;
+use std::collections::HashMap;
 use std::ffi::c_void;
 use std::path::Path;
 
 use cgmath;
-use cgmath::{Point2, Point3, Vector3, SquareMatrix};
+use cgmath::{Point2, Point3, SquareMatrix, Vector3};
 use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
 use gl::types::*;
 use image::GenericImageView;
@@ -43,6 +45,10 @@ macro_rules! gl_check_error {
 }
 
 fn main() {
+    let svo = build_voxel_model();
+    // TODO y direction inverted?
+    //let svo = vec![0x00010101, 0xffffff];
+
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.set_grab_cursor(true);
 
@@ -64,7 +70,15 @@ fn main() {
 
     let mut use_mouse_input = true;
 
+    let mut ssbo = 0;
+
     unsafe {
+        gl::GenBuffers(1, &mut ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
+        gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo.len() * 4) as GLsizeiptr, &svo[0] as *const i32 as *const c_void, gl::STATIC_READ);
+        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+
         gl::Enable(gl::DEPTH_TEST);
         gl::DepthFunc(gl::LESS);
 
@@ -287,4 +301,150 @@ fn build_texture() -> GLuint {
 
         id
     }
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct NodePos {
+    x: u8,
+    y: u8,
+    z: u8,
+}
+
+struct TreeNode {
+    nodes: [Option<Box<TreeNode>>; 8],
+    color: Option<i32>,
+}
+
+impl TreeNode {
+    fn new() -> Box<TreeNode> {
+        Box::new(TreeNode {
+            nodes: Default::default(),
+            color: None,
+        })
+    }
+
+    fn build_descriptor(&self) -> i32 {
+        if let Some(color) = self.color {
+            return color;
+        }
+
+        let mut child_mask = 0;
+        let mut leaf_mask = 0;
+
+        for (i, child) in self.nodes.iter().enumerate() {
+            if child.is_none() {
+                continue;
+            }
+            let child = child.as_ref().unwrap();
+            child_mask |= 1 << i;
+            if child.color.is_some() {
+                leaf_mask |= 1 << i;
+            }
+        }
+
+        (child_mask << 8) | leaf_mask
+    }
+
+    fn build(&self) -> Vec<i32> {
+        let mut result = Vec::new();
+        result.push(self.build_descriptor());
+        if self.nodes.is_empty() {
+            return result;
+        }
+
+        result[0] |= 1 << 17;
+
+        let mut node_offset = 0;
+        //let mut full_child_descriptors = Vec::new();
+
+        for child in self.nodes.iter() {
+            if child.is_none() {
+                if result.len() == 1 {
+                    node_offset += 1;
+                } else {
+                    result.push(0); // TODO can we skip zeros in between?
+                }
+                continue;
+            }
+            let child = child.as_ref().unwrap();
+            result.push(child.build_descriptor());
+            //full_child_descriptors.push((result.len() - 1, child.build()));
+        }
+        // TODO this would drop black leaves
+        if let Some(index) = result.iter().rposition(|&x| x != 0) {
+            result.truncate(index + 1);
+        }
+
+        for i in 0..(result.len() - 1) {
+            let child = &self.nodes[i + node_offset];
+            if child.is_none() {
+                continue;
+            }
+            let child = child.as_ref().unwrap();
+            if child.color.is_some() {
+                continue;
+            }
+
+            let offset = result.len() - (i + 1);
+
+            if offset < 0x7fff {
+                result[i + 1] |= (offset as i32) << 17;
+            } else {
+                println!("far pointer");
+                // TODO far pointer
+                result[i + 1] |= 1 << 16;
+                result[i + 1] |= (offset as i32) << 17;
+            }
+
+            let other = &mut child.build()[1..].to_vec();
+            result.append(other);
+        }
+
+        result
+    }
+}
+
+fn build_voxel_model() -> Vec<i32> {
+    println!("loading model");
+    let data = dot_vox::load("assets/test.vox").unwrap();
+    let model = &data.models[0];
+
+    println!("collecting leaves");
+    let mut nodes_with_leaves = HashMap::new();
+    for voxel in &model.voxels {
+        let pos = NodePos { x: voxel.x / 2, y: voxel.z / 2, z: voxel.y / 2 };
+        let node = nodes_with_leaves.entry(pos).or_insert_with(|| TreeNode::new());
+        let idx = (voxel.x % 2 + (voxel.z % 2) * 2 + (voxel.y % 2) * 4) as usize;
+        let mut child = TreeNode::new();
+        child.color = Some(data.palette[voxel.i as usize] as i32);
+        node.nodes[idx] = Some(child);
+    }
+
+    let mut slot_counts = model.voxels.len() + nodes_with_leaves.len();
+
+    println!("assembling tree");
+    let mut input = nodes_with_leaves;
+    while input.len() > 1 {
+        let output = merge_tree_nodes(input);
+        slot_counts += output.len();
+        input = output;
+    }
+
+    println!("total of {} bytes = {} MB", slot_counts * 4, slot_counts as f32 * 4.0 / 1000.0 / 1000.0);
+
+    println!("building SVO");
+    let svo = input[input.keys().next().unwrap()].build();
+    println!("entries in SVO: {}", svo.len());
+    svo
+}
+
+fn merge_tree_nodes(input: HashMap<NodePos, Box<TreeNode>>) -> HashMap<NodePos, Box<TreeNode>> {
+    let mut output = HashMap::new();
+    for (pos, node) in input.into_iter() {
+        let parent_pos = NodePos { x: pos.x / 2, y: pos.y / 2, z: pos.z / 2 };
+        let parent_node = output.entry(parent_pos).or_insert_with(|| TreeNode::new());
+        let idx = (pos.x % 2 + (pos.y % 2) * 2 + (pos.z % 2) * 4) as usize;
+        parent_node.nodes[idx] = Some(node);
+    }
+    output
 }
