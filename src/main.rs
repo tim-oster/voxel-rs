@@ -47,7 +47,7 @@ macro_rules! gl_check_error {
 fn main() {
     let svo = build_voxel_model();
     // TODO y direction inverted?
-    //let svo = vec![0x00010101, 0xffffff];
+    //let svo = vec![0x00020101, 0xffffff];
 
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.set_grab_cursor(true);
@@ -355,7 +355,13 @@ impl TreeNode {
         result[0] |= 1 << 17;
 
         let mut node_offset = 0;
-        //let mut full_child_descriptors = Vec::new();
+
+        struct ChildDesc {
+            index: usize,
+            desc: Vec<i32>,
+            far_ptr_index: Option<usize>,
+        }
+        let mut full_child_descriptors = Vec::new();
 
         for child in self.nodes.iter() {
             if child.is_none() {
@@ -368,36 +374,47 @@ impl TreeNode {
             }
             let child = child.as_ref().unwrap();
             result.push(child.build_descriptor());
-            //full_child_descriptors.push((result.len() - 1, child.build()));
+            if child.color.is_some() {
+                continue;
+            }
+            full_child_descriptors.push(ChildDesc {
+                index: result.len() - 1,
+                desc: child.build(),
+                far_ptr_index: None,
+            });
         }
         // TODO this would drop black leaves
         if let Some(index) = result.iter().rposition(|&x| x != 0) {
             result.truncate(index + 1);
         }
 
-        for i in 0..(result.len() - 1) {
-            let child = &self.nodes[i + node_offset];
-            if child.is_none() {
-                continue;
-            }
-            let child = child.as_ref().unwrap();
-            if child.color.is_some() {
-                continue;
-            }
+        full_child_descriptors.sort_by(|a, b| a.desc.len().partial_cmp(&b.desc.len()).unwrap());
 
-            let offset = result.len() - (i + 1);
-
-            if offset < 0x7fff {
-                result[i + 1] |= (offset as i32) << 17;
-            } else {
-                println!("far pointer");
-                // TODO far pointer
-                result[i + 1] |= 1 << 16;
-                result[i + 1] |= (offset as i32) << 17;
+        let mut space_count = 0;
+        for child in full_child_descriptors.iter_mut() {
+            let space = child.desc.len() - 1;
+            if space_count + space > 0x7fff {
+                result.push(0);
+                child.far_ptr_index = Some(result.len() - 1);
             }
+            space_count += space;
+        }
+        for child in full_child_descriptors.iter() {
+            match child.far_ptr_index {
+                None => {
+                    let offset = result.len() - child.index;
+                    result[child.index] |= (offset as i32) << 17;
+                }
+                Some(ptr_index) => {
+                    let offset = ptr_index - child.index;
+                    result[child.index] |= 1 << 16;
+                    result[child.index] |= (offset as i32) << 17;
 
-            let other = &mut child.build()[1..].to_vec();
-            result.append(other);
+                    let offset = result.len() - ptr_index;
+                    result[ptr_index] = offset as i32;
+                }
+            }
+            result.extend_from_slice(&child.desc[1..]);
         }
 
         result
@@ -406,7 +423,7 @@ impl TreeNode {
 
 fn build_voxel_model() -> Vec<i32> {
     println!("loading model");
-    let data = dot_vox::load("assets/test.vox").unwrap();
+    let data = dot_vox::load("assets/bonepit.vox").unwrap();
     let model = &data.models[0];
 
     println!("collecting leaves");

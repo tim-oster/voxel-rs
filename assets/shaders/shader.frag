@@ -59,7 +59,7 @@ vec3(0.0, 1.0, 1.0),
 vec3(1.0, 1.0, 1.0)
 );
 
-const int MAX_STEPS = 100;
+const int MAX_STEPS = 1000;
 
 struct octree_result {
     float t;
@@ -147,7 +147,6 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
         bool is_leaf = (octree_desc[ptr] & bit) != 0;
 
         if (is_child && t_min <= t_max) {
-
             if (is_leaf) {
                 // TODO put after loop?
 
@@ -223,7 +222,7 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
 
                 int offset = octree_desc[ptr] >> 17;
                 if ((octree_desc[ptr] & 0x10000) != 0) {
-                    offset = octree_desc[ptr + offset];
+                    offset = offset + octree_desc[ptr + offset];
                 }
                 ptr += offset;
                 ptr += octant_idx - findLSB(child_mask);
@@ -276,10 +275,10 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
 
 void main() {
     // TODO next steps:
-    //  - try to optimize normal & uv calculation
-    //	- generate model from magica voxel (https://sketchfab.com/3d-models/summer-hamlet-voxel-diorama-758293a06ecc4a9787107d554a497b06)
-    //	- scale to world
-    //	- add sources & doc/explainations
+    //      - fix inverted y axis
+    //      - try to optimize normal & uv calculation
+    //      - scale to world
+    //      - add sources & doc/explainations
 
     vec2 uv = v_uv * 2.0 - 1.0;
     uv.x *= u_aspect;
