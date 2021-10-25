@@ -71,8 +71,10 @@ struct octree_result {
 
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
-void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
+void intersect_octree(in vec3 ro, in vec3 rd, float octree_scale, out octree_result res) {
     int[] octree_desc = descriptors;
+
+    ro *= octree_scale;
 
     res.t = -1;
     res.color = vec3(0);
@@ -118,7 +120,7 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
     // the actual, all postive directions, result. Biases are also flipped between a plane at t0 or t1
     // depending on the direction. This ensures that positive ray directions look at planes at 0 and negative
     // directions always look at planes at 1.
-    int octant_mask = 7;
+    int octant_mask = 0;
     if (rd.x > 0) octant_mask ^= 1, tx_bias = 3.0 * tx_coef - tx_bias;
     if (rd.y > 0) octant_mask ^= 2, ty_bias = 3.0 * ty_coef - ty_bias;
     if (rd.z > 0) octant_mask ^= 4, tz_bias = 3.0 * tz_coef - tz_bias;
@@ -163,9 +165,9 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
                 float tz_corner = (pos.z + scale_exp2) * tz_coef - tz_bias;
                 float tc_min = max(max(tx_corner, ty_corner), tz_corner);
 
-                if ((octant_mask & 1) == 0) pos.x = 3.0 - scale_exp2 - pos.x;
-                if ((octant_mask & 2) == 0) pos.y = 3.0 - scale_exp2 - pos.y;
-                if ((octant_mask & 4) == 0) pos.z = 3.0 - scale_exp2 - pos.z;
+                if ((octant_mask & 1) != 0) pos.x = 3.0 - scale_exp2 - pos.x;
+                if ((octant_mask & 2) != 0) pos.y = 3.0 - scale_exp2 - pos.y;
+                if ((octant_mask & 4) != 0) pos.z = 3.0 - scale_exp2 - pos.z;
 
                 // TODO can be optimized?
                 if (tc_min == tx_corner) {
@@ -196,6 +198,7 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
                 res.pos.z = min(max(ro.z + t_min * rd.z, pos.z + epsilon), pos.z + scale_exp2 - epsilon);
                 // undo initial coordinate system shift
                 res.pos -= 1;
+                res.pos /= octree_scale;
 
                 res.color = vec3(
                 float(octree_desc[ptr] & 0xff) / 255.0,
@@ -275,10 +278,14 @@ void intersect_octree(in vec3 ro, in vec3 rd, out octree_result res) {
 
 void main() {
     // TODO next steps:
-    //      - fix inverted y axis
-    //      - try to optimize normal & uv calculation
     //      - scale to world
+    //      - fix SVO generation (proper refactoring & testing?)
+    //      - add basic shadows
+    //      - try to optimize normal & uv calculation
     //      - add sources & doc/explainations
+    //      - add materials & textures
+    //      - transparent & translucent objects
+    //      - add LOD support for far away voxels
 
     vec2 uv = v_uv * 2.0 - 1.0;
     uv.x *= u_aspect;
@@ -290,8 +297,10 @@ void main() {
     look_at = (u_view * vec4(look_at, 1.0)).xyz;
     vec3 rd = normalize(look_at - ro);
 
+    float scale = 1./20.;
+
     octree_result res;
-    intersect_octree(ro, rd, res);
+    intersect_octree(ro, rd, scale, res);
 
     if (res.t < 0) {
         color = vec4(res.color, 1) * 0.2;
