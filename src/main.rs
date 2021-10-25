@@ -60,8 +60,9 @@ fn main() {
     let texture = build_texture();
 
     let mut camera = graphics::Camera::new(72.0, window.get_aspect(), 0.01, 1024.0);
+    camera.position = Point3::new(128.0, 80.0, 128.0);
 
-    let cam_speed = 0.1f32;
+    let cam_speed = 1f32;
     let cam_rot_speed = 0.005f32;
     let mut cam_rot = cgmath::Vector3::new(0.0, -90f32.to_radians(), 0.0);
 
@@ -75,7 +76,7 @@ fn main() {
     unsafe {
         gl::GenBuffers(1, &mut ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
-        gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo.len() * 4) as GLsizeiptr, &svo[0] as *const i32 as *const c_void, gl::STATIC_READ);
+        gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const i32 as *const c_void, gl::STATIC_READ);
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
 
@@ -158,6 +159,7 @@ fn main() {
             shader.set_f32mat4("u_view", &camera.get_camera_to_world_matrix());
             shader.set_f32("u_fovy", 70.0f32.to_radians());
             shader.set_f32("u_aspect", window.get_aspect());
+            shader.set_i32("u_max_depth", svo.max_depth);
 
             // gl::ActiveTexture(gl::TEXTURE0);
             // gl::BindTexture(gl::TEXTURE_2D, texture);
@@ -421,9 +423,14 @@ impl TreeNode {
     }
 }
 
-fn build_voxel_model() -> Vec<i32> {
+struct SVO {
+    max_depth: i32,
+    descriptors: Vec<i32>,
+}
+
+fn build_voxel_model() -> SVO {
     println!("loading model");
-    let data = dot_vox::load("assets/bonepit.vox").unwrap();
+    let data = dot_vox::load("assets/terrain.vox").unwrap();
     let model = &data.models[0];
 
     println!("collecting leaves");
@@ -450,9 +457,13 @@ fn build_voxel_model() -> Vec<i32> {
     println!("total of {} bytes = {} MB", slot_counts * 4, slot_counts as f32 * 4.0 / 1000.0 / 1000.0);
 
     println!("building SVO");
-    let svo = input[input.keys().next().unwrap()].build();
-    println!("entries in SVO: {}", svo.len());
-    svo
+    let descriptors = input[input.keys().next().unwrap()].build();
+    println!("entries in SVO: {}", descriptors.len());
+
+    SVO {
+        max_depth: (model.size.x.max(model.size.y.max(model.size.z)) as f32).log2().ceil() as i32,
+        descriptors,
+    }
 }
 
 fn merge_tree_nodes(input: HashMap<NodePos, Box<TreeNode>>) -> HashMap<NodePos, Box<TreeNode>> {

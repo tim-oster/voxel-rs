@@ -9,6 +9,7 @@ layout (location = 0) out vec4 color;
 uniform mat4 u_view;
 uniform float u_fovy;
 uniform float u_aspect;
+uniform int u_max_depth;
 
 // lighting
 uniform float u_ambient;
@@ -287,7 +288,7 @@ void main() {
     look_at = (u_view * vec4(look_at, 1.0)).xyz;
     vec3 rd = normalize(look_at - ro);
 
-    float scale = 1./20.;
+    float scale = exp2(-u_max_depth);
 
     octree_result res;
     intersect_octree(ro, rd, scale, res);
