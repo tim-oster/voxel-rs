@@ -277,16 +277,6 @@ void intersect_octree(in vec3 ro, in vec3 rd, float octree_scale, out octree_res
 }
 
 void main() {
-    // TODO next steps:
-    //      - scale to world
-    //      - fix SVO generation (proper refactoring & testing?)
-    //      - add basic shadows
-    //      - try to optimize normal & uv calculation
-    //      - add sources & doc/explainations
-    //      - add materials & textures
-    //      - transparent & translucent objects
-    //      - add LOD support for far away voxels
-
     vec2 uv = v_uv * 2.0 - 1.0;
     uv.x *= u_aspect;
     uv *= tan(u_fovy * 0.5);
@@ -313,6 +303,10 @@ void main() {
     vec3 reflect_dir = reflect(-u_light_dir, res.normal);
     float specular = pow(max(dot(view_dir, reflect_dir), 0.0), 265) * specular_strength;
 
-    float light = u_ambient + diffuse + specular;
+    octree_result shadow_res;
+    intersect_octree(res.pos + res.normal*0.0001, -u_light_dir, scale, shadow_res);
+    float shadow = shadow_res.t < 0 ? 1.0 : 0.0;
+
+    float light = u_ambient + (diffuse + specular) * shadow;
     color = vec4(res.color, 1) * light;
 }
