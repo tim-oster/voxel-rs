@@ -153,8 +153,11 @@ void intersect_octree(in vec3 ro, in vec3 rd, float octree_scale, out octree_res
             if (is_leaf) {
                 // TODO put after loop?
 
-                int offset = octree_desc[ptr] >> 17;
+                int offset = int(uint(octree_desc[ptr]) >> 17);
                 int leaf_mask = octree_desc[ptr] & 0xff;
+                if ((octree_desc[ptr] & 0x10000) != 0) {
+                    offset = octree_desc[ptr + offset];
+                }
                 ptr += offset;
                 ptr += octant_idx - findLSB(leaf_mask);
 
@@ -224,9 +227,10 @@ void intersect_octree(in vec3 ro, in vec3 rd, float octree_scale, out octree_res
                 ptr_stack[scale] = ptr;
                 t_max_stack[scale] = t_max;
 
-                int offset = octree_desc[ptr] >> 17;
+                // TODO convert everything to uint?
+                int offset = int(uint(octree_desc[ptr]) >> 17);
                 if ((octree_desc[ptr] & 0x10000) != 0) {
-                    offset = offset + octree_desc[ptr + offset];
+                    offset = octree_desc[ptr + offset];
                 }
                 ptr += offset;
                 ptr += octant_idx - findLSB(child_mask);

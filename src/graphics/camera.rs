@@ -25,7 +25,7 @@ impl Camera {
     }
 
     pub fn right(&self) -> Vector3<f32> {
-        self.forward.cross(self.up)
+        self.forward.cross(self.up).normalize()
     }
 
     pub fn get_projection_matrix(&self) -> &cgmath::Matrix4<f32> {
