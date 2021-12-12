@@ -8,10 +8,10 @@ use crate::core::Input;
 
 pub struct Window {
     context: glfw::Glfw,
+    imgui: imgui_wrapper::Wrapper,
+
     window: RefCell<glfw::Window>,
     events: std::sync::mpsc::Receiver<(f64, glfw::WindowEvent)>,
-
-    imgui: imgui_wrapper::Wrapper,
 
     current_stats: FrameStats,
     is_cursor_grabbed: bool,
@@ -51,9 +51,9 @@ impl Window {
 
         Window {
             context,
+            imgui,
             window: RefCell::new(window),
             events,
-            imgui,
             current_stats: FrameStats {
                 last_frame: Instant::now(),
                 last_measurement: Instant::now(),
