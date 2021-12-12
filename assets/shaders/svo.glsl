@@ -49,14 +49,16 @@ struct octree_result {
 
 // https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Buffer_backed
 // https://www.khronos.org/opengl/wiki/Shader_Storage_Buffer_Object
-layout (std430, binding = 3) readonly buffer root_node {
+layout (std430, binding = 0) readonly buffer root_node {
+    float octree_scale;
     int descriptors[];
 };
 
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
-void intersect_octree(in vec3 ro, in vec3 rd, float octree_scale, out octree_result res) {
+void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
     ro *= octree_scale;
+    max_dst *= octree_scale;
 
     res.t = -1;
     res.color = vec3(0);
@@ -119,6 +121,10 @@ void intersect_octree(in vec3 ro, in vec3 rd, float octree_scale, out octree_res
     if (t_min < 1.5 * tz_coef - tz_bias) idx ^= 4, pos.z = 1.5;
 
     for (int i = 0; i < MAX_STEPS && scale < MAX_STACK_DEPTH; ++i) {
+        if (max_dst >= 0 && t_min > max_dst) {
+            return;
+        }
+
         float tx_corner = pos.x * tx_coef - tx_bias;
         float ty_corner = pos.y * ty_coef - ty_bias;
         float tz_corner = pos.z * tz_coef - tz_bias;
@@ -142,7 +148,7 @@ void intersect_octree(in vec3 ro, in vec3 rd, float octree_scale, out octree_res
                 ptr += offset;
                 ptr += octant_idx - findLSB(leaf_mask);
 
-                res.t = t_min;
+                res.t = t_min / octree_scale;
 
                 // TODO can be optimized?
                 float tx_corner = (pos.x + scale_exp2) * tx_coef - tx_bias;

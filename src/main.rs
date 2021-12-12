@@ -57,6 +57,12 @@ fn main() {
             .build()
     ).unwrap();
 
+    let mut picker_shader = graphics::Resource::new(
+        || graphics::ShaderProgramBuilder::new()
+            .load_shader(graphics::ShaderType::Compute, "assets/shaders/picker.glsl")?
+            .build()
+    ).unwrap();
+
     let (vao, indices_count) = build_vao();
     // let texture = build_texture();
 
@@ -77,8 +83,10 @@ fn main() {
     unsafe {
         gl::GenBuffers(1, &mut ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, ssbo);
-        gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const i32 as *const c_void, gl::STATIC_READ);
-        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, ssbo);
+        gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo.descriptors.len() * 4 + 4) as GLsizeiptr as GLsizeiptr, ptr::null(), gl::STATIC_READ);
+        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 0 as GLsizeiptr, 4 as GLsizeiptr, &svo.max_depth_exp2 as *const f32 as *const c_void);
+        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const i32 as *const c_void);
+        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
 
         gl::Enable(gl::DEPTH_TEST);
@@ -87,6 +95,28 @@ fn main() {
         gl::Enable(gl::CULL_FACE);
         gl::CullFace(gl::BACK);
         gl::FrontFace(gl::CCW);
+    }
+
+    #[repr(C)]
+    struct PickerData {
+        block_pos: cgmath::Point3<f32>,
+    }
+    let mut picker_data = PickerData {
+        block_pos: cgmath::Point3::new(0.0, 0.0, 0.0),
+    };
+
+    let mut picker_ssbo = 0;
+    unsafe {
+        gl::GenBuffers(1, &mut picker_ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, picker_ssbo);
+        gl::BufferData(
+            gl::SHADER_STORAGE_BUFFER,
+            mem::size_of::<PickerData>() as GLsizeiptr,
+            &picker_data as *const PickerData as *const c_void,
+            gl::DYNAMIC_READ,
+        );
+        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, picker_ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
 
     while !window.should_close() {
@@ -107,6 +137,15 @@ fn main() {
                     frame.ui.text(format!(
                         "cam fwd: ({:.3},{:.3},{:.3})",
                         camera.forward.x, camera.forward.y, camera.forward.z,
+                    ));
+
+                    let mut block_pos = picker_data.block_pos;
+                    if block_pos.x == f32::MAX {
+                        block_pos = Point3::new(0.0, 0.0, 0.0);
+                    }
+                    frame.ui.text(format!(
+                        "block pos: ({:.2},{:.2},{:.2})",
+                        block_pos.x, block_pos.y, block_pos.z,
                     ));
                 });
 
@@ -140,10 +179,15 @@ fn main() {
                 light_dir = camera.forward;
             }
             if frame.input.was_key_pressed(&glfw::Key::R) {
-                if let Err(err) = shader.reload() {
-                    println!("error loading shader: {:?}", err);
-                } else {
-                    println!("reload shader");
+                for shader in vec![
+                    &mut shader,
+                    &mut picker_shader,
+                ] {
+                    if let Err(err) = shader.reload() {
+                        println!("error loading shader: {:?}", err);
+                    } else {
+                        println!("reload shader");
+                    }
                 }
             }
             if frame.input.was_key_pressed(&glfw::Key::T) {
@@ -176,7 +220,8 @@ fn main() {
                 shader.set_f32mat4("u_view", &camera.get_camera_to_world_matrix());
                 shader.set_f32("u_fovy", 70.0f32.to_radians());
                 shader.set_f32("u_aspect", frame.get_aspect());
-                shader.set_i32("u_max_depth", svo.max_depth);
+                // shader.set_i32("u_max_depth", svo.max_depth);
+                shader.set_f32vec3("u_highlight_pos", &picker_data.block_pos.to_vec());
 
                 // gl::ActiveTexture(gl::TEXTURE0);
                 // gl::BindTexture(gl::TEXTURE_2D, texture);
@@ -186,6 +231,28 @@ fn main() {
                 gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
 
                 shader.unbind();
+
+                // picker logic
+                picker_shader.bind();
+                picker_shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
+                picker_shader.set_f32vec3("u_cam_dir", &camera.forward);
+
+                // TODO why does update time spike?
+                unsafe {
+                    gl::DispatchCompute(1, 1, 1);
+                    gl::MemoryBarrier(gl::SHADER_STORAGE_BARRIER_BIT);
+
+                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, picker_ssbo);
+                    gl::GetBufferSubData(
+                        gl::SHADER_STORAGE_BUFFER,
+                        0,
+                        mem::size_of::<PickerData>() as GLsizeiptr,
+                        &mut picker_data as *mut PickerData as *mut c_void,
+                    );
+                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+                }
+
+                picker_shader.unbind();
 
                 gl_check_error!();
             }
@@ -546,12 +613,13 @@ mod tests {
 
 struct SVO {
     max_depth: i32,
+    max_depth_exp2: f32,
     descriptors: Vec<i32>,
 }
 
 fn build_voxel_model() -> SVO {
     println!("loading model");
-    let data = dot_vox::load("assets/ignore/simple.vox").unwrap();
+    let data = dot_vox::load("assets/ignore/terrain.vox").unwrap();
     let model = &data.models[0];
 
     println!("collecting leaves");
@@ -580,8 +648,10 @@ fn build_voxel_model() -> SVO {
     println!("entries in SVO: {}", descriptors.len());
     println!("SVO size: {} MB", descriptors.len() as f32 * 4.0 / 1000.0 / 1000.0);
 
+    let max_depth = (model.size.x.max(model.size.y.max(model.size.z)) as f32).log2().ceil() as i32;
     SVO {
-        max_depth: (model.size.x.max(model.size.y.max(model.size.z)) as f32).log2().ceil() as i32,
+        max_depth,
+        max_depth_exp2: (-max_depth as f32).exp2(),
         descriptors,
     }
 }
