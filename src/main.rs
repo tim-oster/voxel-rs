@@ -3,16 +3,16 @@ extern crate gl;
 extern crate memoffset;
 
 use std::{mem, ptr};
-use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::path::Path;
 
 use cgmath;
-use cgmath::{Point2, Point3, SquareMatrix, Vector3};
+use cgmath::{Point2, Point3, Vector3};
 use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
 use gl::types::*;
 use image::GenericImageView;
+use imgui::{Condition, Window};
 
 mod graphics;
 mod core;
@@ -48,14 +48,14 @@ fn main() {
     let svo = build_voxel_model();
 
     let mut window = core::Window::new(1024, 768, "voxel engine");
-    window.set_grab_cursor(true);
+    window.request_grab_cursor(true);
 
     let mut shader = graphics::Resource::new(
         || graphics::ShaderProgram::new_from_files("assets/shaders/shader.vert", "assets/shaders/shader.frag"),
     ).unwrap();
 
     let (vao, indices_count) = build_vao();
-    let texture = build_texture();
+    // let texture = build_texture();
 
     let mut camera = graphics::Camera::new(72.0, window.get_aspect(), 0.01, 1024.0);
     camera.position = Point3::new(128.0, 80.0, 128.0);
@@ -86,90 +86,107 @@ fn main() {
         gl::FrontFace(gl::CCW);
     }
 
-    while window.update() {
-        let stats = window.get_frame_stats();
-        let input = window.get_input();
+    while !window.should_close() {
+        window.update(|frame| {
+            Window::new("Debug")
+                .size([300.0, 100.0], Condition::FirstUseEver)
+                .build(&frame.ui, || {
+                    frame.ui.text(format!(
+                        "fps: {}, frame: {:.2}ms, update: {:.2}ms",
+                        frame.stats.frames_per_second,
+                        frame.stats.avg_frame_time_per_second * 1000.0,
+                        frame.stats.avg_update_time_per_second * 1000.0,
+                    ));
+                    frame.ui.text(format!(
+                        "cam pos: ({:.3},{:.3},{:.3})",
+                        camera.position.x, camera.position.y, camera.position.z,
+                    ));
+                    frame.ui.text(format!(
+                        "cam fwd: ({:.3},{:.3},{:.3})",
+                        camera.forward.x, camera.forward.y, camera.forward.z,
+                    ));
+                });
 
-        if window.was_resized() {
-            camera.update_projection(72.0, window.get_aspect(), 0.01, 1024.0);
-        }
-
-        if input.was_key_pressed(&glfw::Key::Escape) {
-            window.close();
-        }
-        if input.is_key_pressed(&glfw::Key::W) {
-            let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-            camera.position += dir * cam_speed * stats.delta_time;
-        }
-        if input.is_key_pressed(&glfw::Key::S) {
-            let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-            camera.position -= dir * cam_speed * stats.delta_time;
-        }
-        if input.is_key_pressed(&glfw::Key::A) {
-            camera.position -= camera.right() * cam_speed * stats.delta_time;
-        }
-        if input.is_key_pressed(&glfw::Key::D) {
-            camera.position += camera.right() * cam_speed * stats.delta_time;
-        }
-        if input.is_key_pressed(&glfw::Key::Space) {
-            camera.position.y += cam_speed * stats.delta_time;
-        }
-        if input.is_key_pressed(&glfw::Key::LeftShift) {
-            camera.position.y -= cam_speed * stats.delta_time;
-        }
-        if input.was_key_pressed(&glfw::Key::E) {
-            light_dir = camera.forward;
-        }
-        if input.was_key_pressed(&glfw::Key::R) {
-            if let Err(err) = shader.reload() {
-                println!("error loading shader: {:?}", err);
-            } else {
-                println!("reload shader");
+            if frame.was_resized {
+                camera.update_projection(72.0, frame.get_aspect(), 0.01, 1024.0);
             }
-        }
-        if input.was_key_pressed(&glfw::Key::T) {
-            use_mouse_input = !use_mouse_input;
-            window.set_grab_cursor(use_mouse_input);
-        }
-
-        if use_mouse_input {
-            let delta = input.get_mouse_delta();
-            if delta.x.abs() > 0.01 {
-                cam_rot.y += delta.x * cam_rot_speed * stats.delta_time;
+            if frame.input.was_key_pressed(&glfw::Key::Escape) {
+                frame.request_close();
             }
-            if delta.y.abs() > 0.01 {
-                cam_rot.x -= delta.y * cam_rot_speed * stats.delta_time;
+            if frame.input.is_key_pressed(&glfw::Key::W) {
+                let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
+                camera.position += dir * cam_speed * frame.stats.delta_time;
             }
-            camera.set_forward_from_euler(cam_rot);
-        }
+            if frame.input.is_key_pressed(&glfw::Key::S) {
+                let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
+                camera.position -= dir * cam_speed * frame.stats.delta_time;
+            }
+            if frame.input.is_key_pressed(&glfw::Key::A) {
+                camera.position -= camera.right() * cam_speed * frame.stats.delta_time;
+            }
+            if frame.input.is_key_pressed(&glfw::Key::D) {
+                camera.position += camera.right() * cam_speed * frame.stats.delta_time;
+            }
+            if frame.input.is_key_pressed(&glfw::Key::Space) {
+                camera.position.y += cam_speed * frame.stats.delta_time;
+            }
+            if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
+                camera.position.y -= cam_speed * frame.stats.delta_time;
+            }
+            if frame.input.was_key_pressed(&glfw::Key::E) {
+                light_dir = camera.forward;
+            }
+            if frame.input.was_key_pressed(&glfw::Key::R) {
+                if let Err(err) = shader.reload() {
+                    println!("error loading shader: {:?}", err);
+                } else {
+                    println!("reload shader");
+                }
+            }
+            if frame.input.was_key_pressed(&glfw::Key::T) {
+                use_mouse_input = !use_mouse_input;
+                frame.request_grab_cursor(use_mouse_input);
+            }
 
-        unsafe {
-            gl::ClearColor(0.0, 0.0, 0.0, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+            if use_mouse_input {
+                let delta = frame.input.get_mouse_delta();
+                if delta.x.abs() > 0.01 {
+                    cam_rot.y += delta.x * cam_rot_speed * frame.stats.delta_time;
+                }
+                if delta.y.abs() > 0.01 {
+                    cam_rot.x -= delta.y * cam_rot_speed * frame.stats.delta_time;
+                }
+                camera.set_forward_from_euler(cam_rot);
+            }
 
-            shader.bind();
-            // shader.set_f32mat4("u_projection", camera.get_projection_matrix());
-            // shader.set_f32mat4("u_view", &camera.get_view_matrix());
-            shader.set_f32("u_ambient", ambient_intensity);
-            shader.set_f32vec3("u_light_dir", &light_dir);
-            shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
+            unsafe {
+                gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+                gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
-            shader.set_f32mat4("u_view", &camera.get_camera_to_world_matrix());
-            shader.set_f32("u_fovy", 70.0f32.to_radians());
-            shader.set_f32("u_aspect", window.get_aspect());
-            shader.set_i32("u_max_depth", svo.max_depth);
+                shader.bind();
+                // shader.set_f32mat4("u_projection", camera.get_projection_matrix());
+                // shader.set_f32mat4("u_view", &camera.get_view_matrix());
+                shader.set_f32("u_ambient", ambient_intensity);
+                shader.set_f32vec3("u_light_dir", &light_dir);
+                shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
 
-            // gl::ActiveTexture(gl::TEXTURE0);
-            // gl::BindTexture(gl::TEXTURE_2D, texture);
-            // shader.set_i32("u_texture", 0);
+                shader.set_f32mat4("u_view", &camera.get_camera_to_world_matrix());
+                shader.set_f32("u_fovy", 70.0f32.to_radians());
+                shader.set_f32("u_aspect", frame.get_aspect());
+                shader.set_i32("u_max_depth", svo.max_depth);
 
-            gl::BindVertexArray(vao);
-            gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
+                // gl::ActiveTexture(gl::TEXTURE0);
+                // gl::BindTexture(gl::TEXTURE_2D, texture);
+                // shader.set_i32("u_texture", 0);
 
-            shader.unbind();
+                gl::BindVertexArray(vao);
+                gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
 
-            gl_check_error!();
-        }
+                shader.unbind();
+
+                gl_check_error!();
+            }
+        });
     }
 }
 
@@ -182,8 +199,8 @@ fn build_vao() -> (GLuint, i32) {
             normal: cgmath::Vector3<f32>,
         }
 
-        let pos = Point3::new(0.0, 0.0, -5.0);
-        let scl = 0.5;
+        // let pos = Point3::new(0.0, 0.0, -5.0);
+        // let scl = 0.5;
         let vertices = vec![
             // screen quad
             Vertex { position: Point3::new(1.0, 1.0, -1.0), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, 0.0, 1.0) },
