@@ -548,7 +548,7 @@ struct SVO {
 
 fn build_voxel_model() -> SVO {
     println!("loading model");
-    let data = dot_vox::load("assets/simple.vox").unwrap();
+    let data = dot_vox::load("assets/ignore/simple.vox").unwrap();
     let model = &data.models[0];
 
     println!("collecting leaves");

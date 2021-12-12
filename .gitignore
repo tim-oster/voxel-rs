@@ -1,4 +1,5 @@
 /.idea
 /target
 
+/assets/ignore/**/*
 /imgui.ini
