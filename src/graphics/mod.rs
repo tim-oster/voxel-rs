@@ -5,4 +5,6 @@ mod resource;
 pub use resource::Resource;
 
 mod shader;
+pub use shader::ShaderProgramBuilder;
 pub use shader::ShaderProgram;
+pub use shader::ShaderType;

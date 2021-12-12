@@ -51,7 +51,10 @@ fn main() {
     window.request_grab_cursor(true);
 
     let mut shader = graphics::Resource::new(
-        || graphics::ShaderProgram::new_from_files("assets/shaders/shader.vert", "assets/shaders/shader.frag"),
+        || graphics::ShaderProgramBuilder::new()
+            .load_shader(graphics::ShaderType::Vertex, "assets/shaders/shader.vert")?
+            .load_shader(graphics::ShaderType::Fragment, "assets/shaders/shader.frag")?
+            .build()
     ).unwrap();
 
     let (vao, indices_count) = build_vao();

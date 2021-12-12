@@ -14,3 +14,4 @@ memoffset = "0.6.4"
 dot_vox = "4.1.0"
 imgui = "0.8.0"
 imgui-opengl-renderer = { git = "https://github.com/eliaperantoni/rust-imgui-opengl-renderer", rev = "e80b5f21cefea355b9f8932f895f5592bd02a4ee" }
+regex = "1.5.4"
