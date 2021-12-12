@@ -1,6 +1,6 @@
 #version 460
 
-#define DEBUG 1
+#define DEBUG 0
 
 in vec2 v_uv;
 
