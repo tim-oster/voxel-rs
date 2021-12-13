@@ -101,20 +101,28 @@ fn main() {
     struct PickerData {
         block_pos: cgmath::Point3<f32>,
     }
-    let mut picker_data = PickerData {
-        block_pos: cgmath::Point3::new(0.0, 0.0, 0.0),
-    };
+    let picker_data;
 
     let mut picker_ssbo = 0;
     unsafe {
         gl::GenBuffers(1, &mut picker_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, picker_ssbo);
-        gl::BufferData(
+
+        // create an immutable buffer and persistently map to it for stream reading
+        // from GPU to CPU
+        gl::BufferStorage(
             gl::SHADER_STORAGE_BUFFER,
             mem::size_of::<PickerData>() as GLsizeiptr,
-            &picker_data as *const PickerData as *const c_void,
-            gl::DYNAMIC_READ,
+            ptr::null(),
+            gl::MAP_READ_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
         );
+        picker_data = gl::MapBufferRange(
+            gl::SHADER_STORAGE_BUFFER,
+            0,
+            mem::size_of::<PickerData>() as GLsizeiptr,
+            gl::MAP_READ_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+        ) as *mut PickerData;
+
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, picker_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
@@ -139,7 +147,7 @@ fn main() {
                         camera.forward.x, camera.forward.y, camera.forward.z,
                     ));
 
-                    let mut block_pos = picker_data.block_pos;
+                    let mut block_pos = unsafe {(*picker_data).block_pos};
                     if block_pos.x == f32::MAX {
                         block_pos = Point3::new(0.0, 0.0, 0.0);
                     }
@@ -221,7 +229,7 @@ fn main() {
                 shader.set_f32("u_fovy", 70.0f32.to_radians());
                 shader.set_f32("u_aspect", frame.get_aspect());
                 // shader.set_i32("u_max_depth", svo.max_depth);
-                shader.set_f32vec3("u_highlight_pos", &picker_data.block_pos.to_vec());
+                shader.set_f32vec3("u_highlight_pos", unsafe {&(*picker_data).block_pos.to_vec()});
 
                 // gl::ActiveTexture(gl::TEXTURE0);
                 // gl::BindTexture(gl::TEXTURE_2D, texture);
@@ -236,22 +244,7 @@ fn main() {
                 picker_shader.bind();
                 picker_shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
                 picker_shader.set_f32vec3("u_cam_dir", &camera.forward);
-
-                // TODO why does update time spike?
-                unsafe {
-                    gl::DispatchCompute(1, 1, 1);
-                    gl::MemoryBarrier(gl::SHADER_STORAGE_BARRIER_BIT);
-
-                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, picker_ssbo);
-                    gl::GetBufferSubData(
-                        gl::SHADER_STORAGE_BUFFER,
-                        0,
-                        mem::size_of::<PickerData>() as GLsizeiptr,
-                        &mut picker_data as *mut PickerData as *mut c_void,
-                    );
-                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
-                }
-
+                gl::DispatchCompute(1, 1, 1);
                 picker_shader.unbind();
 
                 gl_check_error!();
