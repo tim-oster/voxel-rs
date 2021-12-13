@@ -7,7 +7,7 @@ use std::ffi::c_void;
 use std::path::Path;
 
 use cgmath;
-use cgmath::{Point2, Point3, Vector3};
+use cgmath::{Point2, Point3, Vector2, Vector3};
 use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
 use gl::types::*;
 use image::GenericImageView;
@@ -50,7 +50,7 @@ fn main() {
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.request_grab_cursor(true);
 
-    let mut shader = graphics::Resource::new(
+    let mut world_shader = graphics::Resource::new(
         || graphics::ShaderProgramBuilder::new()
             .load_shader(graphics::ShaderType::Vertex, "assets/shaders/shader.vert")?
             .load_shader(graphics::ShaderType::Fragment, "assets/shaders/shader.frag")?
@@ -60,6 +60,13 @@ fn main() {
     let mut picker_shader = graphics::Resource::new(
         || graphics::ShaderProgramBuilder::new()
             .load_shader(graphics::ShaderType::Compute, "assets/shaders/picker.glsl")?
+            .build()
+    ).unwrap();
+
+    let mut ui_shader = graphics::Resource::new(
+        || graphics::ShaderProgramBuilder::new()
+            .load_shader(graphics::ShaderType::Vertex, "assets/shaders/ui.vert")?
+            .load_shader(graphics::ShaderType::Fragment, "assets/shaders/ui.frag")?
             .build()
     ).unwrap();
 
@@ -89,8 +96,8 @@ fn main() {
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
 
-        gl::Enable(gl::DEPTH_TEST);
-        gl::DepthFunc(gl::LESS);
+        // gl::Enable(gl::DEPTH_TEST);
+        // gl::DepthFunc(gl::LESS);
 
         gl::Enable(gl::CULL_FACE);
         gl::CullFace(gl::BACK);
@@ -127,6 +134,9 @@ fn main() {
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
 
+    let (w, h) = window.get_size();
+    let mut ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
+
     while !window.should_close() {
         window.update(|frame| {
             Window::new("Debug")
@@ -159,6 +169,9 @@ fn main() {
 
             if frame.was_resized {
                 camera.update_projection(72.0, frame.get_aspect(), 0.01, 1024.0);
+
+                let (w, h) = frame.size;
+                ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
             }
             if frame.input.was_key_pressed(&glfw::Key::Escape) {
                 frame.request_close();
@@ -188,8 +201,9 @@ fn main() {
             }
             if frame.input.was_key_pressed(&glfw::Key::R) {
                 for shader in vec![
-                    &mut shader,
+                    &mut world_shader,
                     &mut picker_shader,
+                    &mut ui_shader,
                 ] {
                     if let Err(err) = shader.reload() {
                         println!("error loading shader: {:?}", err);
@@ -218,28 +232,40 @@ fn main() {
                 gl::ClearColor(0.0, 0.0, 0.0, 1.0);
                 gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
-                shader.bind();
+                gl::BindVertexArray(vao);
+
+                // render world
+                world_shader.bind();
                 // shader.set_f32mat4("u_projection", camera.get_projection_matrix());
                 // shader.set_f32mat4("u_view", &camera.get_view_matrix());
-                shader.set_f32("u_ambient", ambient_intensity);
-                shader.set_f32vec3("u_light_dir", &light_dir);
-                shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
+                world_shader.set_f32("u_ambient", ambient_intensity);
+                world_shader.set_f32vec3("u_light_dir", &light_dir);
+                world_shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
 
-                shader.set_f32mat4("u_view", &camera.get_camera_to_world_matrix());
-                shader.set_f32("u_fovy", 70.0f32.to_radians());
-                shader.set_f32("u_aspect", frame.get_aspect());
+                world_shader.set_f32mat4("u_view", &camera.get_camera_to_world_matrix());
+                world_shader.set_f32("u_fovy", 70.0f32.to_radians());
+                world_shader.set_f32("u_aspect", frame.get_aspect());
                 // shader.set_i32("u_max_depth", svo.max_depth);
-                shader.set_f32vec3("u_highlight_pos", &(*picker_data).block_pos.to_vec());
+                world_shader.set_f32vec3("u_highlight_pos", &(*picker_data).block_pos.to_vec());
 
                 // gl::ActiveTexture(gl::TEXTURE0);
                 // gl::BindTexture(gl::TEXTURE_2D, texture);
                 // shader.set_i32("u_texture", 0);
 
-                gl::BindVertexArray(vao);
                 gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
-                gl::BindVertexArray(0);
+                world_shader.unbind();
 
-                shader.unbind();
+                // render ui
+                ui_shader.bind();
+                ui_shader.set_f32mat4("u_view", &ui_view);
+                ui_shader.set_f32vec2("u_dimensions", &Vector2::new(frame.size.0 as f32, frame.size.1 as f32));
+                gl::Enable(gl::BLEND);
+                gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+                gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
+                gl::Disable(gl::BLEND);
+                ui_shader.unbind();
+
+                gl::BindVertexArray(0);
 
                 // picker logic
                 picker_shader.bind();
