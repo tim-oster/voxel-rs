@@ -13,6 +13,7 @@ pub struct Input {
     mouse_wheel_delta: f32,
     pressed_buttons: HashSet<glfw::MouseButton>,
     released_buttons: HashSet<glfw::MouseButton>,
+    last_button_state: HashSet<glfw::MouseButton>,
 }
 
 impl Input {
@@ -28,6 +29,7 @@ impl Input {
             mouse_wheel_delta: 0.0,
             pressed_buttons: HashSet::new(),
             released_buttons: HashSet::new(),
+            last_button_state: HashSet::new(),
         }
     }
 
@@ -38,6 +40,7 @@ impl Input {
 
         self.mouse_delta = cgmath::Vector2::new(0.0, 0.0);
         self.mouse_wheel_delta = 0.0;
+        self.last_button_state = self.pressed_buttons.clone();
     }
 
     pub fn handle_event(&mut self, event: glfw::WindowEvent) {
@@ -88,6 +91,18 @@ impl Input {
 
     pub fn was_key_pressed(&self, key: &glfw::Key) -> bool {
         self.released_keys.contains(key)
+    }
+
+    pub fn is_button_pressed(&self, button: &glfw::MouseButton) -> bool {
+        self.pressed_buttons.contains(button)
+    }
+
+    pub fn is_button_pressed_once(&self, button: &glfw::MouseButton) -> bool {
+        self.pressed_buttons.contains(button) && !self.last_button_state.contains(button)
+    }
+
+    pub fn was_button_pressed(&self, button: &glfw::MouseButton) -> bool {
+        self.released_buttons.contains(button)
     }
 
     pub fn get_mouse_delta(&self) -> cgmath::Vector2<f32> {

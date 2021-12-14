@@ -45,6 +45,8 @@ struct octree_result {
     vec3 normal;
     vec3 pos;
     vec2 uv;
+    int parent_index;
+    int octant_idx;
 };
 
 // https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Buffer_backed
@@ -139,6 +141,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
         if (is_child && t_min <= t_max) {
             if (is_leaf) {
                 // TODO put after loop?
+
+                res.parent_index = ptr;
+                res.octant_idx = octant_idx;
 
                 int offset = int(uint(descriptors[ptr]) >> 17);
                 int leaf_mask = descriptors[ptr] & 0xff;
