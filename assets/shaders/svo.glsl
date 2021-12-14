@@ -151,7 +151,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
                     offset = descriptors[ptr + offset];
                 }
                 ptr += offset;
-                ptr += octant_idx - findLSB(leaf_mask);
+                ptr += octant_idx;
 
                 res.t = t_min / octree_scale;
 
@@ -225,7 +225,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
                     offset = descriptors[ptr + offset];
                 }
                 ptr += offset;
-                ptr += octant_idx - findLSB(child_mask);
+                ptr += octant_idx;
 
                 idx = 0;
                 --scale;

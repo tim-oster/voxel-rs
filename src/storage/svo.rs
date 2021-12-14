@@ -65,10 +65,7 @@ impl TreeNode {
         let mut last_child_index = None;
         for child in self.nodes.iter() {
             if child.is_none() {
-                // skip leading empty children
-                if result.len() > 1 {
-                    result.push(0);
-                }
+                result.push(0);
                 continue;
             }
             let child = child.as_ref().unwrap();
@@ -82,10 +79,6 @@ impl TreeNode {
                 desc: child.build_with_far_pointer_threshold(far_pointer_threshold),
                 far_ptr_index: None,
             });
-        }
-        // strip trailing empty children
-        if let Some(index) = last_child_index {
-            result.truncate(index + 1);
         }
 
         full_child_descriptors.sort_by(|a, b| {
