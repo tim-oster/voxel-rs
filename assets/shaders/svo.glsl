@@ -1,42 +1,3 @@
-#define DEBUG 0
-
-#if DEBUG
-
-// source: https://www.iquilezles.org/www/articles/boxfunctions/boxfunctions.htm
-vec2 intersect_box(in vec3 ro, in vec3 rd, in vec3 pos, in vec3 rad) {
-    ro -= pos + rad;
-
-    vec3 m = 1.0/rd;
-    vec3 n = m*ro;
-    vec3 k = abs(m)*rad;
-    vec3 t1 = -n - k;
-    vec3 t2 = -n + k;
-
-    float tN = max(max(t1.x, t1.y), t1.z);
-    float tF = min(min(t2.x, t2.y), t2.z);
-
-    if (tN>tF || tF<0.0) return vec2(-1.0);// no intersection
-
-    //    oN = -sign(rd)*step(t1.yzx, t1.xyz)*step(t1.zxy, t1.xyz);
-
-    return vec2(tN, tF);
-}
-
-    #endif
-
-const vec3 octree_pos = vec3(0.0, 0.0, 0.0);
-
-const vec3 octant_debug_colors[] = vec3[](
-vec3(0.2, 0.2, 0.2),
-vec3(1.0, 0.0, 0.0),
-vec3(0.0, 1.0, 0.0),
-vec3(1.0, 1.0, 0.0),
-vec3(0.0, 0.0, 1.0),
-vec3(1.0, 0.0, 1.0),
-vec3(0.0, 1.0, 1.0),
-vec3(1.0, 1.0, 1.0)
-);
-
 const int MAX_STEPS = 1000;
 
 struct octree_result {
@@ -64,13 +25,6 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
     res.t = -1;
     res.color = vec3(0);
-
-    // TODO try to what happens when using a positive coordinate system
-    #if DEBUG
-    vec2 minmax = intersect_box(ro, rd, octree_pos, vec3(0.5));
-    if (minmax.x < 0.0 && minmax.y < 0.0) return;
-    res.color = vec3(1, 0, 0);
-    #endif
 
     // shift input coordinate system so that the octree spans from [1;2]
     ro += 1;
