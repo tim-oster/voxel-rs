@@ -7,6 +7,7 @@ struct octree_result {
     vec3 pos;
     vec2 uv;
     int parent_index;
+    int mask_index;
     int octant_idx;
 };
 
@@ -31,12 +32,14 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
     const int MAX_STACK_DEPTH = 23;
     int[MAX_STACK_DEPTH] ptr_stack;
+    int[MAX_STACK_DEPTH] mask_index_stack;
     float[MAX_STACK_DEPTH] t_max_stack;
     int stack_ptr = 0;
 
     const float epsilon = exp2(-MAX_STACK_DEPTH);
 
     int ptr = 0;
+    int mask_index = 0;
     int scale = MAX_STACK_DEPTH - 1;
     float scale_exp2 = 0.5;
 
@@ -88,24 +91,26 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
         int octant_idx = idx ^ octant_mask;
         int bit = 1 << octant_idx;
-        int child_mask = (descriptors[ptr] >> 8) & 0xff;
-        bool is_child = (child_mask & bit) != 0;
-        bool is_leaf = (descriptors[ptr] & bit) != 0;
+
+        int mask = descriptors[ptr + mask_index / 2];
+        if ((mask_index % 2) != 0) {
+            mask = mask >> 16;
+        }
+        mask &= 0xffff;
+
+        bool is_child = ((mask >> 8) & bit) != 0;
+        bool is_leaf = (mask & bit) != 0;
 
         if (is_child && t_min <= t_max) {
             if (is_leaf) {
                 // TODO put after loop?
 
                 res.parent_index = ptr;
+                res.mask_index = mask_index;
                 res.octant_idx = octant_idx;
 
-                int offset = int(uint(descriptors[ptr]) >> 17);
-                int leaf_mask = descriptors[ptr] & 0xff;
-                if ((descriptors[ptr] & 0x10000) != 0) {
-                    offset = descriptors[ptr + offset];
-                }
-                ptr += offset;
-                ptr += octant_idx;
+                int color_ptr = descriptors[ptr + 4 + mask_index];
+                color_ptr += 4 + octant_idx;
 
                 res.t = t_min / octree_scale;
 
@@ -146,14 +151,15 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
                 res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + epsilon), pos.x + scale_exp2 - epsilon);
                 res.pos.y = min(max(ro.y + t_min * rd.y, pos.y + epsilon), pos.y + scale_exp2 - epsilon);
                 res.pos.z = min(max(ro.z + t_min * rd.z, pos.z + epsilon), pos.z + scale_exp2 - epsilon);
+
                 // undo initial coordinate system shift
                 res.pos -= 1;
                 res.pos /= octree_scale;
 
                 res.color = vec3(
-                float(descriptors[ptr] & 0xff) / 255.0,
-                float((descriptors[ptr] >> 8) & 0xff) / 255.0,
-                float((descriptors[ptr] >> 16) & 0xff) / 255.0
+                float(descriptors[color_ptr] & 0xff) / 255.0,
+                float((descriptors[color_ptr] >> 8) & 0xff) / 255.0,
+                float((descriptors[color_ptr] >> 16) & 0xff) / 255.0
                 );
 
                 return;
@@ -171,15 +177,13 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
                 // TODO this is guarded in the original
                 ptr_stack[scale] = ptr;
+                mask_index_stack[scale] = mask_index;
                 t_max_stack[scale] = t_max;
 
                 // TODO convert everything to uint?
-                int offset = int(uint(descriptors[ptr]) >> 17);
-                if ((descriptors[ptr] & 0x10000) != 0) {
-                    offset = descriptors[ptr + offset];
-                }
-                ptr += offset;
-                ptr += octant_idx;
+                int next_ptr = ptr + 4 + mask_index;
+                ptr = descriptors[next_ptr];
+                mask_index = octant_idx;
 
                 idx = 0;
                 --scale;
@@ -214,6 +218,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
             scale_exp2 = intBitsToFloat((scale - MAX_STACK_DEPTH + 127) << 23);
 
             ptr = ptr_stack[scale];
+            mask_index = mask_index_stack[scale];
             t_max = t_max_stack[scale];
 
             int shx = floatBitsToInt(pos.x) >> scale;

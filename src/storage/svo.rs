@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, VecDeque};
+use std::hash::Hash;
+use std::rc::Rc;
 
-#[derive(PartialEq, Eq, Hash)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone)]
 struct NodePos {
     x: u8,
     y: u8,
@@ -8,21 +11,35 @@ struct NodePos {
 }
 
 struct TreeNode {
-    nodes: [Option<Box<TreeNode>>; 8],
+    id: u64,
+    nodes: [Option<Rc<RefCell<TreeNode>>>; 8],
     color: Option<i32>,
 }
 
+struct OctantBlock {
+    id: u64,
+    encoded: [u32; 12],
+    children: [Option<Box<OctantBlock>>; 8],
+    unpopulated_pointers: Vec<UnpopulatedPointer>,
+}
+
+struct UnpopulatedPointer {
+    octant_index: i8,
+    octant_block_ref: u64,
+}
+
 impl TreeNode {
-    fn new() -> Box<TreeNode> {
-        Box::new(TreeNode {
+    fn new() -> Rc<RefCell<TreeNode>> {
+        Rc::new(RefCell::new(TreeNode {
+            id: 0,
             nodes: Default::default(),
             color: None,
-        })
+        }))
     }
 
-    fn build_descriptor(&self) -> i32 {
-        if let Some(color) = self.color {
-            return color;
+    fn get_children_mask(&self) -> u16 {
+        if self.color.is_some() {
+            return 0;
         }
 
         let mut child_mask = 0;
@@ -34,7 +51,7 @@ impl TreeNode {
             }
             let child = child.as_ref().unwrap();
             child_mask |= 1 << i;
-            if child.color.is_some() {
+            if child.borrow().color.is_some() {
                 leaf_mask |= 1 << i;
             }
         }
@@ -42,182 +59,54 @@ impl TreeNode {
         (child_mask << 8) | leaf_mask
     }
 
-    fn build(&self) -> Vec<i32> {
-        self.build_with_far_pointer_threshold(0x7fff)
-    }
+    fn build_octant_blocks(&self) -> Box<OctantBlock> {
+        let mut block = Box::new(OctantBlock {
+            id: self.id,
+            encoded: Default::default(),
+            children: Default::default(),
+            unpopulated_pointers: Vec::new(),
+        });
 
-    fn build_with_far_pointer_threshold(&self, far_pointer_threshold: usize) -> Vec<i32> {
-        let mut result = Vec::new();
-        result.push(self.build_descriptor());
-        if ((result[0] >> 8) & 0xff) == 0 {
-            return result;
-        }
+        let mut children_masks = Vec::new();
 
-        result[0] |= 1 << 17;
-
-        struct ChildDesc {
-            index: usize,
-            desc: Vec<i32>,
-            far_ptr_index: Option<usize>,
-        }
-        let mut full_child_descriptors = Vec::new();
-
-        let mut last_child_index = None;
-        for child in self.nodes.iter() {
+        for (i, child) in self.nodes.iter().enumerate() {
             if child.is_none() {
-                result.push(0);
+                children_masks.push(0);
                 continue;
             }
-            let child = child.as_ref().unwrap();
-            result.push(child.build_descriptor());
-            last_child_index = Some(result.len() - 1);
-            if child.color.is_some() {
+
+            let child = child.as_ref().unwrap().borrow();
+            if let Some(color) = child.color {
+                children_masks.push(0);
+                block.encoded[4 + i] = color as u32;
                 continue;
             }
-            full_child_descriptors.push(ChildDesc {
-                index: result.len() - 1,
-                desc: child.build_with_far_pointer_threshold(far_pointer_threshold),
-                far_ptr_index: None,
+
+            children_masks.push(child.get_children_mask());
+            block.children[i] = Some(child.build_octant_blocks());
+            block.unpopulated_pointers.push(UnpopulatedPointer {
+                octant_index: i as i8,
+                octant_block_ref: child.id,
             });
         }
 
-        full_child_descriptors.sort_by(|a, b| {
-            let len_a = a.desc.len();
-            let len_b = b.desc.len();
-            if len_a == len_b {
-                return a.index.partial_cmp(&b.index).unwrap();
+        // encode children masks: combine to u16 masks of two children into one u32 int
+        for i in 0..8 {
+            let mut mask = children_masks[i] as u32;
+            if (i % 2) != 0 {
+                mask <<= 16;
             }
-            len_a.partial_cmp(&len_b).unwrap()
-        });
-
-        let mut space_count = 0;
-        let start_index = result.len();
-        for child in full_child_descriptors.iter_mut() {
-            let offset = (start_index + space_count) - child.index;
-            if offset > far_pointer_threshold {
-                result.push(0);
-                child.far_ptr_index = Some(result.len() - 1);
-                space_count += 1;
-            }
-
-            space_count += child.desc.len() - 1; // remove descriptor i32 from space
+            block.encoded[i / 2] |= mask;
         }
 
-        for child in full_child_descriptors.iter() {
-            match child.far_ptr_index {
-                None => {
-                    let offset = result.len() - child.index;
-                    result[child.index] |= (offset as i32) << 17;
-                }
-                Some(ptr_index) => {
-                    let offset = ptr_index - child.index;
-                    result[child.index] |= 1 << 16;
-                    result[child.index] |= (offset as i32) << 17;
-
-                    let offset = result.len() - child.index;
-                    result[ptr_index] = offset as i32;
-                }
-            }
-            result.extend_from_slice(&child.desc[1..]);
-        }
-
-        result
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::storage::svo::TreeNode;
-
-    #[test]
-    fn build_leaf_node() {
-        let mut node = TreeNode::new();
-        node.color = Some(0xff);
-
-        let desc = node.build();
-        assert_eq!(desc, vec![255]);
-    }
-
-    #[test]
-    fn build_parent_with_only_leaves() {
-        let mut parent = TreeNode::new();
-        parent.nodes[1] = Some(TreeNode::new());
-        parent.nodes[1].as_mut().unwrap().color = Some(0xa);
-        parent.nodes[4] = Some(TreeNode::new());
-        parent.nodes[4].as_mut().unwrap().color = Some(0xb);
-
-        let desc = parent.build();
-        assert_eq!(desc, vec![
-            0b00000000_00000010_00010010_00010010,
-            0xa,
-            0,
-            0,
-            0xb,
-        ]);
-    }
-
-    #[test]
-    fn build_parent_with_children_with_leaves() {
-        let mut child = TreeNode::new();
-        child.nodes[3] = Some(TreeNode::new());
-        child.nodes[3].as_mut().unwrap().color = Some(0xa);
-
-        let mut root = TreeNode::new();
-        root.nodes[1] = Some(child);
-        root.nodes[4] = Some(TreeNode::new());
-        root.nodes[4].as_mut().unwrap().color = Some(0xb);
-
-        let desc = root.build();
-        assert_eq!(desc, vec![
-            0b00000000_00000010_00010010_00010000,
-            0b00000000_00001000_00001000_00001000,
-            0,
-            0,
-            0xb,
-            //
-            0xa,
-        ]);
-    }
-
-    #[test]
-    fn build_parent_with_far_pointers() {
-        let mut child_a_a = TreeNode::new();
-        child_a_a.nodes[3] = Some(TreeNode::new());
-        child_a_a.nodes[3].as_mut().unwrap().color = Some(0xa);
-
-        let mut child_a = TreeNode::new();
-        child_a.nodes[3] = Some(child_a_a);
-
-        let mut child_b = TreeNode::new();
-        child_b.nodes[3] = Some(TreeNode::new());
-        child_b.nodes[3].as_mut().unwrap().color = Some(0xb);
-
-        let mut root = TreeNode::new();
-        root.nodes[1] = Some(child_a);
-        root.nodes[3] = Some(child_b);
-
-        let desc = root.build_with_far_pointer_threshold(1);
-        assert_eq!(desc, vec![
-            0b00000000_00000010_00001010_00000000,
-            0b00000000_00000111_00001000_00000000,
-            0,
-            0b00000000_00000100_00001000_00001000,
-            //
-            5,
-            //
-            0xb,
-            //
-            0b00000000_00000010_00001000_00001000,
-            //
-            0xa,
-        ]);
+        block
     }
 }
 
 pub struct SVO {
     pub max_depth: i32,
     pub max_depth_exp2: f32,
-    pub descriptors: Vec<i32>,
+    pub descriptors: Vec<u32>,
 }
 
 pub fn build_voxel_model(filename: &str) -> SVO {
@@ -229,8 +118,8 @@ pub fn build_voxel_model(filename: &str) -> SVO {
     let mut leaves = HashMap::new();
     for voxel in &model.voxels {
         let pos = NodePos { x: voxel.x, y: voxel.z, z: voxel.y };
-        let mut leaf = TreeNode::new();
-        leaf.color = Some(data.palette[voxel.i as usize] as i32);
+        let leaf = TreeNode::new();
+        leaf.borrow_mut().color = Some(data.palette[voxel.i as usize] as i32);
         leaves.insert(pos, leaf);
     }
 
@@ -247,7 +136,8 @@ pub fn build_voxel_model(filename: &str) -> SVO {
     println!("total of {} bytes = {} MB", slot_counts * 4, slot_counts as f32 * 4.0 / 1000.0 / 1000.0);
 
     println!("building SVO");
-    let descriptors = input[input.keys().next().unwrap()].build();
+    let key = *input.keys().next().unwrap();
+    let descriptors = build_svo_buffer(input.remove(&key).unwrap());
     println!("entries in SVO: {}", descriptors.len());
     println!("SVO size: {} MB", descriptors.len() as f32 * 4.0 / 1000.0 / 1000.0);
 
@@ -259,13 +149,84 @@ pub fn build_voxel_model(filename: &str) -> SVO {
     }
 }
 
-fn merge_tree_nodes(input: HashMap<NodePos, Box<TreeNode>>) -> HashMap<NodePos, Box<TreeNode>> {
+fn merge_tree_nodes(input: HashMap<NodePos, Rc<RefCell<TreeNode>>>) -> HashMap<NodePos, Rc<RefCell<TreeNode>>> {
     let mut output = HashMap::new();
     for (pos, node) in input.into_iter() {
         let parent_pos = NodePos { x: pos.x / 2, y: pos.y / 2, z: pos.z / 2 };
         let parent_node = output.entry(parent_pos).or_insert_with(|| TreeNode::new());
         let idx = (pos.x % 2 + (pos.y % 2) * 2 + (pos.z % 2) * 4) as usize;
-        parent_node.nodes[idx] = Some(node);
+        parent_node.borrow_mut().nodes[idx] = Some(node);
     }
     output
+}
+
+fn build_svo_buffer(root_node: Rc<RefCell<TreeNode>>) -> Vec<u32> {
+    // TODO remove RefCell somehow?
+
+    // assign unique ids to every TreeNode & create a fast lookup map
+    let mut next_id = 1;
+    let mut node_map = HashMap::new();
+
+    let mut nodes_flat = VecDeque::new();
+    nodes_flat.push_back(Rc::clone(&root_node)); // TODO
+
+    while !nodes_flat.is_empty() {
+        let node = nodes_flat.pop_front().unwrap();
+        node.borrow_mut().id = next_id;
+        node_map.insert(next_id, Rc::clone(&node));
+        next_id += 1;
+
+        for child in node.borrow().nodes.iter() {
+            if let Some(child) = child {
+                nodes_flat.push_back(Rc::clone(child));
+            }
+        }
+    }
+
+    // build octant block tree
+    let root_block = root_node.borrow().build_octant_blocks();
+
+    // build result buffer
+    let estimated_size = next_id * 12 + 5; // each block takes up 12 ints
+    let mut svo = Vec::with_capacity(estimated_size as usize);
+    let mut block_ptr_map = HashMap::new();
+
+    // fake root block
+    svo.push(root_node.borrow().get_children_mask() as u32);
+    svo.push(0);
+    svo.push(0);
+    svo.push(0);
+    svo.push(svo.len() as u32 + 1);
+
+    // push all child blocks
+    let mut blocks_flat = VecDeque::new();
+    blocks_flat.push_back(root_block);
+
+    let mut unpopulated_pointers = Vec::new();
+
+    while !blocks_flat.is_empty() {
+        let block = blocks_flat.pop_front().unwrap();
+
+        let current_pointer = svo.len() as u32;
+
+        block_ptr_map.insert(block.id, current_pointer);
+        svo.extend_from_slice(&block.encoded);
+
+        for ptr in block.unpopulated_pointers {
+            let ref_ptr = current_pointer + 4 + ptr.octant_index as u32;
+            unpopulated_pointers.push((ref_ptr, ptr.octant_block_ref));
+        }
+
+        for child in block.children {
+            if let Some(child) = child {
+                blocks_flat.push_back(child);
+            }
+        }
+    }
+
+    for (ptr, block_ref) in unpopulated_pointers {
+        svo[ptr as usize] = block_ptr_map[&block_ref];
+    }
+
+    svo
 }

@@ -45,7 +45,7 @@ macro_rules! gl_check_error {
 }
 
 fn main() {
-    let mut svo = storage::svo::build_voxel_model("assets/ignore/terrain.vox");
+    let mut svo = storage::svo::build_voxel_model("assets/ignore/menger.vox");
 
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.request_grab_cursor(true);
@@ -92,7 +92,7 @@ fn main() {
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
         gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo.descriptors.len() * 4 + 4) as GLsizeiptr as GLsizeiptr, ptr::null(), gl::STATIC_READ);
         gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 0 as GLsizeiptr, 4 as GLsizeiptr, &svo.max_depth_exp2 as *const f32 as *const c_void);
-        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const i32 as *const c_void);
+        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const u32 as *const c_void);
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
@@ -110,6 +110,7 @@ fn main() {
     struct PickerData {
         block_pos: cgmath::Point3<f32>,
         parent_index: i32,
+        mask_index: i32,
         octant_idx: i32,
     }
     let picker_data;
@@ -234,15 +235,22 @@ fn main() {
 
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
                 unsafe {
-                    let parent_index=(*picker_data).parent_index as usize;
+                    let parent_index = (*picker_data).parent_index as usize;
+                    let mask_index = (*picker_data).mask_index as usize;
+                    let octant_idx = (*picker_data).octant_idx as usize;
                     if parent_index != 0 {
-                        let bit = 1 << (*picker_data).octant_idx;
-                        svo.descriptors[parent_index] ^= bit;
-                        svo.descriptors[parent_index] ^= (bit << 8);
+                        let mut bit = 1 << octant_idx;
+                        if (mask_index % 2) != 0{
+                            bit <<= 16;
+                        }
+
+                        let ptr = parent_index + (mask_index / 2);
+                        svo.descriptors[ptr] ^= bit;
+                        svo.descriptors[ptr] ^= bit << 8;
 
                         // TODO use persisted mapping instead
                         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-                        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const i32 as *const c_void);
+                        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const u32 as *const c_void);
                         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
                     }
                 }
