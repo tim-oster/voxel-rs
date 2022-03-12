@@ -45,9 +45,10 @@ macro_rules! gl_check_error {
 }
 
 fn main() {
-    let vox_data = dot_vox::load("assets/ignore/menger.vox").unwrap();
-    let mut world = storage::world::World::new_from_vox(vox_data);
-    let mut svo = world.build_svo();
+    let mut svo = storage::svo::build_voxel_model("assets/ignore/terrain.vox");
+    // let vox_data = dot_vox::load("assets/ignore/menger.vox").unwrap();
+    // let mut world = storage::world::World::new_from_vox(vox_data);
+    // let mut svo = world.build_svo();
 
     // let mut svo = storage::svo::build_voxel_model("assets/ignore/menger.vox");
 
@@ -114,7 +115,6 @@ fn main() {
     struct PickerData {
         block_pos: cgmath::Point3<f32>,
         parent_index: u32,
-        mask_index: u32,
         octant_idx: u32,
     }
     let picker_data;
@@ -240,10 +240,11 @@ fn main() {
             // removing blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
                 unsafe {
-                    if (*picker_data).parent_index != 0 {
-                        let pos = (*picker_data).block_pos;
-                        // TODO
-                        // svo.remove_block(pos.x as i32, pos.y as i32, pos.z as i32);
+                    let parent_index=(*picker_data).parent_index as usize;
+                    if parent_index != 0 {
+                        let bit = 1 << (*picker_data).octant_idx;
+                        svo.descriptors[parent_index] ^= bit;
+                        svo.descriptors[parent_index] ^= (bit << 8);
 
                         // TODO use persisted mapping instead
                         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
