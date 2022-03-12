@@ -45,7 +45,11 @@ macro_rules! gl_check_error {
 }
 
 fn main() {
-    let mut svo = storage::svo::build_voxel_model("assets/ignore/menger.vox");
+    let vox_data = dot_vox::load("assets/ignore/menger.vox").unwrap();
+    let mut world = storage::world::World::new_from_vox(vox_data);
+    let mut svo = world.build_svo();
+
+    // let mut svo = storage::svo::build_voxel_model("assets/ignore/menger.vox");
 
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.request_grab_cursor(true);
@@ -109,9 +113,9 @@ fn main() {
     #[repr(C)]
     struct PickerData {
         block_pos: cgmath::Point3<f32>,
-        parent_index: i32,
-        mask_index: i32,
-        octant_idx: i32,
+        parent_index: u32,
+        mask_index: u32,
+        octant_idx: u32,
     }
     let picker_data;
 
@@ -233,20 +237,13 @@ fn main() {
                 camera.set_forward_from_euler(cam_rot);
             }
 
+            // removing blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
                 unsafe {
-                    let parent_index = (*picker_data).parent_index as usize;
-                    let mask_index = (*picker_data).mask_index as usize;
-                    let octant_idx = (*picker_data).octant_idx as usize;
-                    if parent_index != 0 {
-                        let mut bit = 1 << octant_idx;
-                        if (mask_index % 2) != 0{
-                            bit <<= 16;
-                        }
-
-                        let ptr = parent_index + (mask_index / 2);
-                        svo.descriptors[ptr] ^= bit;
-                        svo.descriptors[ptr] ^= bit << 8;
+                    if (*picker_data).parent_index != 0 {
+                        let pos = (*picker_data).block_pos;
+                        // TODO
+                        // svo.remove_block(pos.x as i32, pos.y as i32, pos.z as i32);
 
                         // TODO use persisted mapping instead
                         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
@@ -254,6 +251,16 @@ fn main() {
                         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
                     }
                 }
+            }
+
+            // block picking
+            if frame.input.is_button_pressed_once(&glfw::MouseButton::Button3) {
+                // TODO
+            }
+
+            // adding blocks
+            if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
+                // TODO
             }
 
             unsafe {
