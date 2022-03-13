@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::storage::chunk;
-use crate::storage::svo::SVO;
+use crate::storage::svo;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 struct ChunkPos {
@@ -61,12 +61,12 @@ impl World {
         world
     }
 
-    pub fn build_svo(&self) -> SVO {
+    pub fn build_svo(&self) -> svo::Svo {
         // TODO
         for (pos, chunk) in self.chunks.iter() {
-            return chunk.build_svo();
+            return svo::Svo::new_from_chunk(chunk);
         }
-        SVO {
+        svo::Svo {
             max_depth: 0,
             max_depth_exp2: 0.0,
             descriptors: vec![],

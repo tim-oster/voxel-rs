@@ -1,271 +1,341 @@
+use std::cell::{Ref, RefCell};
 use std::collections::HashMap;
+use std::rc::Rc;
 
-#[derive(PartialEq, Eq, Hash)]
+use crate::storage::chunk;
+
+#[derive(PartialEq, Eq, Hash, Copy, Clone)]
 struct NodePos {
     x: u8,
     y: u8,
     z: u8,
 }
 
-struct TreeNode {
-    nodes: [Option<Box<TreeNode>>; 8],
-    color: Option<i32>,
+struct Node {
+    child_mask: u8,
+    leaf_mask: u8,
+    children: [Option<Rc<RefCell<Node>>>; 8],
+    block_id: Option<chunk::BlockId>,
 }
 
-impl TreeNode {
-    fn new() -> Box<TreeNode> {
-        Box::new(TreeNode {
-            nodes: Default::default(),
-            color: None,
-        })
-    }
-
-    fn build_descriptor(&self) -> u32 {
-        if let Some(color) = self.color {
-            return color as u32;
-        }
-
-        let mut child_mask = 0;
-        let mut leaf_mask = 0;
-
-        for (i, child) in self.nodes.iter().enumerate() {
-            if child.is_none() {
-                continue;
-            }
-            let child = child.as_ref().unwrap();
-            child_mask |= 1 << i;
-            if child.color.is_some() {
-                leaf_mask |= 1 << i;
-            }
-        }
-
-        (child_mask << 8) | leaf_mask
-    }
-
-    fn build(&self) -> Vec<u32> {
-        self.build_with_far_pointer_threshold(0x7fff)
-    }
-
-    fn build_with_far_pointer_threshold(&self, far_pointer_threshold: usize) -> Vec<u32> {
-        let mut result = Vec::new();
-        result.push(self.build_descriptor());
-        if ((result[0] >> 8) & 0xff) == 0 {
-            return result;
-        }
-
-        result[0] |= 1 << 17;
-
-        struct ChildDesc {
-            index: usize,
-            desc: Vec<u32>,
-            far_ptr_index: Option<usize>,
-        }
-        let mut full_child_descriptors = Vec::new();
-
-        let mut last_child_index = None;
-        for child in self.nodes.iter() {
-            if child.is_none() {
-                result.push(0);
-                continue;
-            }
-            let child = child.as_ref().unwrap();
-            result.push(child.build_descriptor());
-            last_child_index = Some(result.len() - 1);
-            if child.color.is_some() {
-                continue;
-            }
-            full_child_descriptors.push(ChildDesc {
-                index: result.len() - 1,
-                desc: child.build_with_far_pointer_threshold(far_pointer_threshold),
-                far_ptr_index: None,
-            });
-        }
-
-        full_child_descriptors.sort_by(|a, b| {
-            let len_a = a.desc.len();
-            let len_b = b.desc.len();
-            if len_a == len_b {
-                return a.index.partial_cmp(&b.index).unwrap();
-            }
-            len_a.partial_cmp(&len_b).unwrap()
-        });
-
-        let mut space_count = 0;
-        let start_index = result.len();
-        for child in full_child_descriptors.iter_mut() {
-            let offset = (start_index + space_count) - child.index;
-            if offset > far_pointer_threshold {
-                result.push(0);
-                child.far_ptr_index = Some(result.len() - 1);
-                space_count += 1;
-            }
-
-            space_count += child.desc.len() - 1; // remove descriptor i32 from space
-        }
-
-        for child in full_child_descriptors.iter() {
-            match child.far_ptr_index {
-                None => {
-                    let offset = result.len() - child.index;
-                    result[child.index] |= (offset as u32) << 17;
-                }
-                Some(ptr_index) => {
-                    let offset = ptr_index - child.index;
-                    result[child.index] |= 1 << 16;
-                    result[child.index] |= (offset as u32) << 17;
-
-                    let offset = result.len() - child.index;
-                    result[ptr_index] = offset as u32;
-                }
-            }
-            result.extend_from_slice(&child.desc[1..]);
-        }
-
-        result
-    }
-}
-
-// #[cfg(test)]
-// mod tests {
-//     use crate::storage::svo::TreeNode;
-//
-//     #[test]
-//     fn build_leaf_node() {
-//         let mut node = TreeNode::new();
-//         node.color = Some(0xff);
-//
-//         let desc = node.build();
-//         assert_eq!(desc, vec![255]);
-//     }
-//
-//     #[test]
-//     fn build_parent_with_only_leaves() {
-//         let mut parent = TreeNode::new();
-//         parent.nodes[1] = Some(TreeNode::new());
-//         parent.nodes[1].as_mut().unwrap().color = Some(0xa);
-//         parent.nodes[4] = Some(TreeNode::new());
-//         parent.nodes[4].as_mut().unwrap().color = Some(0xb);
-//
-//         let desc = parent.build();
-//         assert_eq!(desc, vec![
-//             0b00000000_00000010_00010010_00010010,
-//             0xa,
-//             0,
-//             0,
-//             0xb,
-//         ]);
-//     }
-//
-//     #[test]
-//     fn build_parent_with_children_with_leaves() {
-//         let mut child = TreeNode::new();
-//         child.nodes[3] = Some(TreeNode::new());
-//         child.nodes[3].as_mut().unwrap().color = Some(0xa);
-//
-//         let mut root = TreeNode::new();
-//         root.nodes[1] = Some(child);
-//         root.nodes[4] = Some(TreeNode::new());
-//         root.nodes[4].as_mut().unwrap().color = Some(0xb);
-//
-//         let desc = root.build();
-//         assert_eq!(desc, vec![
-//             0b00000000_00000010_00010010_00010000,
-//             0b00000000_00001000_00001000_00001000,
-//             0,
-//             0,
-//             0xb,
-//             //
-//             0xa,
-//         ]);
-//     }
-//
-//     #[test]
-//     fn build_parent_with_far_pointers() {
-//         let mut child_a_a = TreeNode::new();
-//         child_a_a.nodes[3] = Some(TreeNode::new());
-//         child_a_a.nodes[3].as_mut().unwrap().color = Some(0xa);
-//
-//         let mut child_a = TreeNode::new();
-//         child_a.nodes[3] = Some(child_a_a);
-//
-//         let mut child_b = TreeNode::new();
-//         child_b.nodes[3] = Some(TreeNode::new());
-//         child_b.nodes[3].as_mut().unwrap().color = Some(0xb);
-//
-//         let mut root = TreeNode::new();
-//         root.nodes[1] = Some(child_a);
-//         root.nodes[3] = Some(child_b);
-//
-//         let desc = root.build_with_far_pointer_threshold(1);
-//         assert_eq!(desc, vec![
-//             0b00000000_00000010_00001010_00000000,
-//             0b00000000_00000111_00001000_00000000,
-//             0,
-//             0b00000000_00000100_00001000_00001000,
-//             //
-//             5,
-//             //
-//             0xb,
-//             //
-//             0b00000000_00000010_00001000_00001000,
-//             //
-//             0xa,
-//         ]);
-//     }
-// }
-
-pub struct SVO {
+pub struct Svo {
     pub max_depth: i32,
     pub max_depth_exp2: f32,
     pub descriptors: Vec<u32>,
 }
 
-pub fn build_voxel_model(filename: &str) -> SVO {
-    println!("loading model");
-    let data = dot_vox::load(filename).unwrap();
-    let model = &data.models[0];
+impl Svo {
+    pub fn new_from_chunk(chunk: &chunk::Chunk) -> Svo {
+        let mut leaf_map = HashMap::new();
 
-    println!("collecting leaves");
-    let mut leaves = HashMap::new();
-    for voxel in &model.voxels {
-        let pos = NodePos { x: voxel.x, y: voxel.z, z: voxel.y };
-        let mut leaf = TreeNode::new();
-        leaf.color = Some(data.palette[voxel.i as usize] as i32);
-        leaves.insert(pos, leaf);
-    }
+        for z in 0..32 {
+            for y in 0..32 {
+                for x in 0..32 {
+                    let block = chunk.blocks[chunk::Chunk::get_block_index(x, y, z)];
+                    if block == chunk::NO_BLOCK {
+                        continue;
+                    }
 
-    let mut slot_counts = model.voxels.len() + leaves.len();
+                    let pos = NodePos { x: x as u8, y: y as u8, z: z as u8 };
+                    leaf_map.insert(pos, Rc::new(RefCell::new(Node {
+                        child_mask: 1,
+                        leaf_mask: 1,
+                        children: Default::default(),
+                        block_id: Some(block),
+                    })));
+                }
+            }
+        }
 
-    println!("assembling tree");
-    let mut input = leaves;
-    while input.len() > 1 {
-        let output = merge_tree_nodes(input);
-        slot_counts += output.len();
-        input = output;
-    }
+        // build an octree by merging child octrees five times into one (log2(32) = 5)
+        let mut merged_map = leaf_map;
+        let mut octant_count = 0;
 
-    println!("total of {} bytes = {} MB", slot_counts * 4, slot_counts as f32 * 4.0 / 1000.0 / 1000.0);
+        let max_depth = 32f32.log2().ceil() as i32;
+        for _ in 0..max_depth {
+            let result = merge_nodes(&merged_map);
+            octant_count += result.len();
+            merged_map = result;
+        }
 
-    println!("building SVO");
-    let descriptors = input[input.keys().next().unwrap()].build();
-    println!("entries in SVO: {}", descriptors.len());
-    println!("SVO size: {} MB", descriptors.len() as f32 * 4.0 / 1000.0 / 1000.0);
+        let root_node = merged_map.get(merged_map.keys().next().unwrap()).unwrap().borrow();
+        let mut descriptors = Vec::with_capacity((4 + 8) * octant_count);
 
-    let max_depth = (model.size.x.max(model.size.y.max(model.size.z)) as f32).log2().ceil() as i32;
-    SVO {
-        max_depth,
-        max_depth_exp2: (-max_depth as f32).exp2(),
-        descriptors,
+        // create fake root node
+        let mut root_mask = 0;
+        for (idx, node) in root_node.children.iter().enumerate() {
+            if node.is_none() {
+                continue;
+            }
+            root_mask |= (1 << idx) << 8;
+
+            let node = node.as_ref().unwrap().borrow();
+            if node.block_id.is_some() {
+                root_mask |= 1 << idx;
+            }
+        }
+        descriptors.push(root_mask);
+        descriptors.push(0);
+        descriptors.push(0);
+        descriptors.push(0);
+        descriptors.push(5); // absolute pointer to where the actual octree starts
+
+        // add actual descriptors from octree
+        let svo_descriptors = build_descriptors(root_node);
+        descriptors.extend(svo_descriptors);
+
+        let max_depth = max_depth + 1; // plus one because of fake root node
+        Svo {
+            max_depth,
+            max_depth_exp2: (-max_depth as f32).exp2(),
+            descriptors,
+        }
     }
 }
 
-fn merge_tree_nodes(input: HashMap<NodePos, Box<TreeNode>>) -> HashMap<NodePos, Box<TreeNode>> {
-    let mut output = HashMap::new();
-    for (pos, node) in input.into_iter() {
-        let parent_pos = NodePos { x: pos.x / 2, y: pos.y / 2, z: pos.z / 2 };
-        let parent_node = output.entry(parent_pos).or_insert_with(|| TreeNode::new());
-        let idx = (pos.x % 2 + (pos.y % 2) * 2 + (pos.z % 2) * 4) as usize;
-        parent_node.nodes[idx] = Some(node);
+fn merge_nodes(nodes: &HashMap<NodePos, Rc<RefCell<Node>>>) -> HashMap<NodePos, Rc<RefCell<Node>>> {
+    let mut merged_map = HashMap::new();
+
+    for (pos, node) in nodes.iter() {
+        let merged_pos = NodePos { x: pos.x / 2, y: pos.y / 2, z: pos.z / 2 };
+        if !merged_map.contains_key(&merged_pos) {
+            merged_map.insert(merged_pos, Rc::new(RefCell::new(Node {
+                child_mask: 0,
+                leaf_mask: 0,
+                children: Default::default(),
+                block_id: None,
+            })));
+        }
+        let merged_node = merged_map.get_mut(&merged_pos).unwrap();
+
+        let idx = (pos.x % 2) + (pos.y % 2) * 2 + (pos.z % 2) * 4;
+        merged_node.borrow_mut().child_mask |= 1 << idx;
+        if node.borrow().block_id.is_some() {
+            merged_node.borrow_mut().leaf_mask |= 1 << idx;
+        }
+        merged_node.borrow_mut().children[idx as usize] = Some(Rc::clone(node));
     }
-    output
+
+    merged_map
+}
+
+fn build_descriptors(node: Ref<Node>) -> Vec<u32> {
+    let mut svo = Vec::<u32>::with_capacity(12);
+    svo.extend(std::iter::repeat(0).take(12));
+
+    for (idx, node) in node.children.iter().enumerate() {
+        if node.is_none() {
+            continue;
+        }
+
+        let node = node.as_ref().unwrap().borrow();
+
+        if let Some(block) = node.block_id {
+            svo[4 + idx] = block;
+        } else {
+            let mut mask = ((node.child_mask as u32) << 8) | node.leaf_mask as u32;
+            if (idx % 2) != 0 {
+                mask <<= 16;
+            }
+            svo[(idx / 2) as usize] |= mask;
+
+            let child_svo = build_descriptors(node);
+            svo[4 + idx] = svo.len() as u32 - 4 - idx as u32;
+            svo[4 + idx] |= 1 << 31; // flag as relative pointer
+            svo.extend(child_svo);
+        }
+    }
+
+    svo
+}
+
+#[cfg(test)]
+mod tests_svo {
+    #[test]
+    fn chunk_build_svo_one_sub_tree() {
+        let mut chunk = super::Chunk::new();
+        chunk.set_block(0, 0, 0, 100);
+        chunk.set_block(1, 1, 1, 200);
+
+        let svo = chunk.build_svo();
+        assert_eq!(svo.descriptors, vec![
+            // fake root header
+            1 << 8,
+            0,
+            0,
+            0,
+            // fake root body
+            5,
+            // first octant header
+            1 << 8,
+            0,
+            0,
+            0,
+            // first octant body
+            (1 << 31) | 8, 0, 0, 0,
+            0, 0, 0, 0,
+            // second octant header
+            1 << 8,
+            0,
+            0,
+            0,
+            // second octant body
+            (1 << 31) | 8, 0, 0, 0,
+            0, 0, 0, 0,
+            // third octant header
+            1 << 8,
+            0,
+            0,
+            0,
+            // third octant body
+            (1 << 31) | 8, 0, 0, 0,
+            0, 0, 0, 0,
+            // fourth octant header
+            ((1 | 128) << 8) | (1 | 128),
+            0,
+            0,
+            0,
+            // fourth octant body
+            (1 << 31) | 8, 0, 0, 0,
+            0, 0, 0, 0,
+            // fifth octant header
+            0,
+            0,
+            0,
+            0,
+            // fifth octant body
+            100, 0, 0, 0,
+            0, 0, 0, 200,
+        ]);
+    }
+
+    #[test]
+    fn chunk_build_svo_multiple_sub_trees() {
+        let mut chunk = super::Chunk::new();
+        chunk.set_block(31, 0, 0, 1);
+        chunk.set_block(0, 31, 0, 2);
+        chunk.set_block(0, 0, 31, 3);
+
+        let svo = chunk.build_svo();
+        assert_eq!(svo.descriptors, vec![
+            // fake root header
+            (2 | 4 | 16) << 8,
+            0,
+            0,
+            0,
+            // fake root body
+            5,
+
+            // core octant header
+            (2 << 8) << 16,
+            4 << 8,
+            16 << 8,
+            0,
+            // core octant body
+            0, (1 << 31) | 7, (1 << 31) | (6 + 4 * 12), 0,
+            (1 << 31) | (4 + 8 * 12), 0, 0, 0,
+
+            // subtree for (1,0,0)
+            // header 1
+            2 << 8 << 16,
+            0,
+            0,
+            0,
+            // body 1
+            0, (1 << 31) | 7, 0, 0,
+            0, 0, 0, 0,
+            // header 2
+            2 << 8 << 16,
+            0,
+            0,
+            0,
+            // body 2
+            0, (1 << 31) | 7, 0, 0,
+            0, 0, 0, 0,
+            // header 3
+            ((2 << 8) | 2) << 16,
+            0,
+            0,
+            0,
+            // body 3
+            0, (1 << 31) | 7, 0, 0,
+            0, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 1, 0, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,1,0)
+            // header 1
+            0,
+            4 << 8,
+            0,
+            0,
+            // body 1
+            0, 0, (1 << 31) | 6, 0,
+            0, 0, 0, 0,
+            // header 2
+            0,
+            4 << 8,
+            0,
+            0,
+            // body 2
+            0, 0, (1 << 31) | 6, 0,
+            0, 0, 0, 0,
+            // header 3
+            0,
+            4 << 8 | 4,
+            0,
+            0,
+            // body 3
+            0, 0, (1 << 31) | 6, 0,
+            0, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 2, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,0,1)
+            // header 1
+            0,
+            0,
+            16 << 8,
+            0,
+            // body 1
+            0, 0, 0, 0,
+            (1 << 31) | 4, 0, 0, 0,
+            // header 2
+            0,
+            0,
+            16 << 8,
+            0,
+            // body 2
+            0, 0, 0, 0,
+            (1 << 31) | 4, 0, 0, 0,
+            // header 3
+            0,
+            0,
+            16 << 8 | 16,
+            0,
+            // body 3
+            0, 0, 0, 0,
+            (1 << 31) | 4, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 0, 0,
+            3, 0, 0, 0,
+        ]);
+    }
 }
