@@ -45,12 +45,10 @@ macro_rules! gl_check_error {
 }
 
 fn main() {
-    let mut svo = storage::svo::build_voxel_model("assets/ignore/terrain.vox");
-    // let vox_data = dot_vox::load("assets/ignore/menger.vox").unwrap();
-    // let mut world = storage::world::World::new_from_vox(vox_data);
-    // let mut svo = world.build_svo();
-
-    // let mut svo = storage::svo::build_voxel_model("assets/ignore/menger.vox");
+    // let mut svo = storage::svo::build_voxel_model("assets/ignore/terrain.vox");
+    let vox_data = dot_vox::load("assets/ignore/simple.vox").unwrap();
+    let mut world = storage::world::World::new_from_vox(vox_data);
+    let mut svo = world.build_svo();
 
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.request_grab_cursor(true);
@@ -240,7 +238,7 @@ fn main() {
             // removing blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
                 unsafe {
-                    let parent_index=(*picker_data).parent_index as usize;
+                    let parent_index = (*picker_data).parent_index as usize;
                     if parent_index != 0 {
                         let bit = 1 << (*picker_data).octant_idx;
                         svo.descriptors[parent_index] ^= bit;

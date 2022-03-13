@@ -31,12 +31,13 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
     const int MAX_STACK_DEPTH = 23;
     int[MAX_STACK_DEPTH] ptr_stack;
+    int[MAX_STACK_DEPTH] parent_octant_idx_stack;
     float[MAX_STACK_DEPTH] t_max_stack;
-    int stack_ptr = 0;
 
     const float epsilon = exp2(-MAX_STACK_DEPTH);
 
     int ptr = 0;
+    int parent_octant_idx = 0;
     int scale = MAX_STACK_DEPTH - 1;
     float scale_exp2 = 0.5;
 
@@ -88,9 +89,15 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
         int octant_idx = idx ^ octant_mask;
         int bit = 1 << octant_idx;
-        int child_mask = (descriptors[ptr] >> 8) & 0xff;
-        bool is_child = (child_mask & bit) != 0;
-        bool is_leaf = (descriptors[ptr] & bit) != 0;
+
+        int descriptor = descriptors[ptr + int(parent_octant_idx / 2)];
+        if ((parent_octant_idx % 2) != 0) {
+            descriptor >>= 16;
+        }
+        descriptor &= 0xffff;
+
+        bool is_child = (descriptor & (bit << 8)) != 0;
+        bool is_leaf = (descriptor & bit) != 0;
 
         if (is_child && t_min <= t_max) {
             if (is_leaf) {
@@ -99,13 +106,12 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
                 res.parent_index = ptr;
                 res.octant_idx = octant_idx;
 
-                int offset = int(uint(descriptors[ptr]) >> 17);
-                int leaf_mask = descriptors[ptr] & 0xff;
-                if ((descriptors[ptr] & 0x10000) != 0) {
-                    offset = descriptors[ptr + offset];
+                int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
+                if ((next_ptr & (1 << 31)) != 0) {
+                    // use as relative offset if relative bit is set
+                    next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
                 }
-                ptr += offset;
-                ptr += octant_idx;
+                ptr = next_ptr + 4 + octant_idx;
 
                 res.t = t_min / octree_scale;
 
@@ -155,6 +161,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
                 float((descriptors[ptr] >> 8) & 0xff) / 255.0,
                 float((descriptors[ptr] >> 16) & 0xff) / 255.0
                 );
+                res.color = vec3(1);
 
                 return;
             }
@@ -171,24 +178,18 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
                 // TODO this is guarded in the original
                 ptr_stack[scale] = ptr;
+                parent_octant_idx_stack[scale] = parent_octant_idx;
                 t_max_stack[scale] = t_max;
 
                 // TODO convert everything to uint?
-                int offset = int(uint(descriptors[ptr]) >> 17);
-                if ((descriptors[ptr] & 0x10000) != 0) {
-                    offset = descriptors[ptr + offset];
+                int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
+                if ((next_ptr & (1 << 31)) != 0) {
+                    // use as relative offset if relative bit is set
+                    next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
                 }
-                ptr += offset;
-                ptr += octant_idx;
+                ptr = next_ptr;
 
-                // TODO remove
-//                int next_ptr = descriptors[ptr + 4 + mask_index];
-//                if ((next_ptr >> 31) != 0) {
-//                    // use as relative offset if relative bit is set
-//                    next_ptr = ptr + (next_ptr & 0x7fffffff);
-//                }
-//                ptr = next_ptr;
-
+                parent_octant_idx = octant_idx;
                 idx = 0;
                 --scale;
                 scale_exp2 = half_scale;
@@ -213,7 +214,6 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
         if ((idx & step_mask) != 0) {
             // POP
-
             uint differing_bits = 0;
             if ((step_mask & 1) != 0) differing_bits |= floatBitsToInt(pos.x) ^ floatBitsToInt(pos.x + scale_exp2);
             if ((step_mask & 2) != 0) differing_bits |= floatBitsToInt(pos.y) ^ floatBitsToInt(pos.y + scale_exp2);
@@ -222,6 +222,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
             scale_exp2 = intBitsToFloat((scale - MAX_STACK_DEPTH + 127) << 23);
 
             ptr = ptr_stack[scale];
+            parent_octant_idx = parent_octant_idx_stack[scale]; // TODO can be recalculated using index?
             t_max = t_max_stack[scale];
 
             int shx = floatBitsToInt(pos.x) >> scale;
