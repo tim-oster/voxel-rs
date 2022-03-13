@@ -45,10 +45,10 @@ macro_rules! gl_check_error {
 }
 
 fn main() {
-    // let mut svo = storage::svo::build_voxel_model("assets/ignore/terrain.vox");
     let vox_data = dot_vox::load("assets/ignore/simple.vox").unwrap();
-    let mut world = storage::world::World::new_from_vox(vox_data);
-    let mut svo = world.build_svo();
+    let world = storage::world::World::new_from_vox(vox_data);
+    let svo_grid = world.build_svo_grid();
+    let svo = svo_grid.build_svo();
 
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.request_grab_cursor(true);
@@ -89,12 +89,13 @@ fn main() {
     let mut use_mouse_input = true;
 
     let mut world_ssbo = 0;
+    let max_depth_exp2 = (-svo.depth as f32).exp2();
 
     unsafe {
         gl::GenBuffers(1, &mut world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
         gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo.descriptors.len() * 4 + 4) as GLsizeiptr as GLsizeiptr, ptr::null(), gl::STATIC_READ);
-        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 0 as GLsizeiptr, 4 as GLsizeiptr, &svo.max_depth_exp2 as *const f32 as *const c_void);
+        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 0 as GLsizeiptr, 4 as GLsizeiptr, &max_depth_exp2 as *const f32 as *const c_void);
         gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const u32 as *const c_void);
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
@@ -237,19 +238,20 @@ fn main() {
 
             // removing blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
-                unsafe {
-                    let parent_index = (*picker_data).parent_index as usize;
-                    if parent_index != 0 {
-                        let bit = 1 << (*picker_data).octant_idx;
-                        svo.descriptors[parent_index] ^= bit;
-                        svo.descriptors[parent_index] ^= (bit << 8);
-
-                        // TODO use persisted mapping instead
-                        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-                        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const u32 as *const c_void);
-                        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
-                    }
-                }
+                // TODO
+                // unsafe {
+                //     let parent_index = (*picker_data).parent_index as usize;
+                //     if parent_index != 0 {
+                //         let bit = 1 << (*picker_data).octant_idx;
+                //         svo.descriptors[parent_index] ^= bit;
+                //         svo.descriptors[parent_index] ^= (bit << 8);
+                //
+                //         // TODO use persisted mapping instead
+                //         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
+                //         gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const u32 as *const c_void);
+                //         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
+                //     }
+                // }
             }
 
             // block picking

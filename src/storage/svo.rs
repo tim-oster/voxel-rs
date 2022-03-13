@@ -19,8 +19,8 @@ struct Node {
 }
 
 pub struct Svo {
-    pub max_depth: i32,
-    pub max_depth_exp2: f32,
+    pub header_mask: u16,
+    pub depth: i32,
     pub descriptors: Vec<u32>,
 }
 
@@ -59,7 +59,7 @@ impl Svo {
         }
 
         let root_node = merged_map.get(merged_map.keys().next().unwrap()).unwrap().borrow();
-        let mut descriptors = Vec::with_capacity((4 + 8) * octant_count);
+        // let mut descriptors = Vec::with_capacity((4 + 8) * octant_count);
 
         // create fake root node
         let mut root_mask = 0;
@@ -74,22 +74,18 @@ impl Svo {
                 root_mask |= 1 << idx;
             }
         }
-        descriptors.push(root_mask);
-        descriptors.push(0);
-        descriptors.push(0);
-        descriptors.push(0);
-        descriptors.push(5); // absolute pointer to where the actual octree starts
+        // descriptors.push(root_mask);
+        // descriptors.push(0);
+        // descriptors.push(0);
+        // descriptors.push(0);
+        // descriptors.push(5); // absolute pointer to where the actual octree starts
 
         // add actual descriptors from octree
-        let svo_descriptors = build_descriptors(root_node);
-        descriptors.extend(svo_descriptors);
+        let descriptors = build_descriptors(root_node);
+        // descriptors.extend(svo_descriptors);
 
-        let max_depth = max_depth + 1; // plus one because of fake root node
-        Svo {
-            max_depth,
-            max_depth_exp2: (-max_depth as f32).exp2(),
-            descriptors,
-        }
+        let depth = max_depth + 1; // plus one because of fake root node
+        Svo { header_mask: root_mask, depth, descriptors }
     }
 }
 
@@ -151,13 +147,15 @@ fn build_descriptors(node: Ref<Node>) -> Vec<u32> {
 
 #[cfg(test)]
 mod tests_svo {
+    use super::chunk::Chunk;
+
     #[test]
     fn chunk_build_svo_one_sub_tree() {
-        let mut chunk = super::Chunk::new();
+        let mut chunk = Chunk::new();
         chunk.set_block(0, 0, 0, 100);
         chunk.set_block(1, 1, 1, 200);
 
-        let svo = chunk.build_svo();
+        let svo = super::Svo::new_from_chunk(&chunk);
         assert_eq!(svo.descriptors, vec![
             // fake root header
             1 << 8,
@@ -211,12 +209,12 @@ mod tests_svo {
 
     #[test]
     fn chunk_build_svo_multiple_sub_trees() {
-        let mut chunk = super::Chunk::new();
+        let mut chunk = Chunk::new();
         chunk.set_block(31, 0, 0, 1);
         chunk.set_block(0, 31, 0, 2);
         chunk.set_block(0, 0, 31, 3);
 
-        let svo = chunk.build_svo();
+        let svo = super::Svo::new_from_chunk(&chunk);
         assert_eq!(svo.descriptors, vec![
             // fake root header
             (2 | 4 | 16) << 8,

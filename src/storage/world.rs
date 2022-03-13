@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
 use crate::storage::chunk;
-use crate::storage::svo;
+use crate::storage::svo::Svo;
+use crate::storage::svo_grid::SvoGrid;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 struct ChunkPos {
@@ -56,24 +57,20 @@ impl World {
         let model = &data.models[0];
         let mut world = World::new();
         for v in &model.voxels {
-            world.set_block(v.x as i32, v.y as i32, v.z as i32, data.palette[v.i as usize]);
+            world.set_block(v.x as i32, v.z as i32, v.y as i32, data.palette[v.i as usize]);
         }
         world
     }
 
-    pub fn build_svo(&self) -> svo::Svo {
-        // TODO
+    pub fn build_svo_grid(&self) -> SvoGrid {
+        let mut grid = SvoGrid::new();
         for (pos, chunk) in self.chunks.iter() {
-            return svo::Svo::new_from_chunk(chunk);
+            let svo = Svo::new_from_chunk(chunk);
+            grid.add_svo(pos.x, pos.y, pos.z, svo);
         }
-        svo::Svo {
-            max_depth: 0,
-            max_depth_exp2: 0.0,
-            descriptors: vec![],
-        }
+        grid
     }
 }
-
 
 #[cfg(test)]
 mod tests {

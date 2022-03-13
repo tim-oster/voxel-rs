@@ -161,7 +161,6 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
                 float((descriptors[ptr] >> 8) & 0xff) / 255.0,
                 float((descriptors[ptr] >> 16) & 0xff) / 255.0
                 );
-                res.color = vec3(1);
 
                 return;
             }
