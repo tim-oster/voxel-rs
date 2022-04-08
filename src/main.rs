@@ -13,6 +13,8 @@ use gl::types::*;
 use image::GenericImageView;
 use imgui::{Condition, Window};
 
+use crate::storage::chunk;
+
 mod graphics;
 mod core;
 mod storage;
@@ -45,8 +47,8 @@ macro_rules! gl_check_error {
 }
 
 fn main() {
-    let vox_data = dot_vox::load("assets/ignore/simple.vox").unwrap();
-    let world = storage::world::World::new_from_vox(vox_data);
+    let vox_data = dot_vox::load("assets/ignore/terrain.vox").unwrap();
+    let mut world = storage::world::World::new_from_vox(vox_data);
     let svo_grid = world.build_svo_grid();
     let svo = svo_grid.build_svo();
 
@@ -238,6 +240,12 @@ fn main() {
 
             // removing blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
+                let mut block_pos = unsafe { (*picker_data).block_pos };
+                if block_pos.x != f32::MAX {
+                    world.set_block(block_pos.x as i32, block_pos.x as i32, block_pos.x as i32, chunk::NO_BLOCK);
+                    // TODO partial rebuild
+                }
+
                 // TODO
                 // unsafe {
                 //     let parent_index = (*picker_data).parent_index as usize;
