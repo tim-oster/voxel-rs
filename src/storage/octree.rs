@@ -123,11 +123,6 @@ impl<T> Octree<T> {
         }
     }
 
-    /// Goes through the whole tree and removes all children with no leaf nodes at any depth.
-    pub fn compact(&mut self) {
-        // TODO
-    }
-
     fn expand(&mut self, by: u32) {
         for _ in 0..by {
             let new_root_id = self.new_octant(None);
