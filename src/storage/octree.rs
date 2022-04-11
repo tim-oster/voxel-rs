@@ -5,7 +5,7 @@ use cgmath::num_traits::Pow;
 type OctantId = usize;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-struct Position(u32, u32, u32);
+pub struct Position(u32, u32, u32);
 
 impl Position {
     #[inline]
@@ -20,22 +20,26 @@ impl Position {
 }
 
 #[derive(Debug, PartialEq)]
-struct Octree<T> {
+pub struct Octree<T> {
     octants: Vec<Octant<T>>,
+    free_list: Vec<OctantId>,
     root: Option<OctantId>,
     depth: u32,
 }
 
 impl<T> Octree<T> {
-    fn new() -> Octree<T> {
-        Octree { octants: Vec::new(), root: None, depth: 0 }
+    pub fn new() -> Octree<T> {
+        Octree { octants: Vec::new(), free_list: Vec::new(), root: None, depth: 0 }
     }
 
-    fn with_capacity(capacity: usize) -> Octree<T> {
-        Octree { octants: Vec::with_capacity(capacity), root: None, depth: 0 }
+    pub fn with_capacity(capacity: usize) -> Octree<T> {
+        Octree { octants: Vec::with_capacity(capacity), free_list: Vec::new(), root: None, depth: 0 }
     }
 
-    fn add_leaf(&mut self, pos: Position, leaf: T) {
+    /// Adds the given leaf value at the given position. If the tree is not big enough yet,
+    /// it expands it until it can successfully insert. Children along the path are overridden,
+    /// if any exist.
+    pub fn add_leaf(&mut self, pos: Position, leaf: T) {
         let current_depth = self.depth;
         let required_depth = pos.required_depth();
         let difference = required_depth as i32 - current_depth as i32;
@@ -87,7 +91,40 @@ impl<T> Octree<T> {
         }
     }
 
-    fn remove_leaf(&mut self, pos: Position) {
+    /// Removes the leaf at the given position if it exists. Empty children are *not* removed from
+    /// the tree. Look at [`Octree::compact`] for removing empty children.
+    pub fn remove_leaf(&mut self, pos: Position) {
+        let mut it = self.root.unwrap();
+        let mut pos = pos;
+        let mut size = 2f32.pow(self.depth as i32) as u32;
+
+        while size > 0 {
+            size /= 2;
+
+            let idx = Position(pos.0 / size, pos.1 / size, pos.2 / size).idx();
+
+            pos.0 %= size;
+            pos.1 %= size;
+            pos.2 %= size;
+
+            let child = self.octants[it].children[idx];
+            if child.is_none() {
+                break;
+            }
+
+            let parent = it;
+            it = child.unwrap();
+
+            if size == 1 {
+                self.octants[parent].remove_child(idx);
+                self.delete_octant(it);
+                break;
+            }
+        }
+    }
+
+    /// Goes through the whole tree and removes all children with no leaf nodes at any depth.
+    pub fn compact(&mut self) {
         // TODO
     }
 
@@ -114,12 +151,19 @@ impl<T> Octree<T> {
             content: None,
         };
 
+        if let Some(free_id) = self.free_list.pop() {
+            self.octants[free_id] = octant;
+            return free_id;
+        }
+
         let id = self.octants.len() as OctantId;
         self.octants.push(octant);
         id
     }
 
-    // TODO how efficiently remove empty octants? .compact() method?
+    fn delete_octant(&mut self, id: OctantId) {
+        self.free_list.push(id);
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -137,8 +181,14 @@ impl<T> Octant<T> {
         self.children[idx] = Some(child);
         self.children_count += 1;
     }
+
+    fn remove_child(&mut self, idx: usize) {
+        self.children[idx] = None;
+        self.children_count -= 1;
+    }
 }
 
+//noinspection DuplicatedCode
 #[cfg(test)]
 mod tests {
     use crate::storage::octree::{Octant, Octree, Position};
@@ -176,6 +226,7 @@ mod tests {
                     content: Some(20),
                 },
             ],
+            free_list: vec![],
             root: Some(1),
             depth: 2,
         });
@@ -256,10 +307,121 @@ mod tests {
                 },
                 // third node end
             ],
+            free_list: vec![],
             root: Some(2),
             depth: 3,
         });
     }
 
-    // TODO test edge cases: leaf override & replacement
+    #[test]
+    fn octree_leaf_replacement() {
+        let mut octree = Octree {
+            octants: vec![
+                Octant {
+                    parent: None,
+                    children: [Some(1), None, None, None, None, None, None, None],
+                    children_count: 1,
+                    content: None,
+                },
+                Octant {
+                    parent: Some(0),
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: Some(10),
+                },
+            ],
+            free_list: vec![],
+            root: Some(0),
+            depth: 1,
+        };
+
+        octree.add_leaf(Position(0, 0, 0), 20);
+
+        assert_eq!(octree, Octree {
+            octants: vec![
+                Octant {
+                    parent: None,
+                    children: [Some(1), None, None, None, None, None, None, None],
+                    children_count: 1,
+                    content: None,
+                },
+                Octant {
+                    parent: Some(0),
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: Some(20),
+                },
+            ],
+            free_list: vec![],
+            root: Some(0),
+            depth: 1,
+        });
+    }
+
+    #[test]
+    fn octree_remove_and_add_leaf() {
+        let mut octree = Octree {
+            octants: vec![
+                Octant {
+                    parent: None,
+                    children: [Some(1), None, None, None, None, None, None, None],
+                    children_count: 1,
+                    content: None,
+                },
+                Octant {
+                    parent: Some(0),
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: Some(10),
+                },
+            ],
+            free_list: vec![],
+            root: Some(0),
+            depth: 1,
+        };
+
+        octree.remove_leaf(Position(0, 0, 0));
+
+        assert_eq!(octree, Octree {
+            octants: vec![
+                Octant {
+                    parent: None,
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: None,
+                },
+                Octant {
+                    parent: Some(0),
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: Some(10),
+                },
+            ],
+            free_list: vec![1],
+            root: Some(0),
+            depth: 1,
+        });
+
+        octree.add_leaf(Position(0, 0, 0), 20);
+
+        assert_eq!(octree, Octree {
+            octants: vec![
+                Octant {
+                    parent: None,
+                    children: [Some(1), None, None, None, None, None, None, None],
+                    children_count: 1,
+                    content: None,
+                },
+                Octant {
+                    parent: Some(0),
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: Some(20),
+                },
+            ],
+            free_list: vec![],
+            root: Some(0),
+            depth: 1,
+        });
+    }
 }
