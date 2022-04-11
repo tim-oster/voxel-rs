@@ -1,4 +1,3 @@
-use std::borrow::{Borrow, BorrowMut};
 use std::cmp::max;
 
 use cgmath::num_traits::Pow;
@@ -24,33 +23,29 @@ impl Position {
 struct Octree<T> {
     octants: Vec<Octant<T>>,
     root: Option<OctantId>,
+    depth: u32,
 }
 
 impl<T> Octree<T> {
     fn new() -> Octree<T> {
-        Octree { octants: Vec::new(), root: None }
+        Octree { octants: Vec::new(), root: None, depth: 0 }
     }
 
     fn with_capacity(capacity: usize) -> Octree<T> {
-        Octree { octants: Vec::with_capacity(capacity), root: None }
-    }
-
-    fn depth(&self) -> u32 {
-        if self.root.is_none() {
-            return 0;
-        }
-        self.octants[self.root.unwrap()].size_power
+        Octree { octants: Vec::with_capacity(capacity), root: None, depth: 0 }
     }
 
     fn add_leaf(&mut self, pos: Position, leaf: T) {
-        let current_depth = self.depth();
+        let current_depth = self.depth;
         let required_depth = pos.required_depth();
         let difference = required_depth as i32 - current_depth as i32;
-        if difference > 0 { self.expand(difference as u32); }
+        if difference > 0 {
+            self.expand(difference as u32);
+        }
 
         let mut it = self.root.unwrap();
         let mut pos = pos;
-        let mut size = self.octants[it].size();
+        let mut size = 2f32.pow(self.depth as i32) as u32;
 
         while size > 0 {
             size /= 2;
@@ -67,22 +62,12 @@ impl<T> Octree<T> {
                 // if the child is a leaf node, convert it to a normal child node and remove its content
                 let current = &self.octants[child];
                 if current.content.is_some() {
-                    let mut parent_power = 0;
-
-                    if let Some(parent) = current.parent {
-                        parent_power = self.octants[parent].size_power;
-                    }
-
-                    let current = &mut self.octants[child];
-                    current.size_power = parent_power + 1;
-                    current.content = None;
+                    self.octants[child].content = None;
                 }
 
                 // if this is the end of the tree, insert the content
                 if size == 1 {
-                    let current = &mut self.octants[child];
-                    current.size_power = 0;
-                    current.content = Some(leaf);
+                    self.octants[child].content = Some(leaf);
                     break;
                 }
             } else {
@@ -98,17 +83,6 @@ impl<T> Octree<T> {
                     current.content = Some(leaf);
                     break;
                 }
-
-                let mut size_counter = 1;
-                let mut it = Some(next_id);
-                while it.is_some() {
-                    let current = &mut self.octants[it.unwrap()];
-                    if current.size_power < size_counter {
-                        current.size_power = size_counter;
-                    }
-                    size_counter += 1;
-                    it = current.parent;
-                }
             }
         }
     }
@@ -122,25 +96,19 @@ impl<T> Octree<T> {
             let new_root_id = self.new_octant(None);
 
             if let Some(root_id) = self.root {
-                let mut root = &mut self.octants[root_id];
-                let size_power = root.size_power;
-                root.parent = Some(new_root_id);
-
-                let mut new_root = &mut self.octants[new_root_id];
-                new_root.add_child(0, root_id);
-                new_root.size_power = size_power + 1;
-            } else {
-                self.octants[new_root_id].size_power = 1;
+                self.octants[root_id].parent = Some(new_root_id);
+                self.octants[new_root_id].add_child(0, root_id);
             }
 
             self.root = Some(new_root_id);
         }
+
+        self.depth += by
     }
 
     fn new_octant(&mut self, parent: Option<OctantId>) -> OctantId {
         let octant = Octant {
             parent,
-            size_power: 0,
             children: Default::default(),
             children_count: 0,
             content: None,
@@ -157,7 +125,6 @@ impl<T> Octree<T> {
 #[derive(Debug, PartialEq)]
 struct Octant<T> {
     parent: Option<OctantId>,
-    size_power: u32,
 
     children: [Option<OctantId>; 8],
     children_count: u8,
@@ -166,10 +133,6 @@ struct Octant<T> {
 }
 
 impl<T> Octant<T> {
-    fn size(&self) -> u32 {
-        2f32.pow(self.size_power as i32) as u32
-    }
-
     fn add_child(&mut self, idx: usize, child: OctantId) {
         self.children[idx] = Some(child);
         self.children_count += 1;
@@ -190,34 +153,31 @@ mod tests {
             octants: vec![
                 Octant {
                     parent: Some(1),
-                    size_power: 1,
                     children: [None, None, None, None, None, None, None, None],
                     children_count: 0,
                     content: None,
                 },
                 Octant {
                     parent: None,
-                    size_power: 2,
                     children: [Some(0), None, None, None, Some(2), None, None, None],
                     children_count: 2,
                     content: None,
                 },
                 Octant {
                     parent: Some(1),
-                    size_power: 1,
                     children: [None, None, None, None, None, None, None, Some(3)],
                     children_count: 1,
                     content: None,
                 },
                 Octant {
                     parent: Some(2),
-                    size_power: 0,
                     children: [None, None, None, None, None, None, None, None],
                     children_count: 0,
                     content: Some(20),
                 },
             ],
             root: Some(1),
+            depth: 2,
         });
     }
 
@@ -233,21 +193,18 @@ mod tests {
             octants: vec![
                 Octant {
                     parent: Some(1),
-                    size_power: 1,
                     children: [Some(6), None, None, None, None, None, None, None],
                     children_count: 1,
                     content: None,
                 },
                 Octant {
                     parent: Some(2),
-                    size_power: 2,
                     children: [Some(0), None, None, None, None, None, None, None],
                     children_count: 1,
                     content: None,
                 },
                 Octant { // root node
                     parent: None,
-                    size_power: 3,
                     children: [Some(1), None, None, None, Some(7), None, None, Some(3)],
                     children_count: 3,
                     content: None,
@@ -255,21 +212,18 @@ mod tests {
                 // first node start
                 Octant {
                     parent: Some(2),
-                    size_power: 2,
                     children: [None, None, None, Some(4), None, None, None, None],
                     children_count: 1,
                     content: None,
                 },
                 Octant {
                     parent: Some(3),
-                    size_power: 1,
                     children: [None, None, None, None, None, None, Some(5), None],
                     children_count: 1,
                     content: None,
                 },
                 Octant {
                     parent: Some(4),
-                    size_power: 0,
                     children: [None, None, None, None, None, None, None, None],
                     children_count: 0,
                     content: Some(10),
@@ -277,7 +231,6 @@ mod tests {
                 // first node end
                 Octant {
                     parent: Some(0),
-                    size_power: 0,
                     children: [None, None, None, None, None, None, None, None],
                     children_count: 0,
                     content: Some(20),
@@ -285,21 +238,18 @@ mod tests {
                 // third node start
                 Octant {
                     parent: Some(2),
-                    size_power: 2,
                     children: [None, None, None, None, Some(8), None, None, None],
                     children_count: 1,
                     content: None,
                 },
                 Octant {
                     parent: Some(7),
-                    size_power: 1,
                     children: [None, Some(9), None, None, None, None, None, None],
                     children_count: 1,
                     content: None,
                 },
                 Octant {
                     parent: Some(8),
-                    size_power: 0,
                     children: [None, None, None, None, None, None, None, None],
                     children_count: 0,
                     content: Some(30),
@@ -307,6 +257,7 @@ mod tests {
                 // third node end
             ],
             root: Some(2),
+            depth: 3,
         });
     }
 
