@@ -35,7 +35,7 @@ impl World {
     pub fn get_block(&self, x: i32, y: i32, z: i32) -> chunk::BlockId {
         let pos = ChunkPos::from_block_pos(x, y, z);
         if let Some(chunk) = self.chunks.get(&pos) {
-            return chunk.get_block(x & 31, y & 31, z & 31);
+            return chunk.get_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32);
         }
         chunk::NO_BLOCK
     }
@@ -47,7 +47,7 @@ impl World {
             self.chunks.insert(pos, chunk::Chunk::new());
             chunk = self.chunks.get_mut(&pos);
         }
-        chunk.unwrap().set_block(x & 31, y & 31, z & 31, block);
+        chunk.unwrap().set_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32, block);
     }
 }
 

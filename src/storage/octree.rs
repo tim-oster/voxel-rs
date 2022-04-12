@@ -2,10 +2,12 @@ use std::cmp::max;
 
 use cgmath::num_traits::Pow;
 
+use crate::storage;
+
 type OctantId = usize;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct Position(u32, u32, u32);
+pub struct Position(pub u32, pub u32, pub u32);
 
 impl Position {
     #[inline]
@@ -21,10 +23,10 @@ impl Position {
 
 #[derive(Debug, PartialEq)]
 pub struct Octree<T> {
-    octants: Vec<Octant<T>>,
-    free_list: Vec<OctantId>,
-    root: Option<OctantId>,
-    depth: u32,
+    pub(in crate::storage) octants: Vec<Octant<T>>,
+    pub(in crate::storage) free_list: Vec<OctantId>,
+    pub(in crate::storage) root: Option<OctantId>,
+    pub(in crate::storage) depth: u32,
 }
 
 impl<T> Octree<T> {
@@ -40,12 +42,7 @@ impl<T> Octree<T> {
     /// it expands it until it can successfully insert. Children along the path are overridden,
     /// if any exist.
     pub fn add_leaf(&mut self, pos: Position, leaf: T) {
-        let current_depth = self.depth;
-        let required_depth = pos.required_depth();
-        let difference = required_depth as i32 - current_depth as i32;
-        if difference > 0 {
-            self.expand(difference as u32);
-        }
+        self.expand_to(pos.required_depth());
 
         let mut it = self.root.unwrap();
         let mut pos = pos;
@@ -123,7 +120,7 @@ impl<T> Octree<T> {
         }
     }
 
-    fn expand(&mut self, by: u32) {
+    pub fn expand(&mut self, by: u32) {
         for _ in 0..by {
             let new_root_id = self.new_octant(None);
 
@@ -136,6 +133,13 @@ impl<T> Octree<T> {
         }
 
         self.depth += by
+    }
+
+    pub fn expand_to(&mut self, to: u32) {
+        let diff = to - self.depth;
+        if diff > 0 {
+            self.expand(diff);
+        }
     }
 
     fn new_octant(&mut self, parent: Option<OctantId>) -> OctantId {
@@ -162,13 +166,13 @@ impl<T> Octree<T> {
 }
 
 #[derive(Debug, PartialEq)]
-struct Octant<T> {
-    parent: Option<OctantId>,
+pub(in crate::storage) struct Octant<T> {
+    pub(in crate::storage) parent: Option<OctantId>,
 
-    children: [Option<OctantId>; 8],
-    children_count: u8,
+    pub(in crate::storage) children: [Option<OctantId>; 8],
+    pub(in crate::storage) children_count: u8,
 
-    content: Option<T>,
+    pub(in crate::storage) content: Option<T>,
 }
 
 impl<T> Octant<T> {
