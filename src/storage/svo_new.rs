@@ -1,55 +1,69 @@
-use crate::storage::octree::{Octant, Octree, Position};
+use std::collections::HashMap;
+
+use crate::chunk::BlockId;
+use crate::storage::octree::{Octant, OctantId, Octree, Position};
 
 pub struct Svo<T: SvoSerializable> {
     octree: Octree<T>,
-    // TODO cache which octants have changed
 }
 
 impl<T: SvoSerializable> Svo<T> {
-    pub fn set(&mut self, pos: Position, leaf: Option<T>) {}
-    pub fn get(&self, pos: Position) -> Option<T> { None }
-    pub fn serialize(&self) -> SvoBuffer {
-        SvoBuffer {
-            header_mask: 0,
-            depth: 0,
-            bytes: vec![],
+    fn new() -> Svo<T> {
+        Svo {
+            octree: Octree::new(),
         }
     }
 }
 
-#[derive(Debug, PartialEq)]
-pub struct SvoBuffer {
-    pub header_mask: u16,
-    pub depth: u32,
-    pub bytes: Vec<u32>,
-}
+impl<T: SvoSerializable> Svo<T> {
+    pub fn set(&mut self, pos: Position, leaf: Option<T>) {
+        if let Some(leaf) = leaf {
+            self.octree.add_leaf(pos, leaf);
+        } else {
+            self.octree.remove_leaf(pos);
+        }
+    }
 
-pub trait SvoSerializable {
-    fn serialize(&self) -> SvoBuffer;
-}
-
-impl<T: Copy> SvoSerializable for Octree<T> where u32: From<T> {
-    fn serialize(&self) -> SvoBuffer {
-        if self.root.is_none() {
+    pub fn serialize(&self) -> SvoBuffer {
+        if self.octree.root.is_none() {
             return SvoBuffer { header_mask: 0, depth: 0, bytes: vec![] };
         }
 
-        let root_id = self.root.unwrap();
-
-        // TODO figure out correct size
+        // TODO figure out correct sizes
         let mut bytes = Vec::new();
-        let (header_mask, _) = serialize_octant(self, &self.octants[root_id], &mut bytes);
-        let header_mask = (header_mask as u16) << 8; // convert from leaf to child mask
+        bytes.push(0); // will become header mask
+        bytes.push(0);
+        bytes.push(0);
+        bytes.push(0);
+        bytes.push(5); // absolute pointer to where the actual octree starts
 
-        SvoBuffer {
-            header_mask,
-            depth: self.depth,
-            bytes,
-        }
+        let (header_mask, depth) = serialize_octree(&self.octree, &mut bytes);
+        bytes[0] = header_mask as u32;
+
+        SvoBuffer { header_mask, depth, bytes }
     }
 }
 
-fn serialize_octant<T: Copy>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>) -> (u32, u32) where u32: From<T> {
+fn serialize_octree<T: SvoSerializable>(octree: &Octree<T>, dst: &mut Vec<u32>) -> (u16, u32) {
+    let root_id = octree.root.unwrap();
+    let root = &octree.octants[root_id];
+
+    let (header_mask, _, ptrs) = serialize_octant(octree, root, dst);
+    let header_mask = (header_mask as u16) << 8; // convert from leaf to child mask
+
+    // TODO the leaf now points to the spot containing the value, this has to be changed in the shader as well
+
+    // TODO this must be deterministic, currently map access is in random order
+    for (octant_id, index) in ptrs {
+        let octant = &octree.octants[octant_id];
+        dst[index] = dst.len() as u32;
+        octant.content.as_ref().unwrap().serialize_to(dst);
+    }
+
+    (header_mask, octree.depth) // TODO plus size of deepest child
+}
+
+fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>) -> (u32, u32, HashMap<OctantId, usize>) {
     let start_offset = dst.len();
 
     dst.reserve(12);
@@ -57,6 +71,7 @@ fn serialize_octant<T: Copy>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut V
 
     let mut child_mask = 0u32;
     let mut leaf_mask = 0u32;
+    let mut pointers = HashMap::new();
 
     for (idx, child) in octant.children.iter().enumerate() {
         if child.is_none() {
@@ -68,11 +83,12 @@ fn serialize_octant<T: Copy>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut V
         let child_id = child.unwrap();
         let child = &octree.octants[child_id];
 
-        if let Some(content) = child.content {
+        if child.content.is_some() {
             leaf_mask |= 1 << idx;
-            dst[start_offset + 4 + idx] = content.into();
+            pointers.insert(child_id, start_offset + 4 + idx);
         } else {
-            let (child_mask, leaf_mask) = serialize_octant(octree, &octree.octants[child_id], dst);
+            let (child_mask, leaf_mask, child_ptrs) =
+                serialize_octant(octree, &octree.octants[child_id], dst);
 
             let mut mask = ((child_mask as u32) << 8) | leaf_mask as u32;
             if (idx % 2) != 0 {
@@ -82,31 +98,60 @@ fn serialize_octant<T: Copy>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut V
 
             dst[start_offset + 4 + idx] = 12 - 4 - idx as u32; // offset from pointer to end of octant block
             dst[start_offset + 4 + idx] |= 1 << 31; // flag as relative pointer
+
+            pointers.extend(child_ptrs);
         }
     }
 
-    (child_mask, leaf_mask)
+    (child_mask, leaf_mask, pointers)
 }
 
+#[derive(Debug, PartialEq)]
+pub struct SvoBuffer {
+    pub header_mask: u16,
+    pub depth: u32,
+    pub bytes: Vec<u32>,
+}
+
+pub trait SvoSerializable {
+    fn serialize_to(&self, dst: &mut Vec<u32>);
+}
+
+impl<T: SvoSerializable> SvoSerializable for Octree<T> {
+    fn serialize_to(&self, dst: &mut Vec<u32>) {
+        serialize_octree(self, dst);
+    }
+}
+
+impl SvoSerializable for BlockId {
+    fn serialize_to(&self, dst: &mut Vec<u32>) {
+        dst.push(*self as u32);
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use crate::chunk::BlockId;
     use crate::storage::octree::{Octree, Position};
-    use crate::storage::svo_new::{SvoBuffer, SvoSerializable};
+    use crate::storage::svo_new::{Svo, SvoBuffer};
 
     #[test]
-    fn octree_serialize() {
-        let mut octree = Octree::new();
-        octree.add_leaf(Position(0, 0, 0), 100 as BlockId);
-        octree.add_leaf(Position(1, 1, 1), 200 as BlockId);
-        octree.expand_to(5);
+    fn svo_serialize() {
+        let mut svo = Svo::new();
+        svo.set(Position(0, 0, 0), Some(100 as BlockId));
+        svo.set(Position(1, 1, 1), Some(200 as BlockId));
+        svo.octree.expand_to(5);
 
-        let svo = octree.serialize();
-        assert_eq!(svo, SvoBuffer {
+        assert_eq!(svo.serialize(), SvoBuffer {
             header_mask: 1 << 8,
             depth: 5,
             bytes: vec![
+                // svo header
+                1 << 8,
+                0,
+                0,
+                0,
+                5,
                 // first octant header
                 1 << 8,
                 0,
@@ -145,13 +190,16 @@ mod tests {
                 0,
                 0,
                 // fifth octant body
-                100, 0, 0, 0,
-                0, 0, 0, 200,
+                65, 0, 0, 0,
+                0, 0, 0, 66,
+                // content
+                100,
+                200,
             ],
         });
     }
 
-    // TODO fix or remove?
+    // TODO test with multiple octrees in svo
     // #[test]
     // fn octree_serialize_2() {
     //     let mut octree = Octree::new();

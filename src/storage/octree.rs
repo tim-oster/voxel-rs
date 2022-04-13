@@ -4,7 +4,7 @@ use cgmath::num_traits::Pow;
 
 use crate::storage;
 
-type OctantId = usize;
+pub(in crate::storage) type OctantId = usize;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct Position(pub u32, pub u32, pub u32);
