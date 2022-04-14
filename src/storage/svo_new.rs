@@ -1,3 +1,4 @@
+use std::cmp::max;
 use std::collections::HashMap;
 
 use crate::chunk::BlockId;
@@ -31,6 +32,8 @@ impl<T: SvoSerializable> Svo<T> {
 
         // TODO figure out correct sizes
         let mut bytes = Vec::new();
+
+        // add svo "hull" to allow the raytracer to enter
         bytes.push(0); // will become header mask
         bytes.push(0);
         bytes.push(0);
@@ -53,17 +56,18 @@ fn serialize_octree<T: SvoSerializable>(octree: &Octree<T>, dst: &mut Vec<u32>) 
 
     // TODO the leaf now points to the spot containing the value, this has to be changed in the shader as well
 
-    // TODO this must be deterministic, currently map access is in random order
-    for (octant_id, index) in ptrs {
-        let octant = &octree.octants[octant_id];
-        dst[index] = dst.len() as u32;
-        octant.content.as_ref().unwrap().serialize_to(dst);
+    let mut max_depth = octree.depth;
+    for ptr in ptrs.iter() {
+        let octant = &octree.octants[ptr.octant];
+        dst[ptr.buffer_index] = dst.len() as u32;
+        let depth = octant.content.as_ref().unwrap().serialize_to(ptr, dst);
+        max_depth = max(max_depth, octree.depth + depth);
     }
 
-    (header_mask, octree.depth) // TODO plus size of deepest child
+    (header_mask, max_depth)
 }
 
-fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>) -> (u32, u32, HashMap<OctantId, usize>) {
+fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>) -> (u32, u32, Vec<MissingPointer>) {
     let start_offset = dst.len();
 
     dst.reserve(12);
@@ -71,7 +75,7 @@ fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, 
 
     let mut child_mask = 0u32;
     let mut leaf_mask = 0u32;
-    let mut pointers = HashMap::new();
+    let mut pointers = Vec::new();
 
     for (idx, child) in octant.children.iter().enumerate() {
         if child.is_none() {
@@ -85,8 +89,13 @@ fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, 
 
         if child.content.is_some() {
             leaf_mask |= 1 << idx;
-            pointers.insert(child_id, start_offset + 4 + idx);
+            pointers.push(MissingPointer {
+                octant: child_id,
+                child_idx: idx,
+                buffer_index: start_offset + 4 + idx,
+            });
         } else {
+            let child_offset = (dst.len() - start_offset) as u32;
             let (child_mask, leaf_mask, child_ptrs) =
                 serialize_octant(octree, &octree.octants[child_id], dst);
 
@@ -96,7 +105,7 @@ fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, 
             }
             dst[start_offset + (idx / 2) as usize] |= mask;
 
-            dst[start_offset + 4 + idx] = 12 - 4 - idx as u32; // offset from pointer to end of octant block
+            dst[start_offset + 4 + idx] = child_offset - 4 - idx as u32; // offset from pointer to start of next block
             dst[start_offset + 4 + idx] |= 1 << 31; // flag as relative pointer
 
             pointers.extend(child_ptrs);
@@ -113,19 +122,39 @@ pub struct SvoBuffer {
     pub bytes: Vec<u32>,
 }
 
+pub struct MissingPointer {
+    pub octant: OctantId,
+    pub child_idx: usize,
+    pub buffer_index: usize,
+}
+
 pub trait SvoSerializable {
-    fn serialize_to(&self, dst: &mut Vec<u32>);
+    fn serialize_to(&self, at: &MissingPointer, dst: &mut Vec<u32>) -> u32;
 }
 
 impl<T: SvoSerializable> SvoSerializable for Octree<T> {
-    fn serialize_to(&self, dst: &mut Vec<u32>) {
-        serialize_octree(self, dst);
+    fn serialize_to(&self, at: &MissingPointer, dst: &mut Vec<u32>) -> u32 {
+        let (header_mask, depth) = serialize_octree(self, dst);
+
+        let block_start = at.buffer_index - at.child_idx - 4;
+        let header_pos = block_start + (at.child_idx / 2) as usize;
+
+        let mut mask = 0xffff0000 as u32;
+        let mut header_mask = header_mask as u32;
+        if (at.child_idx % 2) != 0 {
+            mask = !mask;
+            header_mask <<= 16;
+        }
+        dst[header_pos] = (dst[header_pos] & mask) | header_mask;
+
+        depth
     }
 }
 
 impl SvoSerializable for BlockId {
-    fn serialize_to(&self, dst: &mut Vec<u32>) {
+    fn serialize_to(&self, at: &MissingPointer, dst: &mut Vec<u32>) -> u32 {
         dst.push(*self as u32);
+        0
     }
 }
 
@@ -141,6 +170,7 @@ mod tests {
         svo.set(Position(0, 0, 0), Some(100 as BlockId));
         svo.set(Position(1, 1, 1), Some(200 as BlockId));
         svo.octree.expand_to(5);
+        svo.octree.compact();
 
         assert_eq!(svo.serialize(), SvoBuffer {
             header_mask: 1 << 8,
@@ -199,130 +229,155 @@ mod tests {
         });
     }
 
-    // TODO test with multiple octrees in svo
-    // #[test]
-    // fn octree_serialize_2() {
-    //     let mut octree = Octree::new();
-    //     octree.add_leaf(Position(31, 0, 0), 1 as BlockId);
-    //     octree.add_leaf(Position(0, 31, 0), 2 as BlockId);
-    //     octree.add_leaf(Position(0, 0, 31), 3 as BlockId);
-    //
-    //     let svo = octree.serialize();
-    //     assert_eq!(svo, SvoBuffer {
-    //         header_mask: (2 | 4 | 16) << 8,
-    //         depth: 5,
-    //         bytes: vec![
-    //             // core octant header
-    //             (2 << 8) << 16,
-    //             4 << 8,
-    //             16 << 8,
-    //             0,
-    //             // core octant body
-    //             0, (1 << 31) | 7, (1 << 31) | (6 + 4 * 12), 0,
-    //             (1 << 31) | (4 + 8 * 12), 0, 0, 0,
-    //
-    //             // subtree for (1,0,0)
-    //             // header 1
-    //             2 << 8 << 16,
-    //             0,
-    //             0,
-    //             0,
-    //             // body 1
-    //             0, (1 << 31) | 7, 0, 0,
-    //             0, 0, 0, 0,
-    //             // header 2
-    //             2 << 8 << 16,
-    //             0,
-    //             0,
-    //             0,
-    //             // body 2
-    //             0, (1 << 31) | 7, 0, 0,
-    //             0, 0, 0, 0,
-    //             // header 3
-    //             ((2 << 8) | 2) << 16,
-    //             0,
-    //             0,
-    //             0,
-    //             // body 3
-    //             0, (1 << 31) | 7, 0, 0,
-    //             0, 0, 0, 0,
-    //             // leaf header
-    //             0,
-    //             0,
-    //             0,
-    //             0,
-    //             // leaf body
-    //             0, 1, 0, 0,
-    //             0, 0, 0, 0,
-    //
-    //             // subtree for (0,1,0)
-    //             // header 1
-    //             0,
-    //             4 << 8,
-    //             0,
-    //             0,
-    //             // body 1
-    //             0, 0, (1 << 31) | 6, 0,
-    //             0, 0, 0, 0,
-    //             // header 2
-    //             0,
-    //             4 << 8,
-    //             0,
-    //             0,
-    //             // body 2
-    //             0, 0, (1 << 31) | 6, 0,
-    //             0, 0, 0, 0,
-    //             // header 3
-    //             0,
-    //             4 << 8 | 4,
-    //             0,
-    //             0,
-    //             // body 3
-    //             0, 0, (1 << 31) | 6, 0,
-    //             0, 0, 0, 0,
-    //             // leaf header
-    //             0,
-    //             0,
-    //             0,
-    //             0,
-    //             // leaf body
-    //             0, 0, 2, 0,
-    //             0, 0, 0, 0,
-    //
-    //             // subtree for (0,0,1)
-    //             // header 1
-    //             0,
-    //             0,
-    //             16 << 8,
-    //             0,
-    //             // body 1
-    //             0, 0, 0, 0,
-    //             (1 << 31) | 4, 0, 0, 0,
-    //             // header 2
-    //             0,
-    //             0,
-    //             16 << 8,
-    //             0,
-    //             // body 2
-    //             0, 0, 0, 0,
-    //             (1 << 31) | 4, 0, 0, 0,
-    //             // header 3
-    //             0,
-    //             0,
-    //             16 << 8 | 16,
-    //             0,
-    //             // body 3
-    //             0, 0, 0, 0,
-    //             (1 << 31) | 4, 0, 0, 0,
-    //             // leaf header
-    //             0,
-    //             0,
-    //             0,
-    //             0,
-    //             // leaf body
-    //             0, 0, 0, 0,
-    //             3, 0, 0, 0,
-    //         ],
-    //     });
-    // }
+    #[test]
+    fn svo_serialize_nested() {
+        let mut octree = Octree::new();
+        octree.add_leaf(Position(31, 0, 0), 1 as BlockId);
+        octree.add_leaf(Position(0, 31, 0), 2 as BlockId);
+        octree.add_leaf(Position(0, 0, 31), 3 as BlockId);
+        octree.expand_to(5);
+        octree.compact();
+
+        let mut svo = Svo::new();
+        svo.set(Position(1, 0, 0), Some(octree));
+
+        let svo = svo.serialize();
+        assert_eq!(svo, SvoBuffer {
+            header_mask: 2 << 8,
+            depth: 6,
+            bytes: vec![
+                // svo header
+                2 << 8,
+                0,
+                0,
+                0,
+                5,
+
+                // outer octree, first node header
+                (2 | 4 | 16) << 8 << 16,
+                0,
+                0,
+                0,
+                // outer octree, first node body
+                0, 17, 0, 0,
+                0, 0, 0, 0,
+
+                // core octant header
+                (2 << 8) << 16,
+                4 << 8,
+                16 << 8,
+                0,
+                // core octant body
+                0, (1 << 31) | 7, (1 << 31) | (6 + 4 * 12), 0,
+                (1 << 31) | (4 + 8 * 12), 0, 0, 0,
+
+                // subtree for (1,0,0)
+                // header 1
+                2 << 8 << 16,
+                0,
+                0,
+                0,
+                // body 1
+                0, (1 << 31) | 7, 0, 0,
+                0, 0, 0, 0,
+                // header 2
+                2 << 8 << 16,
+                0,
+                0,
+                0,
+                // body 2
+                0, (1 << 31) | 7, 0, 0,
+                0, 0, 0, 0,
+                // header 3
+                ((2 << 8) | 2) << 16,
+                0,
+                0,
+                0,
+                // body 3
+                0, (1 << 31) | 7, 0, 0,
+                0, 0, 0, 0,
+                // leaf header
+                0,
+                0,
+                0,
+                0,
+                // leaf body
+                0, 173, 0, 0,
+                0, 0, 0, 0,
+
+                // subtree for (0,1,0)
+                // header 1
+                0,
+                4 << 8,
+                0,
+                0,
+                // body 1
+                0, 0, (1 << 31) | 6, 0,
+                0, 0, 0, 0,
+                // header 2
+                0,
+                4 << 8,
+                0,
+                0,
+                // body 2
+                0, 0, (1 << 31) | 6, 0,
+                0, 0, 0, 0,
+                // header 3
+                0,
+                4 << 8 | 4,
+                0,
+                0,
+                // body 3
+                0, 0, (1 << 31) | 6, 0,
+                0, 0, 0, 0,
+                // leaf header
+                0,
+                0,
+                0,
+                0,
+                // leaf body
+                0, 0, 174, 0,
+                0, 0, 0, 0,
+
+                // subtree for (0,0,1)
+                // header 1
+                0,
+                0,
+                16 << 8,
+                0,
+                // body 1
+                0, 0, 0, 0,
+                (1 << 31) | 4, 0, 0, 0,
+                // header 2
+                0,
+                0,
+                16 << 8,
+                0,
+                // body 2
+                0, 0, 0, 0,
+                (1 << 31) | 4, 0, 0, 0,
+                // header 3
+                0,
+                0,
+                16 << 8 | 16,
+                0,
+                // body 3
+                0, 0, 0, 0,
+                (1 << 31) | 4, 0, 0, 0,
+                // leaf header
+                0,
+                0,
+                0,
+                0,
+                // leaf body
+                0, 0, 0, 0,
+                175, 0, 0, 0,
+
+                // leaf values
+                1,
+                2,
+                3,
+            ],
+        });
+    }
 }
