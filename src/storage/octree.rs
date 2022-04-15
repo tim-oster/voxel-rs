@@ -137,6 +137,9 @@ impl<T> Octree<T> {
     }
 
     pub fn expand_to(&mut self, to: u32) {
+        if self.depth > to {
+            return;
+        }
         let diff = to - self.depth;
         if diff > 0 {
             self.expand(diff);
@@ -150,6 +153,7 @@ impl<T> Octree<T> {
         if self.root.is_none() {
             return;
         }
+        // TODO can it happen that the root is removed?
         self.compact_octant(self.root.unwrap());
     }
 

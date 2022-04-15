@@ -9,7 +9,7 @@ pub struct Svo<T: SvoSerializable> {
 }
 
 impl<T: SvoSerializable> Svo<T> {
-    fn new() -> Svo<T> {
+    pub fn new() -> Svo<T> {
         Svo {
             octree: Octree::new(),
         }
@@ -51,10 +51,8 @@ fn serialize_octree<T: SvoSerializable>(octree: &Octree<T>, dst: &mut Vec<u32>) 
     let root_id = octree.root.unwrap();
     let root = &octree.octants[root_id];
 
-    let (header_mask, _, ptrs) = serialize_octant(octree, root, dst);
-    let header_mask = (header_mask as u16) << 8; // convert from leaf to child mask
-
-    // TODO the leaf now points to the spot containing the value, this has to be changed in the shader as well
+    let (child_mask, leaf_mask, ptrs) = serialize_octant(octree, root, dst);
+    let mask = ((child_mask as u16) << 8) | leaf_mask as u16;
 
     let mut max_depth = octree.depth;
     for ptr in ptrs.iter() {
@@ -64,7 +62,7 @@ fn serialize_octree<T: SvoSerializable>(octree: &Octree<T>, dst: &mut Vec<u32>) 
         max_depth = max(max_depth, octree.depth + depth);
     }
 
-    (header_mask, max_depth)
+    (mask, max_depth)
 }
 
 fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>) -> (u32, u32, Vec<MissingPointer>) {
@@ -87,8 +85,10 @@ fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, 
         let child_id = child.unwrap();
         let child = &octree.octants[child_id];
 
-        if child.content.is_some() {
-            leaf_mask |= 1 << idx;
+        if let Some(content) = &child.content {
+            if !content.is_nested() {
+                leaf_mask |= 1 << idx;
+            }
             pointers.push(MissingPointer {
                 octant: child_id,
                 child_idx: idx,
@@ -129,13 +129,21 @@ pub struct MissingPointer {
 }
 
 pub trait SvoSerializable {
+    // TODO is is_nested clean?
+    fn is_nested(&self) -> bool;
     fn serialize_to(&self, at: &MissingPointer, dst: &mut Vec<u32>) -> u32;
 }
 
 impl<T: SvoSerializable> SvoSerializable for Octree<T> {
+    fn is_nested(&self) -> bool {
+        true
+    }
+
     fn serialize_to(&self, at: &MissingPointer, dst: &mut Vec<u32>) -> u32 {
         let (header_mask, depth) = serialize_octree(self, dst);
 
+        // TODO is there a cleaner way to implement this header replacement?
+        // encode header information in parent octant (it is empty because this looks like a leaf node to the parent)
         let block_start = at.buffer_index - at.child_idx - 4;
         let header_pos = block_start + (at.child_idx / 2) as usize;
 
@@ -152,6 +160,10 @@ impl<T: SvoSerializable> SvoSerializable for Octree<T> {
 }
 
 impl SvoSerializable for BlockId {
+    fn is_nested(&self) -> bool {
+        false
+    }
+
     fn serialize_to(&self, at: &MissingPointer, dst: &mut Vec<u32>) -> u32 {
         dst.push(*self as u32);
         0

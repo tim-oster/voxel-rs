@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
+use crate::chunk::BlockId;
 use crate::storage::chunk;
-use crate::storage::svo::Svo;
-use crate::storage::svo_grid::SvoGrid;
+use crate::storage::octree::{Octree, Position};
+use crate::storage::svo_new::Svo;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 struct ChunkPos {
@@ -62,13 +63,13 @@ impl World {
         world
     }
 
-    pub fn build_svo_grid(&self) -> SvoGrid {
-        let mut grid = SvoGrid::new();
+    pub fn build_svo(&self) -> Svo<Octree<BlockId>> {
+        let mut svo = Svo::new();
         for (pos, chunk) in self.chunks.iter() {
-            let svo = Svo::new_from_chunk(chunk);
-            grid.add_svo(pos.x, pos.y, pos.z, svo);
+            let octree = chunk.build_octree();
+            svo.set(Position(pos.x as u32, pos.y as u32, pos.z as u32), Some(octree));
         }
-        grid
+        svo
     }
 }
 

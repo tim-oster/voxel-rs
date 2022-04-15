@@ -5,6 +5,7 @@ extern crate memoffset;
 use std::{mem, ptr};
 use std::ffi::c_void;
 use std::path::Path;
+use std::time::Instant;
 
 use cgmath;
 use cgmath::{Point2, Point3, Vector2, Vector3};
@@ -47,10 +48,23 @@ macro_rules! gl_check_error {
 }
 
 fn main() {
+    println!("loading model file");
+    let start = Instant::now();
     let vox_data = dot_vox::load("assets/ignore/terrain.vox").unwrap();
+
+    println!("{}s; converting into chunks", start.elapsed().as_secs_f32());
+    let start = Instant::now();
     let mut world = storage::world::World::new_from_vox(vox_data);
-    let svo_grid = world.build_svo_grid();
-    let svo = svo_grid.build_svo();
+
+    println!("{}s; converting into svo", start.elapsed().as_secs_f32());
+    let start = Instant::now();
+    let svo = world.build_svo();
+
+    println!("{}s; serializing svo", start.elapsed().as_secs_f32());
+    let start = Instant::now();
+    let svo_buffer = svo.serialize();
+
+    println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
 
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.request_grab_cursor(true);
@@ -91,14 +105,14 @@ fn main() {
     let mut use_mouse_input = true;
 
     let mut world_ssbo = 0;
-    let max_depth_exp2 = (-svo.depth as f32).exp2();
+    let max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
 
     unsafe {
         gl::GenBuffers(1, &mut world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-        gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo.descriptors.len() * 4 + 4) as GLsizeiptr as GLsizeiptr, ptr::null(), gl::STATIC_READ);
+        gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo_buffer.bytes.len() * 4 + 4) as GLsizeiptr as GLsizeiptr, ptr::null(), gl::STATIC_READ);
         gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 0 as GLsizeiptr, 4 as GLsizeiptr, &max_depth_exp2 as *const f32 as *const c_void);
-        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const u32 as *const c_void);
+        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.bytes[0] as *const u32 as *const c_void);
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }

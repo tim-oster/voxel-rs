@@ -32,6 +32,7 @@ impl Chunk {
 
     pub fn build_octree(&self) -> Octree<BlockId> {
         let mut octree = Octree::new();
+        octree.expand_to(32f32.log2() as u32);
 
         for z in 0u32..32 {
             for y in 0u32..32 {
@@ -45,6 +46,7 @@ impl Chunk {
             }
         }
 
+        octree.compact();
         octree
     }
 }

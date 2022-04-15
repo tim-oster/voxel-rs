@@ -112,6 +112,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
                     next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
                 }
                 ptr = next_ptr + 4 + octant_idx;
+                ptr = descriptors[ptr];
 
                 res.t = t_min / octree_scale;
 
@@ -182,6 +183,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
                 // TODO convert everything to uint?
                 int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
+                // TODO move relative & aboslut pointer resolving into function
                 if ((next_ptr & (1 << 31)) != 0) {
                     // use as relative offset if relative bit is set
                     next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
