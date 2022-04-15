@@ -1,9 +1,6 @@
 use std::cmp::max;
-use std::ops::Deref;
 
 use cgmath::num_traits::Pow;
-
-use crate::storage;
 
 pub(in crate::storage) type OctantId = usize;
 
@@ -77,7 +74,7 @@ impl<T> Octree<T> {
                 let next_id = self.new_octant(Some(prev_id));
                 it = next_id;
 
-                let mut prev_octant = &mut self.octants[prev_id];
+                let prev_octant = &mut self.octants[prev_id];
                 prev_octant.add_child(idx, next_id);
 
                 if size == 1 {

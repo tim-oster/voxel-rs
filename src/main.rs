@@ -254,7 +254,7 @@ fn main() {
 
             // removing blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
-                let mut block_pos = unsafe { (*picker_data).block_pos };
+                let block_pos = unsafe { (*picker_data).block_pos };
                 if block_pos.x != f32::MAX {
                     world.set_block(block_pos.x as i32, block_pos.x as i32, block_pos.x as i32, chunk::NO_BLOCK);
                     // TODO partial rebuild

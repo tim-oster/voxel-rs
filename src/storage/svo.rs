@@ -1,339 +1,394 @@
-use std::cell::{Ref, RefCell};
-use std::collections::HashMap;
-use std::rc::Rc;
+use std::cmp::max;
 
-use crate::storage::chunk;
+use crate::chunk::BlockId;
+use crate::storage::octree::{Octant, OctantId, Octree, Position};
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone)]
-struct NodePos {
-    x: u8,
-    y: u8,
-    z: u8,
+pub struct Svo<T: SvoSerializable> {
+    octree: Octree<T>,
 }
 
-struct Node {
-    child_mask: u8,
-    leaf_mask: u8,
-    children: [Option<Rc<RefCell<Node>>>; 8],
-    block_id: Option<chunk::BlockId>,
-}
-
-pub struct Svo {
-    pub header_mask: u16,
-    pub depth: i32,
-    pub descriptors: Vec<u32>,
-}
-
-impl Svo {
-    pub fn new_from_chunk(chunk: &chunk::Chunk) -> Svo {
-        let mut leaf_map = HashMap::new();
-
-        for z in 0..32 {
-            for y in 0..32 {
-                for x in 0..32 {
-                    let block = chunk.blocks[chunk::Chunk::get_block_index(x, y, z)];
-                    if block == chunk::NO_BLOCK {
-                        continue;
-                    }
-
-                    let pos = NodePos { x: x as u8, y: y as u8, z: z as u8 };
-                    leaf_map.insert(pos, Rc::new(RefCell::new(Node {
-                        child_mask: 1,
-                        leaf_mask: 1,
-                        children: Default::default(),
-                        block_id: Some(block),
-                    })));
-                }
-            }
+impl<T: SvoSerializable> Svo<T> {
+    pub fn new() -> Svo<T> {
+        Svo {
+            octree: Octree::new(),
         }
-
-        // build an octree by merging child octrees five times into one (log2(32) = 5)
-        let mut merged_map = leaf_map;
-        let mut octant_count = 0;
-
-        let max_depth = 32f32.log2().ceil() as i32;
-        for _ in 0..max_depth {
-            let result = merge_nodes(&merged_map);
-            octant_count += result.len();
-            merged_map = result;
-        }
-
-        let root_node = merged_map.get(merged_map.keys().next().unwrap()).unwrap().borrow();
-        // let mut descriptors = Vec::with_capacity((4 + 8) * octant_count);
-
-        // create fake root node
-        let mut root_mask = 0;
-        for (idx, node) in root_node.children.iter().enumerate() {
-            if node.is_none() {
-                continue;
-            }
-            root_mask |= (1 << idx) << 8;
-
-            let node = node.as_ref().unwrap().borrow();
-            if node.block_id.is_some() {
-                root_mask |= 1 << idx;
-            }
-        }
-        // descriptors.push(root_mask);
-        // descriptors.push(0);
-        // descriptors.push(0);
-        // descriptors.push(0);
-        // descriptors.push(5); // absolute pointer to where the actual octree starts
-
-        // add actual descriptors from octree
-        let descriptors = build_descriptors(root_node);
-        // descriptors.extend(svo_descriptors);
-
-        let depth = max_depth + 1; // plus one because of fake root node
-        Svo { header_mask: root_mask, depth, descriptors }
     }
 }
 
-fn merge_nodes(nodes: &HashMap<NodePos, Rc<RefCell<Node>>>) -> HashMap<NodePos, Rc<RefCell<Node>>> {
-    let mut merged_map = HashMap::new();
-
-    for (pos, node) in nodes.iter() {
-        let merged_pos = NodePos { x: pos.x / 2, y: pos.y / 2, z: pos.z / 2 };
-        if !merged_map.contains_key(&merged_pos) {
-            merged_map.insert(merged_pos, Rc::new(RefCell::new(Node {
-                child_mask: 0,
-                leaf_mask: 0,
-                children: Default::default(),
-                block_id: None,
-            })));
+impl<T: SvoSerializable> Svo<T> {
+    pub fn set(&mut self, pos: Position, leaf: Option<T>) {
+        if let Some(leaf) = leaf {
+            self.octree.add_leaf(pos, leaf);
+        } else {
+            self.octree.remove_leaf(pos);
         }
-        let merged_node = merged_map.get_mut(&merged_pos).unwrap();
-
-        let idx = (pos.x % 2) + (pos.y % 2) * 2 + (pos.z % 2) * 4;
-        merged_node.borrow_mut().child_mask |= 1 << idx;
-        if node.borrow().block_id.is_some() {
-            merged_node.borrow_mut().leaf_mask |= 1 << idx;
-        }
-        merged_node.borrow_mut().children[idx as usize] = Some(Rc::clone(node));
     }
 
-    merged_map
+    pub fn serialize(&self) -> SvoBuffer {
+        if self.octree.root.is_none() {
+            return SvoBuffer { header_mask: 0, depth: 0, bytes: vec![] };
+        }
+
+        // TODO figure out correct sizes
+        let mut bytes = Vec::new();
+
+        // add svo "hull" to allow the raytracer to enter
+        bytes.push(0); // will become header mask
+        bytes.push(0);
+        bytes.push(0);
+        bytes.push(0);
+        bytes.push(5); // absolute pointer to where the actual octree starts
+
+        let (header_mask, depth) = serialize_octree(&self.octree, &mut bytes);
+        bytes[0] = header_mask as u32;
+
+        SvoBuffer { header_mask, depth, bytes }
+    }
 }
 
-fn build_descriptors(node: Ref<Node>) -> Vec<u32> {
-    let mut svo = Vec::<u32>::with_capacity(12);
-    svo.extend(std::iter::repeat(0).take(12));
+fn serialize_octree<T: SvoSerializable>(octree: &Octree<T>, dst: &mut Vec<u32>) -> (u16, u32) {
+    let root_id = octree.root.unwrap();
+    let root = &octree.octants[root_id];
 
-    for (idx, node) in node.children.iter().enumerate() {
-        if node.is_none() {
+    let (child_mask, leaf_mask, ptrs) = serialize_octant(octree, root, dst);
+    let mask = ((child_mask as u16) << 8) | leaf_mask as u16;
+
+    let mut max_depth = octree.depth;
+    for ptr in ptrs.iter() {
+        let octant = &octree.octants[ptr.octant];
+        dst[ptr.buffer_index] = dst.len() as u32;
+        let depth = octant.content.as_ref().unwrap().serialize_to(ptr, dst);
+        max_depth = max(max_depth, octree.depth + depth);
+    }
+
+    (mask, max_depth)
+}
+
+fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>) -> (u32, u32, Vec<MissingPointer>) {
+    let start_offset = dst.len();
+
+    dst.reserve(12);
+    dst.extend(std::iter::repeat(0).take(12));
+
+    let mut child_mask = 0u32;
+    let mut leaf_mask = 0u32;
+    let mut pointers = Vec::new();
+
+    for (idx, child) in octant.children.iter().enumerate() {
+        if child.is_none() {
             continue;
         }
 
-        let node = node.as_ref().unwrap().borrow();
+        child_mask |= 1 << idx;
 
-        if let Some(block) = node.block_id {
-            svo[4 + idx] = block;
+        let child_id = child.unwrap();
+        let child = &octree.octants[child_id];
+
+        if let Some(content) = &child.content {
+            if !content.is_nested() {
+                leaf_mask |= 1 << idx;
+            }
+            pointers.push(MissingPointer {
+                octant: child_id,
+                child_idx: idx,
+                buffer_index: start_offset + 4 + idx,
+            });
         } else {
-            let mut mask = ((node.child_mask as u32) << 8) | node.leaf_mask as u32;
+            let child_offset = (dst.len() - start_offset) as u32;
+            let (child_mask, leaf_mask, child_ptrs) =
+                serialize_octant(octree, &octree.octants[child_id], dst);
+
+            let mut mask = ((child_mask as u32) << 8) | leaf_mask as u32;
             if (idx % 2) != 0 {
                 mask <<= 16;
             }
-            svo[(idx / 2) as usize] |= mask;
+            dst[start_offset + (idx / 2) as usize] |= mask;
 
-            let child_svo = build_descriptors(node);
-            svo[4 + idx] = svo.len() as u32 - 4 - idx as u32;
-            svo[4 + idx] |= 1 << 31; // flag as relative pointer
-            svo.extend(child_svo);
+            dst[start_offset + 4 + idx] = child_offset - 4 - idx as u32; // offset from pointer to start of next block
+            dst[start_offset + 4 + idx] |= 1 << 31; // flag as relative pointer
+
+            pointers.extend(child_ptrs);
         }
     }
 
-    svo
+    (child_mask, leaf_mask, pointers)
+}
+
+#[derive(Debug, PartialEq)]
+pub struct SvoBuffer {
+    pub header_mask: u16,
+    pub depth: u32,
+    pub bytes: Vec<u32>,
+}
+
+pub struct MissingPointer {
+    pub octant: OctantId,
+    pub child_idx: usize,
+    pub buffer_index: usize,
+}
+
+pub trait SvoSerializable {
+    // TODO is is_nested clean?
+    fn is_nested(&self) -> bool;
+    fn serialize_to(&self, at: &MissingPointer, dst: &mut Vec<u32>) -> u32;
+}
+
+impl<T: SvoSerializable> SvoSerializable for Octree<T> {
+    fn is_nested(&self) -> bool {
+        true
+    }
+
+    fn serialize_to(&self, at: &MissingPointer, dst: &mut Vec<u32>) -> u32 {
+        let (header_mask, depth) = serialize_octree(self, dst);
+
+        // TODO is there a cleaner way to implement this header replacement?
+        // encode header information in parent octant (it is empty because this looks like a leaf node to the parent)
+        let block_start = at.buffer_index - at.child_idx - 4;
+        let header_pos = block_start + (at.child_idx / 2) as usize;
+
+        let mut mask = 0xffff0000 as u32;
+        let mut header_mask = header_mask as u32;
+        if (at.child_idx % 2) != 0 {
+            mask = !mask;
+            header_mask <<= 16;
+        }
+        dst[header_pos] = (dst[header_pos] & mask) | header_mask;
+
+        depth
+    }
+}
+
+impl SvoSerializable for BlockId {
+    fn is_nested(&self) -> bool {
+        false
+    }
+
+    fn serialize_to(&self, _: &MissingPointer, dst: &mut Vec<u32>) -> u32 {
+        dst.push(*self as u32);
+        0
+    }
 }
 
 #[cfg(test)]
-mod tests_svo {
-    use super::chunk::Chunk;
+mod tests {
+    use crate::chunk::BlockId;
+    use crate::storage::octree::{Octree, Position};
+    use crate::storage::svo::{Svo, SvoBuffer};
 
     #[test]
-    fn chunk_build_svo_one_sub_tree() {
-        let mut chunk = Chunk::new();
-        chunk.set_block(0, 0, 0, 100);
-        chunk.set_block(1, 1, 1, 200);
+    fn svo_serialize() {
+        let mut svo = Svo::new();
+        svo.set(Position(0, 0, 0), Some(100 as BlockId));
+        svo.set(Position(1, 1, 1), Some(200 as BlockId));
+        svo.octree.expand_to(5);
+        svo.octree.compact();
 
-        let svo = super::Svo::new_from_chunk(&chunk);
-        assert_eq!(svo.descriptors, vec![
-            // fake root header
-            1 << 8,
-            0,
-            0,
-            0,
-            // fake root body
-            5,
-            // first octant header
-            1 << 8,
-            0,
-            0,
-            0,
-            // first octant body
-            (1 << 31) | 8, 0, 0, 0,
-            0, 0, 0, 0,
-            // second octant header
-            1 << 8,
-            0,
-            0,
-            0,
-            // second octant body
-            (1 << 31) | 8, 0, 0, 0,
-            0, 0, 0, 0,
-            // third octant header
-            1 << 8,
-            0,
-            0,
-            0,
-            // third octant body
-            (1 << 31) | 8, 0, 0, 0,
-            0, 0, 0, 0,
-            // fourth octant header
-            ((1 | 128) << 8) | (1 | 128),
-            0,
-            0,
-            0,
-            // fourth octant body
-            (1 << 31) | 8, 0, 0, 0,
-            0, 0, 0, 0,
-            // fifth octant header
-            0,
-            0,
-            0,
-            0,
-            // fifth octant body
-            100, 0, 0, 0,
-            0, 0, 0, 200,
-        ]);
+        assert_eq!(svo.serialize(), SvoBuffer {
+            header_mask: 1 << 8,
+            depth: 5,
+            bytes: vec![
+                // svo header
+                1 << 8,
+                0,
+                0,
+                0,
+                5,
+                // first octant header
+                1 << 8,
+                0,
+                0,
+                0,
+                // first octant body
+                (1 << 31) | 8, 0, 0, 0,
+                0, 0, 0, 0,
+                // second octant header
+                1 << 8,
+                0,
+                0,
+                0,
+                // second octant body
+                (1 << 31) | 8, 0, 0, 0,
+                0, 0, 0, 0,
+                // third octant header
+                1 << 8,
+                0,
+                0,
+                0,
+                // third octant body
+                (1 << 31) | 8, 0, 0, 0,
+                0, 0, 0, 0,
+                // fourth octant header
+                ((1 | 128) << 8) | (1 | 128),
+                0,
+                0,
+                0,
+                // fourth octant body
+                (1 << 31) | 8, 0, 0, 0,
+                0, 0, 0, 0,
+                // fifth octant header
+                0,
+                0,
+                0,
+                0,
+                // fifth octant body
+                65, 0, 0, 0,
+                0, 0, 0, 66,
+                // content
+                100,
+                200,
+            ],
+        });
     }
 
     #[test]
-    fn chunk_build_svo_multiple_sub_trees() {
-        let mut chunk = Chunk::new();
-        chunk.set_block(31, 0, 0, 1);
-        chunk.set_block(0, 31, 0, 2);
-        chunk.set_block(0, 0, 31, 3);
+    fn svo_serialize_nested() {
+        let mut octree = Octree::new();
+        octree.add_leaf(Position(31, 0, 0), 1 as BlockId);
+        octree.add_leaf(Position(0, 31, 0), 2 as BlockId);
+        octree.add_leaf(Position(0, 0, 31), 3 as BlockId);
+        octree.expand_to(5);
+        octree.compact();
 
-        let svo = super::Svo::new_from_chunk(&chunk);
-        assert_eq!(svo.descriptors, vec![
-            // fake root header
-            (2 | 4 | 16) << 8,
-            0,
-            0,
-            0,
-            // fake root body
-            5,
+        let mut svo = Svo::new();
+        svo.set(Position(1, 0, 0), Some(octree));
 
-            // core octant header
-            (2 << 8) << 16,
-            4 << 8,
-            16 << 8,
-            0,
-            // core octant body
-            0, (1 << 31) | 7, (1 << 31) | (6 + 4 * 12), 0,
-            (1 << 31) | (4 + 8 * 12), 0, 0, 0,
+        let svo = svo.serialize();
+        assert_eq!(svo, SvoBuffer {
+            header_mask: 2 << 8,
+            depth: 6,
+            bytes: vec![
+                // svo header
+                2 << 8,
+                0,
+                0,
+                0,
+                5,
 
-            // subtree for (1,0,0)
-            // header 1
-            2 << 8 << 16,
-            0,
-            0,
-            0,
-            // body 1
-            0, (1 << 31) | 7, 0, 0,
-            0, 0, 0, 0,
-            // header 2
-            2 << 8 << 16,
-            0,
-            0,
-            0,
-            // body 2
-            0, (1 << 31) | 7, 0, 0,
-            0, 0, 0, 0,
-            // header 3
-            ((2 << 8) | 2) << 16,
-            0,
-            0,
-            0,
-            // body 3
-            0, (1 << 31) | 7, 0, 0,
-            0, 0, 0, 0,
-            // leaf header
-            0,
-            0,
-            0,
-            0,
-            // leaf body
-            0, 1, 0, 0,
-            0, 0, 0, 0,
+                // outer octree, first node header
+                (2 | 4 | 16) << 8 << 16,
+                0,
+                0,
+                0,
+                // outer octree, first node body
+                0, 17, 0, 0,
+                0, 0, 0, 0,
 
-            // subtree for (0,1,0)
-            // header 1
-            0,
-            4 << 8,
-            0,
-            0,
-            // body 1
-            0, 0, (1 << 31) | 6, 0,
-            0, 0, 0, 0,
-            // header 2
-            0,
-            4 << 8,
-            0,
-            0,
-            // body 2
-            0, 0, (1 << 31) | 6, 0,
-            0, 0, 0, 0,
-            // header 3
-            0,
-            4 << 8 | 4,
-            0,
-            0,
-            // body 3
-            0, 0, (1 << 31) | 6, 0,
-            0, 0, 0, 0,
-            // leaf header
-            0,
-            0,
-            0,
-            0,
-            // leaf body
-            0, 0, 2, 0,
-            0, 0, 0, 0,
+                // core octant header
+                (2 << 8) << 16,
+                4 << 8,
+                16 << 8,
+                0,
+                // core octant body
+                0, (1 << 31) | 7, (1 << 31) | (6 + 4 * 12), 0,
+                (1 << 31) | (4 + 8 * 12), 0, 0, 0,
 
-            // subtree for (0,0,1)
-            // header 1
-            0,
-            0,
-            16 << 8,
-            0,
-            // body 1
-            0, 0, 0, 0,
-            (1 << 31) | 4, 0, 0, 0,
-            // header 2
-            0,
-            0,
-            16 << 8,
-            0,
-            // body 2
-            0, 0, 0, 0,
-            (1 << 31) | 4, 0, 0, 0,
-            // header 3
-            0,
-            0,
-            16 << 8 | 16,
-            0,
-            // body 3
-            0, 0, 0, 0,
-            (1 << 31) | 4, 0, 0, 0,
-            // leaf header
-            0,
-            0,
-            0,
-            0,
-            // leaf body
-            0, 0, 0, 0,
-            3, 0, 0, 0,
-        ]);
+                // subtree for (1,0,0)
+                // header 1
+                2 << 8 << 16,
+                0,
+                0,
+                0,
+                // body 1
+                0, (1 << 31) | 7, 0, 0,
+                0, 0, 0, 0,
+                // header 2
+                2 << 8 << 16,
+                0,
+                0,
+                0,
+                // body 2
+                0, (1 << 31) | 7, 0, 0,
+                0, 0, 0, 0,
+                // header 3
+                ((2 << 8) | 2) << 16,
+                0,
+                0,
+                0,
+                // body 3
+                0, (1 << 31) | 7, 0, 0,
+                0, 0, 0, 0,
+                // leaf header
+                0,
+                0,
+                0,
+                0,
+                // leaf body
+                0, 173, 0, 0,
+                0, 0, 0, 0,
+
+                // subtree for (0,1,0)
+                // header 1
+                0,
+                4 << 8,
+                0,
+                0,
+                // body 1
+                0, 0, (1 << 31) | 6, 0,
+                0, 0, 0, 0,
+                // header 2
+                0,
+                4 << 8,
+                0,
+                0,
+                // body 2
+                0, 0, (1 << 31) | 6, 0,
+                0, 0, 0, 0,
+                // header 3
+                0,
+                4 << 8 | 4,
+                0,
+                0,
+                // body 3
+                0, 0, (1 << 31) | 6, 0,
+                0, 0, 0, 0,
+                // leaf header
+                0,
+                0,
+                0,
+                0,
+                // leaf body
+                0, 0, 174, 0,
+                0, 0, 0, 0,
+
+                // subtree for (0,0,1)
+                // header 1
+                0,
+                0,
+                16 << 8,
+                0,
+                // body 1
+                0, 0, 0, 0,
+                (1 << 31) | 4, 0, 0, 0,
+                // header 2
+                0,
+                0,
+                16 << 8,
+                0,
+                // body 2
+                0, 0, 0, 0,
+                (1 << 31) | 4, 0, 0, 0,
+                // header 3
+                0,
+                0,
+                16 << 8 | 16,
+                0,
+                // body 3
+                0, 0, 0, 0,
+                (1 << 31) | 4, 0, 0, 0,
+                // leaf header
+                0,
+                0,
+                0,
+                0,
+                // leaf body
+                0, 0, 0, 0,
+                175, 0, 0, 0,
+
+                // leaf values
+                1,
+                2,
+                3,
+            ],
+        });
     }
 }

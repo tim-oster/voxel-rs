@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::chunk::BlockId;
 use crate::storage::chunk;
 use crate::storage::octree::{Octree, Position};
-use crate::storage::svo_new::Svo;
+use crate::storage::svo::Svo;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 struct ChunkPos {
