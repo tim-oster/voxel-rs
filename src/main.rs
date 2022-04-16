@@ -4,6 +4,7 @@ extern crate memoffset;
 
 use std::{mem, ptr};
 use std::ffi::c_void;
+use std::ops::Add;
 use std::path::Path;
 use std::time::Instant;
 
@@ -13,8 +14,10 @@ use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
 use gl::types::*;
 use image::GenericImageView;
 use imgui::{Condition, Window};
+use crate::chunk::BlockId;
 
 use crate::storage::chunk;
+use crate::storage::world::World;
 
 mod graphics;
 mod core;
@@ -50,7 +53,7 @@ macro_rules! gl_check_error {
 fn main() {
     println!("loading model file");
     let start = Instant::now();
-    let vox_data = dot_vox::load("assets/ignore/terrain.vox").unwrap();
+    let vox_data = dot_vox::load("assets/ignore/simple.vox").unwrap();
 
     println!("{}s; converting into chunks", start.elapsed().as_secs_f32());
     let start = Instant::now();
@@ -62,7 +65,7 @@ fn main() {
 
     println!("{}s; serializing svo", start.elapsed().as_secs_f32());
     let start = Instant::now();
-    let svo_buffer = svo.serialize();
+    let mut svo_buffer = svo.serialize();
 
     println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
 
@@ -110,7 +113,7 @@ fn main() {
     unsafe {
         gl::GenBuffers(1, &mut world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-        gl::BufferData(gl::SHADER_STORAGE_BUFFER, (svo_buffer.bytes.len() * 4 + 4) as GLsizeiptr as GLsizeiptr, ptr::null(), gl::STATIC_READ);
+        gl::BufferData(gl::SHADER_STORAGE_BUFFER, ((svo_buffer.bytes.len() * 4 + 4) as GLsizeiptr) * 2, ptr::null(), gl::STATIC_READ);
         gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 0 as GLsizeiptr, 4 as GLsizeiptr, &max_depth_exp2 as *const f32 as *const c_void);
         gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.bytes[0] as *const u32 as *const c_void);
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
@@ -126,11 +129,15 @@ fn main() {
         gl::FrontFace(gl::CCW);
     }
 
+    #[repr(align(16))]
+    struct AlignedVec3<T>(cgmath::Vector3<T>);
+    #[repr(align(16))]
+    struct AlignedPoint3<T>(cgmath::Point3<T>);
+
     #[repr(C)]
     struct PickerData {
-        block_pos: cgmath::Point3<f32>,
-        parent_index: u32,
-        octant_idx: u32,
+        block_pos: AlignedPoint3<f32>,
+        block_normal: AlignedVec3<f32>,
     }
     let picker_data;
 
@@ -161,6 +168,8 @@ fn main() {
     let (w, h) = window.get_size();
     let mut ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
 
+    let mut selected_block = 0 as BlockId;
+
     while !window.should_close() {
         window.update(|frame| {
             Window::new("Debug")
@@ -181,13 +190,19 @@ fn main() {
                         camera.forward.x, camera.forward.y, camera.forward.z,
                     ));
 
-                    let mut block_pos = unsafe { (*picker_data).block_pos };
+                    let mut block_pos = unsafe { (*picker_data).block_pos.0 };
                     if block_pos.x == f32::MAX {
                         block_pos = Point3::new(0.0, 0.0, 0.0);
                     }
                     frame.ui.text(format!(
                         "block pos: ({:.2},{:.2},{:.2})",
                         block_pos.x, block_pos.y, block_pos.z,
+                    ));
+
+                    let block_normal = unsafe { (*picker_data).block_normal.0 };
+                    frame.ui.text(format!(
+                        "block normal: ({},{},{})",
+                        block_normal.x as i32, block_normal.y as i32, block_normal.z as i32,
                     ));
                 });
 
@@ -254,36 +269,75 @@ fn main() {
 
             // removing blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
-                let block_pos = unsafe { (*picker_data).block_pos };
+                let block_pos = unsafe { (*picker_data).block_pos.0 };
                 if block_pos.x != f32::MAX {
-                    world.set_block(block_pos.x as i32, block_pos.x as i32, block_pos.x as i32, chunk::NO_BLOCK);
-                    // TODO partial rebuild
-                }
+                    let x = block_pos.x as i32;
+                    let y = block_pos.y as i32;
+                    let z = block_pos.z as i32;
 
-                // TODO
-                // unsafe {
-                //     let parent_index = (*picker_data).parent_index as usize;
-                //     if parent_index != 0 {
-                //         let bit = 1 << (*picker_data).octant_idx;
-                //         svo.descriptors[parent_index] ^= bit;
-                //         svo.descriptors[parent_index] ^= (bit << 8);
-                //
-                //         // TODO use persisted mapping instead
-                //         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-                //         gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo.descriptors.len() * 4) as GLsizeiptr, &svo.descriptors[0] as *const u32 as *const c_void);
-                //         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
-                //     }
-                // }
+                    world.set_block(x, y, z, chunk::NO_BLOCK);
+
+                    // TODO do partial rebuild instead
+
+                    println!("{}", svo_buffer.bytes.len());
+                    println!("rebuilding...");
+                    let start = Instant::now();
+                    let svo = world.build_svo();
+                    svo_buffer = svo.serialize();
+                    println!("done after: {}s", start.elapsed().as_secs_f32());
+
+                    println!("{}", svo_buffer.bytes.len());
+
+                    unsafe {
+                        // TODO use persisted mapping instead
+                        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
+                        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.bytes[0] as *const u32 as *const c_void);
+                        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+                    }
+                }
             }
 
             // block picking
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button3) {
-                // TODO
+                let block_pos = unsafe { (*picker_data).block_pos.0 };
+                if block_pos.x != f32::MAX {
+                    let x = block_pos.x as i32;
+                    let y = block_pos.y as i32;
+                    let z = block_pos.z as i32;
+                    selected_block = world.get_block(x, y, z);
+                }
             }
 
             // adding blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
-                // TODO
+                let block_pos = unsafe { (*picker_data).block_pos.0 };
+                let block_normal = unsafe { ((*picker_data).block_normal.0) };
+                if block_pos.x != f32::MAX {
+                    let block_pos = block_pos.add(block_normal);
+                    let x = block_pos.x as i32;
+                    let y = block_pos.y as i32;
+                    let z = block_pos.z as i32;
+
+                    world.set_block(x, y, z, selected_block);
+
+                    // TODO do partial rebuild instead
+
+                    println!("{}", svo_buffer.bytes.len());
+                    println!("rebuilding...");
+                    let start = Instant::now();
+                    let svo = world.build_svo();
+                    svo_buffer = svo.serialize();
+                    println!("done after: {}s", start.elapsed().as_secs_f32());
+
+                    println!("{}", svo_buffer.bytes.len());
+
+                    unsafe {
+                        // TODO use persisted mapping instead
+                        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
+                        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.bytes[0] as *const u32 as *const c_void);
+                        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+                    }
+                }
             }
 
             unsafe {
@@ -304,7 +358,7 @@ fn main() {
                 world_shader.set_f32("u_fovy", 70.0f32.to_radians());
                 world_shader.set_f32("u_aspect", frame.get_aspect());
                 // shader.set_i32("u_max_depth", svo.max_depth);
-                world_shader.set_f32vec3("u_highlight_pos", &(*picker_data).block_pos.to_vec());
+                world_shader.set_f32vec3("u_highlight_pos", &(*picker_data).block_pos.0.to_vec());
 
                 // gl::ActiveTexture(gl::TEXTURE0);
                 // gl::BindTexture(gl::TEXTURE_2D, texture);
