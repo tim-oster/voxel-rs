@@ -4,7 +4,7 @@ use cgmath::num_traits::Pow;
 
 pub(in crate::storage) type OctantId = usize;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Position(pub u32, pub u32, pub u32);
 
 impl Position {
@@ -39,7 +39,7 @@ impl<T> Octree<T> {
     /// Adds the given leaf value at the given position. If the tree is not big enough yet,
     /// it expands it until it can successfully insert. Children along the path are overridden,
     /// if any exist.
-    pub fn add_leaf(&mut self, pos: Position, leaf: T) {
+    pub fn add_leaf(&mut self, pos: Position, leaf: T) -> OctantId {
         self.expand_to(pos.required_depth());
 
         let mut it = self.root.unwrap();
@@ -67,7 +67,7 @@ impl<T> Octree<T> {
                 // if this is the end of the tree, insert the content
                 if size == 1 {
                     self.octants[child].content = Some(leaf);
-                    break;
+                    return child;
                 }
             } else {
                 let prev_id = it;
@@ -80,15 +80,17 @@ impl<T> Octree<T> {
                 if size == 1 {
                     let current = &mut self.octants[next_id];
                     current.content = Some(leaf);
-                    break;
+                    return next_id;
                 }
             }
         }
+
+        panic!("could not reach end of tree");
     }
 
     /// Removes the leaf at the given position if it exists. Empty parents are *not* removed from
     /// the tree. Look at [`Octree::compact`] for removing empty parents.
-    pub fn remove_leaf(&mut self, pos: Position) {
+    pub fn remove_leaf(&mut self, pos: Position) -> Option<OctantId> {
         let mut it = self.root.unwrap();
         let mut pos = pos;
         let mut size = 2f32.pow(self.depth as i32) as u32;
@@ -116,6 +118,8 @@ impl<T> Octree<T> {
                 break;
             }
         }
+
+        None
     }
 
     pub fn expand(&mut self, by: u32) {

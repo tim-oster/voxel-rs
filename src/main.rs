@@ -14,9 +14,10 @@ use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
 use gl::types::*;
 use image::GenericImageView;
 use imgui::{Condition, Window};
-use crate::chunk::BlockId;
 
+use crate::chunk::{BlockId, Chunk};
 use crate::storage::chunk;
+use crate::storage::octree::Position;
 use crate::storage::world::World;
 
 mod graphics;
@@ -58,16 +59,17 @@ fn main() {
     println!("{}s; converting into chunks", start.elapsed().as_secs_f32());
     let start = Instant::now();
     let mut world = storage::world::World::new_from_vox(vox_data);
+    world.get_changed_chunks(); // drain all changed chunks
 
     println!("{}s; converting into svo", start.elapsed().as_secs_f32());
     let start = Instant::now();
-    let svo = world.build_svo();
+    let mut svo = world.build_svo();
 
     println!("{}s; serializing svo", start.elapsed().as_secs_f32());
     let start = Instant::now();
     let mut svo_buffer = svo.serialize();
 
-    println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
+    println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
 
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.request_grab_cursor(true);
@@ -113,9 +115,9 @@ fn main() {
     unsafe {
         gl::GenBuffers(1, &mut world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-        gl::BufferData(gl::SHADER_STORAGE_BUFFER, ((svo_buffer.bytes.len() * 4 + 4) as GLsizeiptr) * 2, ptr::null(), gl::STATIC_READ);
+        gl::BufferData(gl::SHADER_STORAGE_BUFFER, ((svo_buffer.buffer.bytes.len() * 4 + 4) as GLsizeiptr) * 2, ptr::null(), gl::STATIC_READ);
         gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 0 as GLsizeiptr, 4 as GLsizeiptr, &max_depth_exp2 as *const f32 as *const c_void);
-        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.bytes[0] as *const u32 as *const c_void);
+        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.buffer.bytes[0] as *const u32 as *const c_void);
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
@@ -168,9 +170,33 @@ fn main() {
     let (w, h) = window.get_size();
     let mut ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
 
-    let mut selected_block = 0 as BlockId;
+    let mut selected_block: BlockId = 0xffffff;
 
     while !window.should_close() {
+        // TODO do this in the background
+        {
+            let changed = world.get_changed_chunks();
+            if !changed.is_empty() {
+                println!("rebuilding...");
+                let start = Instant::now();
+                for pos in &changed {
+                    if let Some(chunk) = world.chunks.get(pos) {
+                        let octree = chunk.build_octree();
+                        svo.set(Position(pos.x as u32, pos.y as u32, pos.z as u32), Some(octree));
+                    }
+                }
+                svo_buffer = svo.serialize_delta(svo_buffer);
+                println!("done after: {}ms", start.elapsed().as_millis());
+
+                unsafe {
+                    // TODO use persisted mapping instead
+                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
+                    gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.buffer.bytes[0] as *const u32 as *const c_void);
+                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+                }
+            }
+        }
+
         window.update(|frame| {
             Window::new("Debug")
                 .size([300.0, 100.0], Condition::FirstUseEver)
@@ -274,26 +300,7 @@ fn main() {
                     let x = block_pos.x as i32;
                     let y = block_pos.y as i32;
                     let z = block_pos.z as i32;
-
                     world.set_block(x, y, z, chunk::NO_BLOCK);
-
-                    // TODO do partial rebuild instead
-
-                    println!("{}", svo_buffer.bytes.len());
-                    println!("rebuilding...");
-                    let start = Instant::now();
-                    let svo = world.build_svo();
-                    svo_buffer = svo.serialize();
-                    println!("done after: {}s", start.elapsed().as_secs_f32());
-
-                    println!("{}", svo_buffer.bytes.len());
-
-                    unsafe {
-                        // TODO use persisted mapping instead
-                        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-                        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.bytes[0] as *const u32 as *const c_void);
-                        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
-                    }
                 }
             }
 
@@ -317,26 +324,7 @@ fn main() {
                     let x = block_pos.x as i32;
                     let y = block_pos.y as i32;
                     let z = block_pos.z as i32;
-
                     world.set_block(x, y, z, selected_block);
-
-                    // TODO do partial rebuild instead
-
-                    println!("{}", svo_buffer.bytes.len());
-                    println!("rebuilding...");
-                    let start = Instant::now();
-                    let svo = world.build_svo();
-                    svo_buffer = svo.serialize();
-                    println!("done after: {}s", start.elapsed().as_secs_f32());
-
-                    println!("{}", svo_buffer.bytes.len());
-
-                    unsafe {
-                        // TODO use persisted mapping instead
-                        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-                        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.bytes[0] as *const u32 as *const c_void);
-                        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
-                    }
                 }
             }
 

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::chunk::BlockId;
 use crate::storage::chunk;
@@ -6,10 +6,10 @@ use crate::storage::octree::{Octree, Position};
 use crate::storage::svo::Svo;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
-struct ChunkPos {
-    x: i32,
-    y: i32,
-    z: i32,
+pub struct ChunkPos {
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
 }
 
 impl ChunkPos {
@@ -23,13 +23,18 @@ impl ChunkPos {
 }
 
 pub struct World {
-    chunks: HashMap<ChunkPos, chunk::Chunk>,
+    // TODO do not make public later
+    pub chunks: HashMap<ChunkPos, chunk::Chunk>,
+    changed_chunks_set: HashSet<ChunkPos>,
+    changed_chunks: VecDeque<ChunkPos>,
 }
 
 impl World {
     pub fn new() -> World {
         World {
             chunks: HashMap::new(),
+            changed_chunks_set: HashSet::new(),
+            changed_chunks: VecDeque::new(),
         }
     }
 
@@ -49,6 +54,17 @@ impl World {
             chunk = self.chunks.get_mut(&pos);
         }
         chunk.unwrap().set_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32, block);
+
+        if !self.changed_chunks_set.contains(&pos) {
+            self.changed_chunks_set.insert(pos);
+            self.changed_chunks.push_back(pos);
+        }
+    }
+
+    pub fn get_changed_chunks(&mut self) -> Vec<ChunkPos> {
+        let changed = self.changed_chunks.drain(..).collect::<Vec<ChunkPos>>();
+        self.changed_chunks_set.clear();
+        changed
     }
 }
 
@@ -75,6 +91,10 @@ impl World {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashSet, VecDeque};
+
+    use crate::storage::world::ChunkPos;
+
     #[test]
     fn chunk_pos_from_block_pos() {
         use super::ChunkPos;
@@ -134,5 +154,26 @@ mod tests {
         assert_eq!(chunk.get_block(1, 0, 0), 102);
         assert_eq!(chunk.get_block(0, 1, 0), 103);
         assert_eq!(chunk.get_block(1, 1, 0), 104);
+    }
+
+    #[test]
+    fn world_changed_chunks() {
+        let mut world = super::World::new();
+
+        for _ in 0..2 {
+            world.set_block(0, 0, 0, 1);
+        }
+
+        let mut set = HashSet::new();
+        set.insert(ChunkPos::from_block_pos(0, 0, 0));
+        assert_eq!(world.changed_chunks_set, set);
+
+        assert_eq!(world.changed_chunks, VecDeque::from(vec![ChunkPos::from_block_pos(0, 0, 0)]));
+
+        let changed = world.get_changed_chunks();
+        assert_eq!(changed, vec![ChunkPos::from_block_pos(0, 0, 0)]);
+
+        assert_eq!(true, world.changed_chunks_set.is_empty());
+        assert_eq!(true, world.changed_chunks.is_empty());
     }
 }
