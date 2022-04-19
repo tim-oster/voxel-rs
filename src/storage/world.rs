@@ -70,13 +70,11 @@ impl World {
 
 
 impl World {
-    pub fn new_from_vox(data: dot_vox::DotVoxData) -> World {
+    pub fn add_vox_at(&mut self, data: &dot_vox::DotVoxData, block_x: i32, block_y: i32, block_z: i32) {
         let model = &data.models[0];
-        let mut world = World::new();
         for v in &model.voxels {
-            world.set_block(v.x as i32, v.z as i32, v.y as i32, data.palette[v.i as usize]);
+            self.set_block(block_x + v.x as i32, block_y + v.z as i32, block_z + v.y as i32, data.palette[v.i as usize]);
         }
-        world
     }
 
     pub fn build_svo(&self) -> Svo<Octree<BlockId>> {

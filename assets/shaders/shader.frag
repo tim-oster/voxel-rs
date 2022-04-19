@@ -46,7 +46,7 @@ void main() {
     float specular = pow(max(dot(view_dir, reflect_dir), 0.0), 265) * specular_strength;
 
     octree_result shadow_res;
-    intersect_octree(res.pos + res.normal*0.0001, -u_light_dir, -1, shadow_res);
+    intersect_octree(res.pos + res.normal*0.0005, -u_light_dir, -1, shadow_res);
     float shadow = shadow_res.t < 0 ? 1.0 : 0.0;
 
     float light = u_ambient + (diffuse + specular) * shadow;

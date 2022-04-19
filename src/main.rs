@@ -58,7 +58,14 @@ fn main() {
 
     println!("{}s; converting into chunks", start.elapsed().as_secs_f32());
     let start = Instant::now();
-    let mut world = storage::world::World::new_from_vox(vox_data);
+    let mut world = storage::world::World::new();
+
+    let square = 1;
+    for x in 0..square {
+        for z in 0..square {
+            world.add_vox_at(&vox_data, x * 256, 0, z * 256);
+        }
+    }
     world.get_changed_chunks(); // drain all changed chunks
 
     println!("{}s; converting into svo", start.elapsed().as_secs_f32());
@@ -186,14 +193,16 @@ fn main() {
                     }
                 }
                 svo_buffer = svo.serialize_delta(svo_buffer);
-                println!("done after: {}ms", start.elapsed().as_millis());
 
+                // TODO only send partial update to GPU
                 unsafe {
                     // TODO use persisted mapping instead
                     gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
                     gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.buffer.bytes[0] as *const u32 as *const c_void);
                     gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
                 }
+
+                println!("done after: {}ms", start.elapsed().as_millis());
             }
         }
 
