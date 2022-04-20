@@ -4,6 +4,7 @@ extern crate memoffset;
 
 use std::{mem, ptr};
 use std::ffi::c_void;
+use std::mem::transmute;
 use std::ops::Add;
 use std::path::Path;
 use std::time::Instant;
@@ -117,14 +118,31 @@ fn main() {
     let mut use_mouse_input = true;
 
     let mut world_ssbo = 0;
-    let max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
+    let mut max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
+    let mut world_buffer;
 
     unsafe {
         gl::GenBuffers(1, &mut world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-        gl::BufferData(gl::SHADER_STORAGE_BUFFER, ((svo_buffer.buffer.bytes.len() * 4 + 4) as GLsizeiptr) * 2, ptr::null(), gl::STATIC_READ);
-        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 0 as GLsizeiptr, 4 as GLsizeiptr, &max_depth_exp2 as *const f32 as *const c_void);
-        gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.buffer.bytes[0] as *const u32 as *const c_void);
+
+        let buffer_size = ((svo_buffer.buffer.bytes.len() * 4 + 4) as GLsizeiptr) * 2;
+
+        gl::BufferStorage(
+            gl::SHADER_STORAGE_BUFFER,
+            buffer_size,
+            ptr::null(),
+            gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+        );
+        world_buffer = gl::MapBufferRange(
+            gl::SHADER_STORAGE_BUFFER,
+            0,
+            buffer_size,
+            gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+        ) as *mut u32;
+
+        ptr::write(world_buffer, max_depth_exp2.to_bits());
+        ptr::copy(svo_buffer.buffer.bytes.as_ptr(), world_buffer.offset(1), svo_buffer.buffer.bytes.len());
+
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
@@ -193,13 +211,12 @@ fn main() {
                     }
                 }
                 svo_buffer = svo.serialize_delta(svo_buffer);
+                max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
 
                 // TODO only send partial update to GPU
                 unsafe {
-                    // TODO use persisted mapping instead
-                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
-                    gl::BufferSubData(gl::SHADER_STORAGE_BUFFER, 4 as GLsizeiptr, (svo_buffer.buffer.bytes.len() * 4) as GLsizeiptr, &svo_buffer.buffer.bytes[0] as *const u32 as *const c_void);
-                    gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+                    ptr::write(world_buffer, max_depth_exp2.to_bits());
+                    ptr::copy(svo_buffer.buffer.bytes.as_ptr(), world_buffer.offset(1), svo_buffer.buffer.bytes.len());
                 }
 
                 println!("done after: {}ms", start.elapsed().as_millis());
