@@ -18,7 +18,7 @@ void main() {
 
     if (res.t > 0) {
         pos = res.pos;
-        normal = res.normal;
+        normal = FACE_NORMALS[res.face_id];
     } else {
         // max float = no hit
         pos = vec3(3.402823466E+38);

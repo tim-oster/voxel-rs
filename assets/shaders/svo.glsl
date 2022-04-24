@@ -1,13 +1,38 @@
 const int MAX_STEPS = 1000;
 
+const vec3 FACE_NORMALS[6] = vec3[6](
+vec3(-1, 0, 0),
+vec3(1, 0, 0),
+vec3(0, -1, 0),
+vec3(0, 1, 0),
+vec3(0, 0, -1),
+vec3(0, 0, 1)
+);
+
+const vec3 FACE_TANGENTS[6] = vec3[6](
+vec3(0, 0, 1),
+vec3(0, 0, -1),
+vec3(1, 0, 0),
+vec3(1, 0, 0),
+vec3(-1, 0, 0),
+vec3(1, 0, 0)
+);
+
+const vec3 FACE_BITANGENTS[6] = vec3[6](
+vec3(0, 1, 0),
+vec3(0, 1, 0),
+vec3(0, 0, 1),
+vec3(0, 0, 1),
+vec3(0, 1, 0),
+vec3(0, 1, 0)
+);
+
 struct octree_result {
     float t;
     uint value;
-    vec3 normal;
+    int face_id;
     vec3 pos;
     vec2 uv;
-    int parent_index;
-    int octant_idx;
 };
 
 // https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Buffer_backed
@@ -103,9 +128,6 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
             if (is_leaf) {
                 // TODO put after loop?
 
-                res.parent_index = ptr;
-                res.octant_idx = octant_idx;
-
                 int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
                 if ((next_ptr & (1 << 31)) != 0) {
                     // use as relative offset if relative bit is set
@@ -128,26 +150,26 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
                 // TODO can be optimized?
                 if (tc_min == tx_corner) {
-                    res.normal = vec3(1, 0, 0) * -sign(rd.x);
+                    res.face_id = int((sign(-rd.x) + 1) / 2);
                     res.uv = vec2(
                     ((ro.z + rd.z * tx_corner) - pos.z) / scale_exp2,
                     ((ro.y + rd.y * tx_corner) - pos.y) / scale_exp2
                     );
-                    if (res.normal.x > 0) res.uv.x = 1 - res.uv.x;
+                    if (sign(rd.x) > 0) res.uv.x = 1 - res.uv.x;
                 } else if (tc_min == ty_corner) {
-                    res.normal = vec3(0, 1, 0) * -sign(rd.y);
+                    res.face_id = 2 + int((sign(-rd.y) + 1) / 2);
                     res.uv = vec2(
                     ((ro.x + rd.x * ty_corner) - pos.x) / scale_exp2,
                     ((ro.z + rd.z * ty_corner) - pos.z) / scale_exp2
                     );
-                    if (res.normal.y < 0) res.uv.x = 1 - res.uv.x;
+                    if (sign(rd.y) < 0) res.uv.x = 1 - res.uv.x;
                 } else {
-                    res.normal = vec3(0, 0, 1) * -sign(rd.z);
+                    res.face_id = 4 + int((sign(-rd.z) + 1) / 2);
                     res.uv = vec2(
                     ((ro.x + rd.x * tz_corner) - pos.x) / scale_exp2,
                     ((ro.y + rd.y * tz_corner) - pos.y) / scale_exp2
                     );
-                    if (res.normal.z < 0) res.uv.x = 1 - res.uv.x;
+                    if (sign(rd.z) < 0) res.uv.x = 1 - res.uv.x;
                 }
 
                 res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + epsilon), pos.x + scale_exp2 - epsilon);
@@ -219,7 +241,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
             scale_exp2 = intBitsToFloat((scale - MAX_STACK_DEPTH + 127) << 23);
 
             ptr = ptr_stack[scale];
-            parent_octant_idx = parent_octant_idx_stack[scale]; // TODO can be recalculated using index?
+            parent_octant_idx = parent_octant_idx_stack[scale];// TODO can be recalculated using index?
             t_max = t_max_stack[scale];
 
             int shx = floatBitsToInt(pos.x) >> scale;

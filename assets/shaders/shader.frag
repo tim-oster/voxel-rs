@@ -22,9 +22,14 @@ uniform vec3 u_highlight_pos;
 struct Material {
     float specular_pow;
     float specular_strength;
-    uint tex_top;
-    uint tex_side;
-    uint tex_bottom;
+
+    int tex_top;
+    int tex_side;
+    int tex_bottom;
+
+    int tex_top_normal;
+    int tex_side_normal;
+    int tex_bottom_normal;
 };
 
 layout (std430, binding = 2) readonly buffer material_registry {
@@ -52,21 +57,29 @@ void main() {
 
     Material mat = materials[res.value];
 
-    uint tex_id = mat.tex_side;
-    int face_id = int(dot(abs(res.normal.yxz), vec3(0, 2, 4)));
-    if (dot(res.normal, vec3(1)) < 0) face_id += 1;
-    if (face_id == 0) tex_id = mat.tex_top;
-    else if (face_id == 1) tex_id = mat.tex_bottom;
+    int tex_id = mat.tex_side;
+    int tex_normal_id = mat.tex_side_normal;
+    if (res.face_id == 3) { tex_id = mat.tex_top; tex_normal_id = mat.tex_top_normal; }
+    else if (res.face_id == 2) { tex_id = mat.tex_bottom; tex_normal_id = mat.tex_bottom_normal; }
     vec4 tex_color = texture(u_texture, vec3(res.uv, float(tex_id)));
 
-    float diffuse = max(dot(res.normal, -u_light_dir), 0.0);
+    vec3 normal = FACE_NORMALS[res.face_id];
+    vec3 tangent = FACE_TANGENTS[res.face_id];
+    vec3 bitangent = FACE_BITANGENTS[res.face_id];
+    if (tex_normal_id != -1) {
+        vec3 tex = texture(u_texture, vec3(res.uv, float(tex_normal_id))).xzy; // blue = up -> y axis
+        tex = normalize(tex * 2 - 1);
+        normal = tex.x * tangent + tex.y * normal + tex.z * bitangent;
+    }
+
+    float diffuse = max(dot(normal, -u_light_dir), 0.0);
 
     vec3 view_dir = normalize(res.pos - u_cam_pos);
-    vec3 reflect_dir = reflect(-u_light_dir, res.normal);
+    vec3 reflect_dir = reflect(-u_light_dir, normal);
     float specular = pow(max(dot(view_dir, reflect_dir), 0.0), mat.specular_pow) * mat.specular_strength;
 
     octree_result shadow_res;
-    intersect_octree(res.pos + res.normal*0.0005, -u_light_dir, -1, shadow_res);
+    intersect_octree(res.pos + normal*0.0005, -u_light_dir, -1, shadow_res);
     float shadow = shadow_res.t < 0 ? 1.0 : 0.0;
 
     float light = u_ambient + (diffuse + specular) * shadow;

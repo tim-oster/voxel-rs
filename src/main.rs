@@ -75,11 +75,15 @@ fn main() {
     let tex_array = graphics::Resource::new(
         || graphics::TextureArrayBuilder::new(4)
             .add_texture("dirt", "assets/textures/dirt.png")?
-            .add_texture("glass", "assets/textures/glass.png")?
-            .add_texture("glass_light_blue", "assets/textures/glass_light_blue.png")?
+            .add_texture("dirt_normal", "assets/textures/dirt_n.png")?
             .add_texture("grass_side", "assets/textures/grass_side.png")?
+            .add_texture("grass_side_normal", "assets/textures/grass_side_n.png")?
             .add_texture("grass_top", "assets/textures/grass_top.png")?
+            .add_texture("grass_top_normal", "assets/textures/grass_top_n.png")?
             .add_texture("stone", "assets/textures/stone.png")?
+            .add_texture("stone_normal", "assets/textures/stone_n.png")?
+            .add_texture("stone_bricks", "assets/textures/stone_bricks.png")?
+            .add_texture("stone_bricks_normal", "assets/textures/stone_bricks_n.png")?
             .build()
     ).unwrap();
 
@@ -213,39 +217,64 @@ fn main() {
     struct Material {
         specular_pow: f32,
         specular_strength: f32,
-        tex_top: u32,
-        tex_side: u32,
-        tex_bottom: u32,
+        tex_top: i32,
+        tex_side: i32,
+        tex_bottom: i32,
+        tex_top_normal: i32,
+        tex_side_normal: i32,
+        tex_bottom_normal: i32,
     }
 
     let materials = vec![
         Material { // air
             specular_pow: 0.0,
             specular_strength: 0.0,
-            tex_top: 0,
-            tex_side: 0,
-            tex_bottom: 0,
+            tex_top: -1,
+            tex_side: -1,
+            tex_bottom: -1,
+            tex_top_normal: -1,
+            tex_side_normal: -1,
+            tex_bottom_normal: -1,
         },
         Material { // grass
             specular_pow: 14.0,
             specular_strength: 0.4,
-            tex_top: tex_array.lookup("grass_top").unwrap(),
-            tex_side: tex_array.lookup("grass_side").unwrap(),
-            tex_bottom: tex_array.lookup("dirt").unwrap(),
+            tex_top: tex_array.lookup("grass_top").unwrap() as i32,
+            tex_side: tex_array.lookup("grass_side").unwrap() as i32,
+            tex_bottom: tex_array.lookup("dirt").unwrap() as i32,
+            tex_top_normal: tex_array.lookup("grass_top_normal").unwrap() as i32,
+            tex_side_normal: tex_array.lookup("grass_side_normal").unwrap() as i32,
+            tex_bottom_normal: tex_array.lookup("dirt_normal").unwrap() as i32,
         },
         Material { // dirt
             specular_pow: 14.0,
             specular_strength: 0.4,
-            tex_top: tex_array.lookup("dirt").unwrap(),
-            tex_side: tex_array.lookup("dirt").unwrap(),
-            tex_bottom: tex_array.lookup("dirt").unwrap(),
+            tex_top: tex_array.lookup("dirt").unwrap() as i32,
+            tex_side: tex_array.lookup("dirt").unwrap() as i32,
+            tex_bottom: tex_array.lookup("dirt").unwrap() as i32,
+            tex_top_normal: tex_array.lookup("dirt_normal").unwrap() as i32,
+            tex_side_normal: tex_array.lookup("dirt_normal").unwrap() as i32,
+            tex_bottom_normal: tex_array.lookup("dirt_normal").unwrap() as i32,
         },
         Material { // stone
             specular_pow: 70.0,
             specular_strength: 0.4,
-            tex_top: tex_array.lookup("stone").unwrap(),
-            tex_side: tex_array.lookup("stone").unwrap(),
-            tex_bottom: tex_array.lookup("stone").unwrap(),
+            tex_top: tex_array.lookup("stone").unwrap() as i32,
+            tex_side: tex_array.lookup("stone").unwrap() as i32,
+            tex_bottom: tex_array.lookup("stone").unwrap() as i32,
+            tex_top_normal: tex_array.lookup("stone_normal").unwrap() as i32,
+            tex_side_normal: tex_array.lookup("stone_normal").unwrap() as i32,
+            tex_bottom_normal: tex_array.lookup("stone_normal").unwrap() as i32,
+        },
+        Material { // stone bricks
+            specular_pow: 70.0,
+            specular_strength: 0.4,
+            tex_top: tex_array.lookup("stone_bricks").unwrap() as i32,
+            tex_side: tex_array.lookup("stone_bricks").unwrap() as i32,
+            tex_bottom: tex_array.lookup("stone_bricks").unwrap() as i32,
+            tex_top_normal: tex_array.lookup("stone_bricks_normal").unwrap() as i32,
+            tex_side_normal: tex_array.lookup("stone_bricks_normal").unwrap() as i32,
+            tex_bottom_normal: tex_array.lookup("stone_bricks_normal").unwrap() as i32,
         },
     ];
 
@@ -397,6 +426,9 @@ fn main() {
             }
             if frame.input.was_key_pressed(&glfw::Key::Num3) {
                 selected_block = 3;
+            }
+            if frame.input.was_key_pressed(&glfw::Key::Num4) {
+                selected_block = 4;
             }
 
             if use_mouse_input {
