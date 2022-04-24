@@ -53,34 +53,8 @@ macro_rules! gl_check_error {
 }
 
 fn main() {
-    println!("loading model file");
-    let start = Instant::now();
-    let vox_data = dot_vox::load("assets/ignore/simple.vox").unwrap();
-
-    println!("{}s; converting into chunks", start.elapsed().as_secs_f32());
-    let start = Instant::now();
-    let mut world = storage::world::World::new();
-
-    let square = 1;
-    for x in 0..square {
-        for z in 0..square {
-            world.add_vox_at(&vox_data, x * 256, 0, z * 256);
-        }
-    }
-    world.get_changed_chunks(); // drain all changed chunks
-
-    println!("{}s; converting into svo", start.elapsed().as_secs_f32());
-    let start = Instant::now();
-    let mut svo = world.build_svo();
-
-    println!("{}s; serializing svo", start.elapsed().as_secs_f32());
-    let start = Instant::now();
-    let mut svo_buffer = svo.serialize();
-
-    println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
-
     let mut window = core::Window::new(1024, 768, "voxel engine");
-    window.request_grab_cursor(true);
+    window.request_grab_cursor(false);
 
     let mut world_shader = graphics::Resource::new(
         || graphics::ShaderProgramBuilder::new()
@@ -118,34 +92,65 @@ fn main() {
     let mut use_mouse_input = true;
 
     let mut world_ssbo = 0;
-    let mut max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
     let mut world_buffer;
+    let world_buffer_size = 1000 * 1024 * 1024; // 1000 MB
 
     unsafe {
         gl::GenBuffers(1, &mut world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
 
-        let buffer_size = ((svo_buffer.buffer.bytes.len() * 4 + 4) as GLsizeiptr) * 2;
-
         gl::BufferStorage(
             gl::SHADER_STORAGE_BUFFER,
-            buffer_size,
+            world_buffer_size,
             ptr::null(),
             gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
         );
         world_buffer = gl::MapBufferRange(
             gl::SHADER_STORAGE_BUFFER,
             0,
-            buffer_size,
+            world_buffer_size,
             gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
         ) as *mut u32;
-
-        ptr::write(world_buffer, max_depth_exp2.to_bits());
-        ptr::copy(svo_buffer.buffer.bytes.as_ptr(), world_buffer.offset(1), svo_buffer.buffer.bytes.len());
 
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
+
+    // WORLD LOADING START
+
+    println!("loading model file");
+    let start = Instant::now();
+    let vox_data = dot_vox::load("assets/ignore/terrain.vox").unwrap();
+
+    println!("{}s; converting into chunks", start.elapsed().as_secs_f32());
+    let start = Instant::now();
+    let mut world = storage::world::World::new();
+
+    let square = 4;
+    for x in 0..square {
+        for z in 0..square {
+            world.add_vox_at(&vox_data, x * 256, 0, z * 256);
+        }
+    }
+    world.get_changed_chunks(); // drain all changed chunks
+
+    println!("{}s; converting into svo", start.elapsed().as_secs_f32());
+    let start = Instant::now();
+    let mut svo = world.build_svo();
+
+    println!("{}s; serializing svo", start.elapsed().as_secs_f32());
+    let start = Instant::now();
+    let mut svo_buffer = svo.serialize();
+
+    println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
+
+    let mut max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
+    unsafe {
+        ptr::write(world_buffer, max_depth_exp2.to_bits());
+        ptr::copy(svo_buffer.buffer.bytes.as_ptr(), world_buffer.offset(1), svo_buffer.buffer.bytes.len());
+    }
+
+    // WORLD LOADING END
 
     unsafe {
         // gl::Enable(gl::DEPTH_TEST);
@@ -197,12 +202,12 @@ fn main() {
 
     let mut selected_block: BlockId = 0xffffff;
 
+    window.request_grab_cursor(true);
     while !window.should_close() {
         // TODO do this in the background
         {
             let changed = world.get_changed_chunks();
             if !changed.is_empty() {
-                println!("rebuilding...");
                 let start = Instant::now();
                 for pos in &changed {
                     if let Some(chunk) = world.chunks.get(pos) {
@@ -213,13 +218,20 @@ fn main() {
                 svo_buffer = svo.serialize_delta(svo_buffer);
                 max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
 
-                // TODO only send partial update to GPU
                 unsafe {
                     ptr::write(world_buffer, max_depth_exp2.to_bits());
-                    ptr::copy(svo_buffer.buffer.bytes.as_ptr(), world_buffer.offset(1), svo_buffer.buffer.bytes.len());
                 }
 
-                println!("done after: {}ms", start.elapsed().as_millis());
+                for id in &svo_buffer.changed_octants {
+                    let range = svo_buffer.buffer.octant_to_range.get(id).unwrap();
+                    unsafe {
+                        ptr::copy(svo_buffer.buffer.bytes.as_ptr().offset(range.start as isize),
+                                  world_buffer.offset(1 + range.start as isize),
+                                  range.length);
+                    }
+                }
+
+                println!("rebuild took {}ms", start.elapsed().as_millis());
             }
         }
 

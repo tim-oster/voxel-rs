@@ -144,7 +144,8 @@ mod tests {
             materials: vec![],
         };
 
-        let world = super::World::new_from_vox(data);
+        let mut world = super::World::new();
+        world.add_vox_at(&data, 0, 0, 0);
         let chunk = world.chunks.get(&super::ChunkPos { x: 0, y: 0, z: 0 }).unwrap();
 
         assert_eq!(chunk.get_block(0, 0, 0), 101);

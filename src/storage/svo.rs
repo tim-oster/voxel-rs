@@ -9,9 +9,9 @@ use crate::storage::octree::{Octant, OctantId, Octree, Position};
 // TODO refactor whole implementation
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-struct Range {
-    start: usize,
-    length: usize,
+pub struct Range {
+    pub start: usize,
+    pub length: usize,
 
     ptr: MissingPointer, // TODO improve
 }
@@ -21,6 +21,7 @@ pub struct SerializedSvo {
     pub header_mask: u16,
     pub depth: u32,
     pub buffer: SvoBuffer,
+    pub changed_octants: HashSet<OctantId>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -30,7 +31,7 @@ pub struct SvoBuffer {
 
     pub bytes: Vec<u32>,
     free_ranges: Vec<Range>,
-    octant_to_range: HashMap<OctantId, Range>,
+    pub octant_to_range: HashMap<OctantId, Range>,
 
     // TODO should this be stored in the buffer?
     rebuild_targets: HashMap<OctantId, MissingPointer>,
@@ -110,6 +111,7 @@ impl<T: SvoSerializable> Svo<T> {
                 octant_to_range: Default::default(),
                 rebuild_targets: Default::default(),
             },
+            changed_octants: HashSet::new(),
         };
         self.serialize_to(dst)
     }
@@ -127,12 +129,13 @@ impl<T: SvoSerializable> Svo<T> {
             dst.buffer.bytes.extend(std::iter::repeat(0).take(5));
         }
 
-        let (header_mask, depth, _) = serialize_octree(&self.octree, &mut dst.buffer);
+        let (header_mask, depth, _, changed_octants) = serialize_octree(&self.octree, &mut dst.buffer);
         dst.buffer.bytes[0] = header_mask as u32;
         dst.buffer.bytes[4] = dst.buffer.octant_to_range.get(&self.octree.root.unwrap()).unwrap().start as u32;
 
         dst.header_mask = header_mask;
         dst.depth = depth;
+        dst.changed_octants = changed_octants;
         dst
     }
 
@@ -198,9 +201,11 @@ impl<T: SvoSerializable> Svo<T> {
     }
 }
 
-fn serialize_octree<T: SvoSerializable>(octree: &Octree<T>, dst: &mut SvoBuffer) -> (u16, u32, Vec<MissingPointer>) {
+fn serialize_octree<T: SvoSerializable>(octree: &Octree<T>, dst: &mut SvoBuffer) -> (u16, u32, Vec<MissingPointer>, HashSet<OctantId>) {
     let root_id = octree.root.unwrap();
     let root = &octree.octants[root_id];
+
+    let mut changed_octants = HashSet::new();
 
     if !dst.octant_to_range.contains_key(&root_id) {
         let mut staging_buf = Vec::new(); // TODO use memory pool?
@@ -218,6 +223,7 @@ fn serialize_octree<T: SvoSerializable>(octree: &Octree<T>, dst: &mut SvoBuffer)
                 buffer_index: ptr,
             },
         });
+        changed_octants.insert(root_id);
 
         dst.depth = octree.depth;
         for missing_ptr in ptrs {
@@ -256,10 +262,13 @@ fn serialize_octree<T: SvoSerializable>(octree: &Octree<T>, dst: &mut SvoBuffer)
             length: len,
             ptr: *missing_ptr,
         });
+
+        changed_octants.insert(missing_ptr.octant);
+        changed_octants.insert(root_id);
     }
 
     // TODO still return?
-    (dst.root_mask, dst.depth, rebuild_targets)
+    (dst.root_mask, dst.depth, rebuild_targets, changed_octants)
 }
 
 fn serialize_octant<T: SvoSerializable>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>) -> (u32, u32, Vec<MissingPointer>) {
@@ -331,6 +340,8 @@ impl<T: SvoSerializable> SvoSerializable for Octree<T> {
     }
 
     fn serialize_to(&self, at: &MissingPointer, dst: &mut SvoBuffer, staging_buffer: &mut Vec<u32>) -> (u32, Vec<MissingPointer>) {
+        // TODO do not track changed octants here
+
         let mut wrapped_dst = SvoBuffer {
             root_mask: 0,
             depth: 0,
@@ -340,7 +351,7 @@ impl<T: SvoSerializable> SvoSerializable for Octree<T> {
             rebuild_targets: Default::default(),
         };
         swap(staging_buffer, &mut wrapped_dst.bytes);
-        let (header_mask, depth, ptrs) = serialize_octree(self, &mut wrapped_dst);
+        let (header_mask, depth, ptrs, _) = serialize_octree(self, &mut wrapped_dst);
         swap(staging_buffer, &mut wrapped_dst.bytes);
 
         // TODO is there a cleaner way to implement this header replacement?
@@ -374,9 +385,11 @@ impl SvoSerializable for BlockId {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::{HashMap, HashSet};
+
     use crate::chunk::BlockId;
     use crate::storage::octree::{Octree, Position};
-    use crate::storage::svo::{SerializedSvo, Svo, SvoBuffer};
+    use crate::storage::svo::{MissingPointer, Range, SerializedSvo, Svo, SvoBuffer};
 
     #[test]
     fn svo_serialize() {
@@ -444,9 +457,14 @@ mod tests {
                     200,
                 ],
                 free_ranges: vec![],
-                octant_to_range: Default::default(),
+                octant_to_range: HashMap::from([
+                    (1, Range { start: 65, length: 1, ptr: MissingPointer { octant: 1, child_idx: 0, buffer_index: 57 } }),
+                    (2, Range { start: 66, length: 1, ptr: MissingPointer { octant: 2, child_idx: 7, buffer_index: 64 } }),
+                    (6, Range { start: 5, length: 60, ptr: MissingPointer { octant: 0, child_idx: 0, buffer_index: 5 } }),
+                ]),
                 rebuild_targets: Default::default(),
             },
+            changed_octants: HashSet::from([1, 2, 6]),
         });
     }
 
@@ -603,9 +621,13 @@ mod tests {
                     3,
                 ],
                 free_ranges: vec![],
-                octant_to_range: Default::default(),
+                octant_to_range: HashMap::from([
+                    (0, Range { start: 5, length: 12, ptr: MissingPointer { octant: 0, child_idx: 0, buffer_index: 5 } }),
+                    (1, Range { start: 17, length: 159, ptr: MissingPointer { octant: 1, child_idx: 1, buffer_index: 10 } }),
+                ]),
                 rebuild_targets: Default::default(),
             },
+            changed_octants: HashSet::from([0, 1]),
         });
     }
 }
