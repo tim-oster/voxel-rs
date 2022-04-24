@@ -4,22 +4,18 @@ extern crate memoffset;
 
 use std::{mem, ptr};
 use std::ffi::c_void;
-use std::mem::transmute;
 use std::ops::Add;
-use std::path::Path;
 use std::time::Instant;
 
 use cgmath;
 use cgmath::{Point2, Point3, Vector2, Vector3};
 use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
 use gl::types::*;
-use image::GenericImageView;
 use imgui::{Condition, Window};
 
-use crate::chunk::{BlockId, Chunk};
+use crate::chunk::BlockId;
 use crate::storage::chunk;
 use crate::storage::octree::Position;
-use crate::storage::world::World;
 
 mod graphics;
 mod core;
@@ -76,8 +72,18 @@ fn main() {
             .build()
     ).unwrap();
 
+    let tex_array = graphics::Resource::new(
+        || graphics::TextureArrayBuilder::new(4)
+            .add_texture("dirt", "assets/textures/dirt.png")?
+            .add_texture("glass", "assets/textures/glass.png")?
+            .add_texture("glass_light_blue", "assets/textures/glass_light_blue.png")?
+            .add_texture("grass_side", "assets/textures/grass_side.png")?
+            .add_texture("grass_top", "assets/textures/grass_top.png")?
+            .add_texture("stone", "assets/textures/stone.png")?
+            .build()
+    ).unwrap();
+
     let (vao, indices_count) = build_vao();
-    // let texture = build_texture();
 
     let mut camera = graphics::Camera::new(72.0, window.get_aspect(), 0.01, 1024.0);
     camera.position = Point3::new(128.0, 80.0, 128.0);
@@ -92,7 +98,7 @@ fn main() {
     let mut use_mouse_input = true;
 
     let mut world_ssbo = 0;
-    let mut world_buffer;
+    let world_buffer;
     let world_buffer_size = 1000 * 1024 * 1024; // 1000 MB
 
     unsafe {
@@ -126,7 +132,7 @@ fn main() {
     let start = Instant::now();
     let mut world = storage::world::World::new();
 
-    let square = 4;
+    let square = 1;
     for x in 0..square {
         for z in 0..square {
             world.add_vox_at(&vox_data, x * 256, 0, z * 256);
@@ -160,6 +166,8 @@ fn main() {
         gl::CullFace(gl::BACK);
         gl::FrontFace(gl::CCW);
     }
+
+    // BLOCK PICKING START
 
     #[repr(align(16))]
     struct AlignedVec3<T>(cgmath::Vector3<T>);
@@ -197,10 +205,72 @@ fn main() {
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
 
+    // BLOCK PICKING END
+
+    // BLOCK PICKING START
+
+    #[repr(C)]
+    struct Material {
+        specular_pow: f32,
+        specular_strength: f32,
+        tex_top: u32,
+        tex_side: u32,
+        tex_bottom: u32,
+    }
+
+    let materials = vec![
+        Material { // air
+            specular_pow: 0.0,
+            specular_strength: 0.0,
+            tex_top: 0,
+            tex_side: 0,
+            tex_bottom: 0,
+        },
+        Material { // grass
+            specular_pow: 14.0,
+            specular_strength: 0.4,
+            tex_top: tex_array.lookup("grass_top").unwrap(),
+            tex_side: tex_array.lookup("grass_side").unwrap(),
+            tex_bottom: tex_array.lookup("dirt").unwrap(),
+        },
+        Material { // dirt
+            specular_pow: 14.0,
+            specular_strength: 0.4,
+            tex_top: tex_array.lookup("dirt").unwrap(),
+            tex_side: tex_array.lookup("dirt").unwrap(),
+            tex_bottom: tex_array.lookup("dirt").unwrap(),
+        },
+        Material { // stone
+            specular_pow: 70.0,
+            specular_strength: 0.4,
+            tex_top: tex_array.lookup("stone").unwrap(),
+            tex_side: tex_array.lookup("stone").unwrap(),
+            tex_bottom: tex_array.lookup("stone").unwrap(),
+        },
+    ];
+
+    let mut material_ssbo = 0;
+    unsafe {
+        gl::GenBuffers(1, &mut material_ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, material_ssbo);
+
+        gl::BufferData(
+            gl::SHADER_STORAGE_BUFFER,
+            (mem::size_of::<Material>() * materials.len()) as GLsizeiptr,
+            &materials[0] as *const Material as *const c_void,
+            gl::STATIC_READ,
+        );
+
+        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, material_ssbo);
+        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+    }
+
+    // BLOCK PICKING END
+
     let (w, h) = window.get_size();
     let mut ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
 
-    let mut selected_block: BlockId = 0xffffff;
+    let mut selected_block: BlockId = 1;
 
     window.request_grab_cursor(true);
     while !window.should_close() {
@@ -319,6 +389,15 @@ fn main() {
                 use_mouse_input = !use_mouse_input;
                 frame.request_grab_cursor(use_mouse_input);
             }
+            if frame.input.was_key_pressed(&glfw::Key::Num1) {
+                selected_block = 1;
+            }
+            if frame.input.was_key_pressed(&glfw::Key::Num2) {
+                selected_block = 2;
+            }
+            if frame.input.was_key_pressed(&glfw::Key::Num3) {
+                selected_block = 3;
+            }
 
             if use_mouse_input {
                 let delta = frame.input.get_mouse_delta();
@@ -356,7 +435,7 @@ fn main() {
             // adding blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
                 let block_pos = unsafe { (*picker_data).block_pos.0 };
-                let block_normal = unsafe { ((*picker_data).block_normal.0) };
+                let block_normal = unsafe { (*picker_data).block_normal.0 };
                 if block_pos.x != f32::MAX {
                     let block_pos = block_pos.add(block_normal);
                     let x = block_pos.x as i32;
@@ -386,9 +465,9 @@ fn main() {
                 // shader.set_i32("u_max_depth", svo.max_depth);
                 world_shader.set_f32vec3("u_highlight_pos", &(*picker_data).block_pos.0.to_vec());
 
-                // gl::ActiveTexture(gl::TEXTURE0);
-                // gl::BindTexture(gl::TEXTURE_2D, texture);
-                // shader.set_i32("u_texture", 0);
+                gl::ActiveTexture(gl::TEXTURE0);
+                tex_array.bind();
+                world_shader.set_i32("u_texture", 0);
 
                 gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
                 world_shader.unbind();
@@ -514,36 +593,5 @@ fn build_vao() -> (GLuint, i32) {
         gl::BindVertexArray(0);
 
         (vao, vertices.len() as i32 / 4 * 6)
-    }
-}
-
-fn build_texture() -> GLuint {
-    unsafe {
-        let mut id = 0;
-        gl::GenTextures(1, &mut id);
-        gl::BindTexture(gl::TEXTURE_2D, id);
-
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as GLint);
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_R, gl::CLAMP_TO_EDGE as GLint);
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::NEAREST as GLint);
-        gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::NEAREST as GLint);
-
-        let path = Path::new("assets/textures/grass_top.png");
-        let image = image::open(&path).expect("failed to load image");
-        let data = image.to_rgba8().into_raw();
-        gl::TexImage2D(
-            gl::TEXTURE_2D,
-            0,
-            gl::RGBA8 as i32,
-            image.width() as i32,
-            image.height() as i32,
-            0,
-            gl::RGBA,
-            gl::UNSIGNED_BYTE,
-            &data[0] as *const u8 as *const c_void,
-        );
-        gl::GenerateMipmap(gl::TEXTURE_2D);
-
-        id
     }
 }

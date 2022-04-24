@@ -2,7 +2,7 @@ const int MAX_STEPS = 1000;
 
 struct octree_result {
     float t;
-    vec3 color;
+    uint value;
     vec3 normal;
     vec3 pos;
     vec2 uv;
@@ -24,7 +24,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
     max_dst *= octree_scale;
 
     res.t = -1;
-    res.color = vec3(0);
+    res.value = 0;
 
     // shift input coordinate system so that the octree spans from [1;2]
     ro += 1;
@@ -157,11 +157,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
                 res.pos -= 1;
                 res.pos /= octree_scale;
 
-                res.color = vec3(
-                float(descriptors[ptr] & 0xff) / 255.0,
-                float((descriptors[ptr] >> 8) & 0xff) / 255.0,
-                float((descriptors[ptr] >> 16) & 0xff) / 255.0
-                );
+                res.value = descriptors[ptr];
 
                 return;
             }

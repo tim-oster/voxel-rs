@@ -1,4 +1,4 @@
-use std::cmp::{max, Ordering};
+use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::mem::swap;
 use std::ptr::copy;
@@ -376,7 +376,7 @@ impl SvoSerializable for BlockId {
         false
     }
 
-    fn serialize_to(&self, _: &MissingPointer, dst: &mut SvoBuffer, staging_buffer: &mut Vec<u32>) -> (u32, Vec<MissingPointer>) {
+    fn serialize_to(&self, _: &MissingPointer, _: &mut SvoBuffer, staging_buffer: &mut Vec<u32>) -> (u32, Vec<MissingPointer>) {
         // TODO set inplace instead of appending?
         staging_buffer.push(*self as u32);
         (0, Vec::new())

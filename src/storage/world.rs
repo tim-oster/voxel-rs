@@ -72,7 +72,8 @@ impl World {
     pub fn add_vox_at(&mut self, data: &dot_vox::DotVoxData, block_x: i32, block_y: i32, block_z: i32) {
         let model = &data.models[0];
         for v in &model.voxels {
-            self.set_block(block_x + v.x as i32, block_y + v.z as i32, block_z + v.y as i32, data.palette[v.i as usize]);
+            // TODO data.palette[v.i as usize]
+            self.set_block(block_x + v.x as i32, block_y + v.z as i32, block_z + v.y as i32, 1);
         }
     }
 
