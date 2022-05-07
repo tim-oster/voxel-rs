@@ -5,6 +5,7 @@ extern crate memoffset;
 use std::{mem, ptr};
 use std::ffi::c_void;
 use std::ops::Add;
+use std::os::raw::c_int;
 use std::time::Instant;
 
 use cgmath;
@@ -84,6 +85,8 @@ fn main() {
             .add_texture("stone_normal", "assets/textures/stone_n.png")?
             .add_texture("stone_bricks", "assets/textures/stone_bricks.png")?
             .add_texture("stone_bricks_normal", "assets/textures/stone_bricks_n.png")?
+            .add_texture("glass", "assets/textures/glass.png")?
+            .add_texture("glass_light_blue", "assets/textures/glass_light_blue.png")?
             .build()
     ).unwrap();
 
@@ -92,7 +95,7 @@ fn main() {
     let mut camera = graphics::Camera::new(72.0, window.get_aspect(), 0.01, 1024.0);
     camera.position = Point3::new(128.0, 80.0, 128.0);
 
-    let cam_speed = 1f32;
+    let mut cam_speed = 1f32;
     let cam_rot_speed = 0.005f32;
     let mut cam_rot = cgmath::Vector3::new(0.0, -90f32.to_radians(), 0.0);
 
@@ -276,6 +279,26 @@ fn main() {
             tex_side_normal: tex_array.lookup("stone_bricks_normal").unwrap() as i32,
             tex_bottom_normal: tex_array.lookup("stone_bricks_normal").unwrap() as i32,
         },
+        Material { // glass
+            specular_pow: 70.0,
+            specular_strength: 0.4,
+            tex_top: tex_array.lookup("glass").unwrap() as i32,
+            tex_side: tex_array.lookup("glass").unwrap() as i32,
+            tex_bottom: tex_array.lookup("glass").unwrap() as i32,
+            tex_top_normal: -1,
+            tex_side_normal: -1,
+            tex_bottom_normal: -1,
+        },
+        Material { // glass light blue
+            specular_pow: 70.0,
+            specular_strength: 0.4,
+            tex_top: tex_array.lookup("glass_light_blue").unwrap() as i32,
+            tex_side: tex_array.lookup("glass_light_blue").unwrap() as i32,
+            tex_bottom: tex_array.lookup("glass_light_blue").unwrap() as i32,
+            tex_top_normal: -1,
+            tex_side_normal: -1,
+            tex_bottom_normal: -1,
+        },
     ];
 
     let mut material_ssbo = 0;
@@ -398,6 +421,13 @@ fn main() {
             if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
                 camera.position.y -= cam_speed * frame.stats.delta_time;
             }
+            if frame.input.was_key_pressed(&glfw::Key::G) {
+                if cam_speed == 1.0 {
+                    cam_speed = 0.25;
+                } else {
+                    cam_speed = 1.0;
+                }
+            }
             if frame.input.was_key_pressed(&glfw::Key::E) {
                 light_dir = camera.forward;
             }
@@ -418,17 +448,14 @@ fn main() {
                 use_mouse_input = !use_mouse_input;
                 frame.request_grab_cursor(use_mouse_input);
             }
-            if frame.input.was_key_pressed(&glfw::Key::Num1) {
-                selected_block = 1;
-            }
-            if frame.input.was_key_pressed(&glfw::Key::Num2) {
-                selected_block = 2;
-            }
-            if frame.input.was_key_pressed(&glfw::Key::Num3) {
-                selected_block = 3;
-            }
-            if frame.input.was_key_pressed(&glfw::Key::Num4) {
-                selected_block = 4;
+            for i in 1..materials.len() {
+                let key = glfw::Key::Num1 as c_int + (i - 1) as c_int;
+                let key = &key as *const c_int as *const glfw::Key;
+                let key = unsafe { &*key };
+
+                if frame.input.was_key_pressed(key) {
+                    selected_block = i as u32;
+                }
             }
 
             if use_mouse_input {

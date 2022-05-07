@@ -14,7 +14,7 @@ uniform vec3 u_cam_dir;
 
 void main() {
     octree_result res;
-    intersect_octree(u_cam_pos, u_cam_dir, 30, res);
+    intersect_octree(u_cam_pos, u_cam_dir, 30, false, res);
 
     if (res.t > 0) {
         pos = res.pos;

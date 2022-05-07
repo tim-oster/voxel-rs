@@ -14,27 +14,9 @@ uniform float u_aspect;
 uniform float u_ambient;
 uniform vec3 u_light_dir;
 uniform vec3 u_cam_pos;
-uniform sampler2DArray u_texture;
 
 // block highlighting
 uniform vec3 u_highlight_pos;
-
-struct Material {
-    float specular_pow;
-    float specular_strength;
-
-    int tex_top;
-    int tex_side;
-    int tex_bottom;
-
-    int tex_top_normal;
-    int tex_side_normal;
-    int tex_bottom_normal;
-};
-
-layout (std430, binding = 2) readonly buffer material_registry {
-    Material materials[];
-};
 
 void main() {
     vec2 uv = v_uv * 2.0 - 1.0;
@@ -48,7 +30,7 @@ void main() {
     vec3 rd = normalize(look_at - ro);
 
     octree_result res;
-    intersect_octree(ro, rd, -1, res);
+    intersect_octree(ro, rd, -1, true, res);
 
     if (res.t < 0) {
         color = vec4(0);
@@ -56,18 +38,15 @@ void main() {
     }
 
     Material mat = materials[res.value];
-
-    int tex_id = mat.tex_side;
     int tex_normal_id = mat.tex_side_normal;
-    if (res.face_id == 3) { tex_id = mat.tex_top; tex_normal_id = mat.tex_top_normal; }
-    else if (res.face_id == 2) { tex_id = mat.tex_bottom; tex_normal_id = mat.tex_bottom_normal; }
-    vec4 tex_color = texture(u_texture, vec3(res.uv, float(tex_id)));
+    if (res.face_id == 3) { tex_normal_id = mat.tex_top_normal; }
+    else if (res.face_id == 2) { tex_normal_id = mat.tex_bottom_normal; }
 
     vec3 normal = FACE_NORMALS[res.face_id];
     vec3 tangent = FACE_TANGENTS[res.face_id];
     vec3 bitangent = FACE_BITANGENTS[res.face_id];
     if (tex_normal_id != -1) {
-        vec3 tex = texture(u_texture, vec3(res.uv, float(tex_normal_id))).xzy; // blue = up -> y axis
+        vec3 tex = texture(u_texture, vec3(res.uv, float(tex_normal_id))).xzy;// blue = up -> y axis
         tex = normalize(tex * 2 - 1);
         normal = tex.x * tangent + tex.y * normal + tex.z * bitangent;
     }
@@ -78,12 +57,14 @@ void main() {
     vec3 reflect_dir = reflect(-u_light_dir, normal);
     float specular = pow(max(dot(view_dir, reflect_dir), 0.0), mat.specular_pow) * mat.specular_strength;
 
+    // TODO support translucent objects
+
     octree_result shadow_res;
-    intersect_octree(res.pos + normal*0.0005, -u_light_dir, -1, shadow_res);
+    intersect_octree(res.pos + normal*0.0005, -u_light_dir, -1, true, shadow_res);
     float shadow = shadow_res.t < 0 ? 1.0 : 0.0;
 
     float light = u_ambient + (diffuse + specular) * shadow;
-    color = tex_color * light;
+    color = res.color * light;
 
     if (floor(res.pos) == floor(u_highlight_pos)) {
         const float thickness = 1./16.;

@@ -33,6 +33,7 @@ struct octree_result {
     int face_id;
     vec3 pos;
     vec2 uv;
+    vec4 color;
 };
 
 // https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Buffer_backed
@@ -42,9 +43,28 @@ layout (std430, binding = 0) readonly buffer root_node {
     int descriptors[];
 };
 
+struct Material {
+    float specular_pow;
+    float specular_strength;
+
+    int tex_top;
+    int tex_side;
+    int tex_bottom;
+
+    int tex_top_normal;
+    int tex_side_normal;
+    int tex_bottom_normal;
+};
+
+layout (std430, binding = 2) readonly buffer material_registry {
+    Material materials[];
+};
+
+uniform sampler2DArray u_texture; // TODO rename or as param
+
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
-void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
+void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, out octree_result res) {
     ro *= octree_scale;
     max_dst *= octree_scale;
 
@@ -126,99 +146,114 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, out octree_result res) {
 
         if (is_child && t_min <= t_max) {
             if (is_leaf) {
-                // TODO put after loop?
-
                 int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
                 if ((next_ptr & (1 << 31)) != 0) {
                     // use as relative offset if relative bit is set
                     next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
                 }
-                ptr = next_ptr + 4 + octant_idx;
-                ptr = descriptors[ptr];
+                next_ptr = next_ptr + 4 + octant_idx;
+                next_ptr = descriptors[next_ptr];
 
-                res.t = t_min / octree_scale;
+                int value = descriptors[next_ptr];
 
-                // TODO can be optimized?
                 float tx_corner = (pos.x + scale_exp2) * tx_coef - tx_bias;
                 float ty_corner = (pos.y + scale_exp2) * ty_coef - ty_bias;
                 float tz_corner = (pos.z + scale_exp2) * tz_coef - tz_bias;
                 float tc_min = max(max(tx_corner, ty_corner), tz_corner);
 
+                vec3 pos = pos;
                 if ((octant_mask & 1) != 0) pos.x = 3.0 - scale_exp2 - pos.x;
                 if ((octant_mask & 2) != 0) pos.y = 3.0 - scale_exp2 - pos.y;
                 if ((octant_mask & 4) != 0) pos.z = 3.0 - scale_exp2 - pos.z;
 
-                // TODO can be optimized?
+                int face_id;
+                vec2 uv;
                 if (tc_min == tx_corner) {
-                    res.face_id = int((sign(-rd.x) + 1) / 2);
-                    res.uv = vec2(
+                    face_id = int((sign(-rd.x) + 1) / 2);
+                    uv = vec2(
                     ((ro.z + rd.z * tx_corner) - pos.z) / scale_exp2,
                     ((ro.y + rd.y * tx_corner) - pos.y) / scale_exp2
                     );
-                    if (sign(rd.x) > 0) res.uv.x = 1 - res.uv.x;
+                    if (sign(rd.x) > 0) uv.x = 1 - uv.x;
                 } else if (tc_min == ty_corner) {
-                    res.face_id = 2 + int((sign(-rd.y) + 1) / 2);
-                    res.uv = vec2(
+                    face_id = 2 + int((sign(-rd.y) + 1) / 2);
+                    uv = vec2(
                     ((ro.x + rd.x * ty_corner) - pos.x) / scale_exp2,
                     ((ro.z + rd.z * ty_corner) - pos.z) / scale_exp2
                     );
-                    if (sign(rd.y) < 0) res.uv.x = 1 - res.uv.x;
+                    if (sign(rd.y) < 0) uv.x = 1 - uv.x;
                 } else {
-                    res.face_id = 4 + int((sign(-rd.z) + 1) / 2);
-                    res.uv = vec2(
+                    face_id = 4 + int((sign(-rd.z) + 1) / 2);
+                    uv = vec2(
                     ((ro.x + rd.x * tz_corner) - pos.x) / scale_exp2,
                     ((ro.y + rd.y * tz_corner) - pos.y) / scale_exp2
                     );
-                    if (sign(rd.z) < 0) res.uv.x = 1 - res.uv.x;
+                    if (sign(rd.z) < 0) uv.x = 1 - uv.x;
                 }
 
-                res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + epsilon), pos.x + scale_exp2 - epsilon);
-                res.pos.y = min(max(ro.y + t_min * rd.y, pos.y + epsilon), pos.y + scale_exp2 - epsilon);
-                res.pos.z = min(max(ro.z + t_min * rd.z, pos.z + epsilon), pos.z + scale_exp2 - epsilon);
-                // undo initial coordinate system shift
-                res.pos -= 1;
-                res.pos /= octree_scale;
+                Material mat = materials[value];
+                int tex_id = mat.tex_side;
+                if (face_id == 3) { tex_id = mat.tex_top; }
+                else if (face_id == 2) { tex_id = mat.tex_bottom; }
+                vec4 tex_color = texture(u_texture, vec3(uv, float(tex_id)));
 
-                res.value = descriptors[ptr];
+                if (tex_color.a >= 1 || !cast_translucent) {
+                    res.t = t_min / octree_scale;
+                    res.face_id = face_id;
+                    res.uv = uv;
+                    res.value = value;
+                    res.color = tex_color;
 
-                return;
-            }
+                    res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + epsilon), pos.x + scale_exp2 - epsilon);
+                    res.pos.y = min(max(ro.y + t_min * rd.y, pos.y + epsilon), pos.y + scale_exp2 - epsilon);
+                    res.pos.z = min(max(ro.z + t_min * rd.z, pos.z + epsilon), pos.z + scale_exp2 - epsilon);
 
-            // INTERSECT
-            float tv_max = min(t_max, tc_max);
-            float half_scale = scale_exp2 * 0.5;
-            float tx_center = half_scale * tx_coef + tx_corner;
-            float ty_center = half_scale * ty_coef + ty_corner;
-            float tz_center = half_scale * tz_coef + tz_corner;
+                    // undo initial coordinate system shift
+                    res.pos -= 1;
+                    res.pos /= octree_scale;
 
-            if (t_min <= tv_max) {
-                // PUSH
-
-                // TODO this is guarded in the original
-                ptr_stack[scale] = ptr;
-                parent_octant_idx_stack[scale] = parent_octant_idx;
-                t_max_stack[scale] = t_max;
-
-                // TODO convert everything to uint?
-                int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
-                // TODO move relative & aboslut pointer resolving into function
-                if ((next_ptr & (1 << 31)) != 0) {
-                    // use as relative offset if relative bit is set
-                    next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
+                    return;
                 }
-                ptr = next_ptr;
 
-                parent_octant_idx = octant_idx;
-                idx = 0;
-                --scale;
-                scale_exp2 = half_scale;
+                // TODO rendering bug when inside a block (best to be observed in transparent blocks)
+                // TODO do not render transparent blocks next to each other
+            } else {
+                // INTERSECT
+                float tv_max = min(t_max, tc_max);
+                float half_scale = scale_exp2 * 0.5;
+                float tx_center = half_scale * tx_coef + tx_corner;
+                float ty_center = half_scale * ty_coef + ty_corner;
+                float tz_center = half_scale * tz_coef + tz_corner;
 
-                if (t_min < tx_center) idx ^= 1, pos.x += scale_exp2;
-                if (t_min < ty_center) idx ^= 2, pos.y += scale_exp2;
-                if (t_min < tz_center) idx ^= 4, pos.z += scale_exp2;
+                if (t_min <= tv_max) {
+                    // PUSH
 
-                t_max = tv_max;
-                continue;
+                    // TODO this is guarded in the original
+                    ptr_stack[scale] = ptr;
+                    parent_octant_idx_stack[scale] = parent_octant_idx;
+                    t_max_stack[scale] = t_max;
+
+                    // TODO convert everything to uint?
+                    int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
+                    // TODO move relative & aboslut pointer resolving into function
+                    if ((next_ptr & (1 << 31)) != 0) {
+                        // use as relative offset if relative bit is set
+                        next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
+                    }
+                    ptr = next_ptr;
+
+                    parent_octant_idx = octant_idx;
+                    idx = 0;
+                    --scale;
+                    scale_exp2 = half_scale;
+
+                    if (t_min < tx_center) idx ^= 1, pos.x += scale_exp2;
+                    if (t_min < ty_center) idx ^= 2, pos.y += scale_exp2;
+                    if (t_min < tz_center) idx ^= 4, pos.z += scale_exp2;
+
+                    t_max = tv_max;
+                    continue;
+                }
             }
         }
 
