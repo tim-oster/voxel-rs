@@ -60,7 +60,7 @@ layout (std430, binding = 2) readonly buffer material_registry {
     Material materials[];
 };
 
-uniform sampler2DArray u_texture; // TODO rename or as param
+uniform sampler2DArray u_texture;// TODO rename or as param
 
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
@@ -85,6 +85,12 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
     int parent_octant_idx = 0;
     int scale = MAX_STACK_DEPTH - 1;
     float scale_exp2 = 0.5;
+
+    // In case a leaf has a texture with transparency, the ray can pass through several leaf voxels. When that happens,
+    // these variables keep track of how many adjecent leafs of the same value the ray has passed through to skip
+    // after the first leaf. This invokes the look of connected textures / voxels and reduces visual "noise".
+    int last_leaf_value = -1;
+    int adjecent_leaf_count = 0;
 
     // prevents divide by zero
     if (abs(rd.x) < epsilon) rd.x = epsilon * sign(rd.x);
@@ -197,7 +203,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
                 else if (face_id == 2) { tex_id = mat.tex_bottom; }
                 vec4 tex_color = texture(u_texture, vec3(uv, float(tex_id)));
 
-                if (tex_color.a >= 1 || !cast_translucent) {
+                bool first_of_kind = adjecent_leaf_count == 0 || value != last_leaf_value;
+                if ((tex_color.a >= 1 || !cast_translucent) && first_of_kind) {
                     res.t = t_min / octree_scale;
                     res.face_id = face_id;
                     res.uv = uv;
@@ -215,8 +222,10 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
                     return;
                 }
 
+                ++adjecent_leaf_count;
+                last_leaf_value = value;
+
                 // TODO rendering bug when inside a block (best to be observed in transparent blocks)
-                // TODO do not render transparent blocks next to each other
             } else {
                 // INTERSECT
                 float tv_max = min(t_max, tc_max);
@@ -255,6 +264,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
                     continue;
                 }
             }
+        } else {
+            adjecent_leaf_count = 0;
+            last_leaf_value = -1;
         }
 
         // ADVANCE
