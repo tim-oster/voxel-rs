@@ -1,6 +1,6 @@
 // TODO does it make sense to use 16 instead of 32 for faster octree rebuilds?
 
-use crate::storage::octree::{Octree, Position};
+use crate::world::octree::{Octree, Position};
 
 pub type BlockId = u32;
 

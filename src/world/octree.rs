@@ -2,7 +2,7 @@ use std::cmp::max;
 
 use cgmath::num_traits::Pow;
 
-pub(in crate::storage) type OctantId = usize;
+pub(in crate::world) type OctantId = usize;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Position(pub u32, pub u32, pub u32);
@@ -21,10 +21,10 @@ impl Position {
 
 #[derive(Debug, PartialEq)]
 pub struct Octree<T> {
-    pub(in crate::storage) octants: Vec<Octant<T>>,
-    pub(in crate::storage) free_list: Vec<OctantId>,
-    pub(in crate::storage) root: Option<OctantId>,
-    pub(in crate::storage) depth: u32,
+    pub(in crate::world) octants: Vec<Octant<T>>,
+    pub(in crate::world) free_list: Vec<OctantId>,
+    pub(in crate::world) root: Option<OctantId>,
+    pub(in crate::world) depth: u32,
 }
 
 impl<T> Octree<T> {
@@ -202,13 +202,13 @@ impl<T> Octree<T> {
 }
 
 #[derive(Debug, PartialEq)]
-pub(in crate::storage) struct Octant<T> {
-    pub(in crate::storage) parent: Option<OctantId>,
+pub(in crate::world) struct Octant<T> {
+    pub(in crate::world) parent: Option<OctantId>,
 
-    pub(in crate::storage) children: [Option<OctantId>; 8],
-    pub(in crate::storage) children_count: u8,
+    pub(in crate::world) children: [Option<OctantId>; 8],
+    pub(in crate::world) children_count: u8,
 
-    pub(in crate::storage) content: Option<T>,
+    pub(in crate::world) content: Option<T>,
 }
 
 impl<T> Octant<T> {
@@ -226,7 +226,7 @@ impl<T> Octant<T> {
 //noinspection DuplicatedCode
 #[cfg(test)]
 mod tests {
-    use crate::storage::octree::{Octant, Octree, Position};
+    use crate::world::octree::{Octant, Octree, Position};
 
     #[test]
     fn octree_add_leaf_single() {

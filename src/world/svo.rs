@@ -4,7 +4,7 @@ use std::mem::swap;
 use std::ptr::copy;
 
 use crate::chunk::BlockId;
-use crate::storage::octree::{Octant, OctantId, Octree, Position};
+use crate::world::octree::{Octant, OctantId, Octree, Position};
 
 // TODO refactor whole implementation
 
@@ -388,8 +388,8 @@ mod tests {
     use std::collections::{HashMap, HashSet};
 
     use crate::chunk::BlockId;
-    use crate::storage::octree::{Octree, Position};
-    use crate::storage::svo::{MissingPointer, Range, SerializedSvo, Svo, SvoBuffer};
+    use crate::world::octree::{Octree, Position};
+    use crate::world::svo::{MissingPointer, Range, SerializedSvo, Svo, SvoBuffer};
 
     #[test]
     fn svo_serialize() {

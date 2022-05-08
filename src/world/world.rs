@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
 use crate::chunk::BlockId;
-use crate::storage::chunk;
-use crate::storage::octree::{Octree, Position};
-use crate::storage::svo::Svo;
+use crate::world::chunk;
+use crate::world::octree::{Octree, Position};
+use crate::world::svo::Svo;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct ChunkPos {
@@ -91,7 +91,7 @@ impl World {
 mod tests {
     use std::collections::{HashSet, VecDeque};
 
-    use crate::storage::world::ChunkPos;
+    use crate::world::world::ChunkPos;
 
     #[test]
     fn chunk_pos_from_block_pos() {

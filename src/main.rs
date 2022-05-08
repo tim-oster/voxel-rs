@@ -15,12 +15,12 @@ use gl::types::*;
 use imgui::{Condition, Window};
 
 use crate::chunk::BlockId;
-use crate::storage::chunk;
-use crate::storage::octree::Position;
+use crate::world::chunk;
+use crate::world::octree::Position;
 
 mod graphics;
 mod core;
-mod storage;
+mod world;
 
 unsafe fn gl_check_error_(file: &str, line: u32) -> u32 {
     let mut error_code = gl::GetError();
