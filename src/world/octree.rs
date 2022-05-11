@@ -2,7 +2,7 @@ use std::cmp::max;
 
 use cgmath::num_traits::Pow;
 
-pub(in crate::world) type OctantId = usize;
+pub type OctantId = usize;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Position(pub u32, pub u32, pub u32);

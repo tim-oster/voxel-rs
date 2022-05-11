@@ -13,12 +13,12 @@ pub struct ChunkPos {
 }
 
 impl ChunkPos {
-    fn from_block_pos(x: i32, y: i32, z: i32) -> ChunkPos {
-        ChunkPos {
-            x: x >> 5,
-            y: y >> 5,
-            z: z >> 5,
-        }
+    pub fn new(x: i32, y: i32, z: i32) -> ChunkPos {
+        ChunkPos { x, y, z }
+    }
+
+    pub fn from_block_pos(x: i32, y: i32, z: i32) -> ChunkPos {
+        ChunkPos { x: x >> 5, y: y >> 5, z: z >> 5 }
     }
 }
 
@@ -35,6 +35,15 @@ impl World {
             chunks: HashMap::new(),
             changed_chunks_set: HashSet::new(),
             changed_chunks: VecDeque::new(),
+        }
+    }
+
+    pub fn set_chunk(&mut self, pos: ChunkPos, chunk: chunk::Chunk) {
+        self.chunks.insert(pos, chunk);
+
+        if !self.changed_chunks_set.contains(&pos) {
+            self.changed_chunks_set.insert(pos);
+            self.changed_chunks.push_back(pos);
         }
     }
 

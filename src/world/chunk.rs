@@ -13,6 +13,7 @@ pub struct Chunk {
 impl Chunk {
     pub fn new() -> Chunk {
         Chunk {
+            // TODO use memory pool
             blocks: [NO_BLOCK; 32 * 32 * 32],
         }
     }

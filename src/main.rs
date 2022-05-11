@@ -12,11 +12,13 @@ use cgmath;
 use cgmath::{Point2, Point3, Vector2, Vector3};
 use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
 use gl::types::*;
-use imgui::{Condition, Window};
+use imgui::{Condition, Id, TreeNodeFlags, Window};
 
 use crate::chunk::BlockId;
 use crate::world::chunk;
-use crate::world::octree::Position;
+use crate::world::generator::Octave;
+use crate::world::octree::{Octree, Position};
+use crate::world::svo::{SerializedSvo, Svo};
 
 mod graphics;
 mod core;
@@ -131,37 +133,11 @@ fn main() {
 
     // WORLD LOADING START
 
-    println!("loading model file");
-    let start = Instant::now();
-    let vox_data = dot_vox::load("assets/ignore/terrain.vox").unwrap();
-
-    println!("{}s; converting into chunks", start.elapsed().as_secs_f32());
-    let start = Instant::now();
-    let mut world = storage::world::World::new();
-
-    let square = 1;
-    for x in 0..square {
-        for z in 0..square {
-            world.add_vox_at(&vox_data, x * 256, 0, z * 256);
-        }
-    }
-    world.get_changed_chunks(); // drain all changed chunks
-
-    println!("{}s; converting into svo", start.elapsed().as_secs_f32());
-    let start = Instant::now();
-    let mut svo = world.build_svo();
-
-    println!("{}s; serializing svo", start.elapsed().as_secs_f32());
-    let start = Instant::now();
-    let mut svo_buffer = svo.serialize();
-
-    println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
-
-    let mut max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
-    unsafe {
-        ptr::write(world_buffer, max_depth_exp2.to_bits());
-        ptr::copy(svo_buffer.buffer.bytes.as_ptr(), world_buffer.offset(1), svo_buffer.buffer.bytes.len());
-    }
+    let mut octaves = vec![
+        Octave { frequency: 0.03, amplitude: 10.0 },
+        Octave { frequency: 0.01, amplitude: 4.0 },
+    ];
+    let (mut world, mut svo, mut svo_buffer, mut max_depth_exp2) = generate_world(world_buffer, &octaves);
 
     // WORLD LOADING END
 
@@ -214,7 +190,7 @@ fn main() {
 
     // BLOCK PICKING END
 
-    // BLOCK PICKING START
+    // BLOCKS START
 
     #[repr(C)]
     struct Material {
@@ -317,7 +293,7 @@ fn main() {
         gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
 
-    // BLOCK PICKING END
+    // BLOCKS END
 
     let (w, h) = window.get_size();
     let mut ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
@@ -390,6 +366,41 @@ fn main() {
                         "block normal: ({},{},{})",
                         block_normal.x as i32, block_normal.y as i32, block_normal.z as i32,
                     ));
+                });
+
+            Window::new("World Gen")
+                .size([300.0, 100.0], Condition::FirstUseEver)
+                .build(&frame.ui, || {
+                    if frame.ui.collapsing_header("octaves", TreeNodeFlags::DEFAULT_OPEN) {
+                        if frame.ui.button("add") {
+                            octaves.push(Octave { frequency: 0.0, amplitude: 0.0 });
+                        }
+                        frame.ui.same_line();
+                        if frame.ui.button("generate") {
+                            (world, svo, svo_buffer, max_depth_exp2) = generate_world(world_buffer, &octaves);
+                        }
+
+                        let mut i = 0;
+                        while i < octaves.len() {
+                            let stack = frame.ui.push_id(Id::Int(i as i32));
+
+                            frame.ui.text(format!("#{}", i));
+                            frame.ui.same_line();
+                            if frame.ui.small_button("del") {
+                                octaves.remove(i);
+                                i -= 1;
+                                continue;
+                            }
+
+                            frame.ui.indent();
+                            frame.ui.input_float("frequency", &mut octaves[i].frequency).step(0.01).build();
+                            frame.ui.input_float("amplitude", &mut octaves[i].amplitude).step(1.0).build();
+                            frame.ui.unindent();
+
+                            stack.end();
+                            i += 1;
+                        }
+                    }
                 });
 
             if frame.was_resized {
@@ -653,4 +664,45 @@ fn build_vao() -> (GLuint, i32) {
 
         (vao, vertices.len() as i32 / 4 * 6)
     }
+}
+
+fn generate_world(world_buffer: *mut u32, octaves: &Vec<Octave>) -> (world::world::World, Svo<Octree<BlockId>>, SerializedSvo, f32) {
+    println!("generating world");
+    let start = Instant::now();
+    let mut world = world::world::World::new();
+
+    let world_gen = world::generator::Generator::new(1, octaves.to_vec());
+
+    let world_size = 5;
+    let world_height = 256;
+    for x in 0..world_size {
+        for z in 0..world_size {
+            for y in 0..(world_height / 32) {
+                let pos = world::world::ChunkPos::new(x, y, z);
+                let chunk = world_gen.generate(pos);
+                world.set_chunk(pos, chunk);
+            }
+        }
+    }
+
+    world.get_changed_chunks(); // drain all changed chunks
+
+    println!("{}s; converting into svo", start.elapsed().as_secs_f32());
+    let start = Instant::now();
+    let mut svo = world.build_svo();
+
+    println!("{}s; serializing svo", start.elapsed().as_secs_f32());
+    let start = Instant::now();
+    let mut svo_buffer = svo.serialize();
+
+    println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
+    println!("tree depth: {}", svo_buffer.depth);
+
+    let mut max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
+    unsafe {
+        ptr::write(world_buffer, max_depth_exp2.to_bits());
+        ptr::copy(svo_buffer.buffer.bytes.as_ptr(), world_buffer.offset(1), svo_buffer.buffer.bytes.len());
+    }
+
+    (world, svo, svo_buffer, max_depth_exp2)
 }
