@@ -84,8 +84,7 @@ impl World {
     pub fn add_vox_at(&mut self, data: &dot_vox::DotVoxData, block_x: i32, block_y: i32, block_z: i32) {
         let model = &data.models[0];
         for v in &model.voxels {
-            // TODO data.palette[v.i as usize]
-            self.set_block(block_x + v.x as i32, block_y + v.z as i32, block_z + v.y as i32, 1);
+            self.set_block(block_x + v.x as i32, block_y + v.z as i32, block_z + v.y as i32, data.palette[v.i as usize]);
         }
     }
 
@@ -163,8 +162,8 @@ mod tests {
 
         assert_eq!(chunk.get_block(0, 0, 0), 101);
         assert_eq!(chunk.get_block(1, 0, 0), 102);
-        assert_eq!(chunk.get_block(0, 1, 0), 103);
-        assert_eq!(chunk.get_block(1, 1, 0), 104);
+        assert_eq!(chunk.get_block(0, 0, 1), 103);
+        assert_eq!(chunk.get_block(1, 0, 1), 104);
     }
 
     #[test]
