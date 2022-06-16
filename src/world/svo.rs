@@ -1,9 +1,13 @@
+use std::cell::RefCell;
 use std::cmp::max;
 use std::collections::{HashMap, HashSet};
 use std::mem::swap;
+use std::ops::{Deref, DerefMut};
 use std::ptr::copy;
+use std::rc::Rc;
 
 use crate::chunk::BlockId;
+use crate::ChunkStorage;
 use crate::world::octree::{Octant, OctantId, Octree, Position};
 
 // TODO refactor whole implementation
@@ -334,7 +338,7 @@ pub trait SvoSerializable {
     fn serialize_to(&self, at: &MissingPointer, dst: &mut SvoBuffer, staging_buffer: &mut Vec<u32>) -> (u32, Vec<MissingPointer>);
 }
 
-impl<T: SvoSerializable> SvoSerializable for Octree<T> {
+impl SvoSerializable for Rc<ChunkStorage> {
     fn is_nested(&self) -> bool {
         true
     }
@@ -351,7 +355,7 @@ impl<T: SvoSerializable> SvoSerializable for Octree<T> {
             rebuild_targets: Default::default(),
         };
         swap(staging_buffer, &mut wrapped_dst.bytes);
-        let (header_mask, depth, ptrs, _) = serialize_octree(self, &mut wrapped_dst);
+        let (header_mask, depth, ptrs, _) = serialize_octree(self.get_octree_ref().deref(), &mut wrapped_dst);
         swap(staging_buffer, &mut wrapped_dst.bytes);
 
         // TODO is there a cleaner way to implement this header replacement?

@@ -1,6 +1,9 @@
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::rc::Rc;
+use std::time::{Duration, Instant};
 
-use crate::chunk::BlockId;
+use crate::chunk::{BlockId, Chunk, ChunkStorage};
 use crate::world::chunk;
 use crate::world::octree::{Octree, Position};
 use crate::world::svo::Svo;
@@ -86,11 +89,11 @@ impl World {
         }
     }
 
-    pub fn build_svo(&self) -> Svo<Octree<BlockId>> {
+    pub fn build_svo(&self) -> Svo<Rc<ChunkStorage>> {
         let mut svo = Svo::new();
         for (pos, chunk) in self.chunks.iter() {
-            let octree = chunk.build_octree();
-            svo.set(Position(pos.x as u32, pos.y as u32, pos.z as u32), Some(octree));
+            let storage = chunk.get_storage();
+            svo.set(Position(pos.x as u32, pos.y as u32, pos.z as u32), Some(storage));
         }
         svo
     }

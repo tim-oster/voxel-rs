@@ -32,8 +32,10 @@ impl<T> Octree<T> {
         Octree { octants: Vec::new(), free_list: Vec::new(), root: None, depth: 0 }
     }
 
-    pub fn with_capacity(capacity: usize) -> Octree<T> {
-        Octree { octants: Vec::with_capacity(capacity), free_list: Vec::new(), root: None, depth: 0 }
+    pub fn with_size(size: u32) -> Octree<T> {
+        let mut octree = Self::new();
+        octree.expand_to(size);
+        octree
     }
 
     /// Adds the given leaf value at the given position. If the tree is not big enough yet,
@@ -116,6 +118,35 @@ impl<T> Octree<T> {
                 self.octants[parent].remove_child(idx);
                 self.delete_octant(it);
                 break;
+            }
+        }
+
+        None
+    }
+
+    pub fn get_leaf(&self, pos: Position) -> Option<T> where T: Copy {
+        let mut it = self.root.unwrap();
+        let mut pos = pos;
+        let mut size = 2f32.pow(self.depth as i32) as u32;
+
+        while size > 0 {
+            size /= 2;
+
+            let idx = Position(pos.0 / size, pos.1 / size, pos.2 / size).idx();
+
+            pos.0 %= size;
+            pos.1 %= size;
+            pos.2 %= size;
+
+            let child = self.octants[it].children[idx];
+            if child.is_none() {
+                break;
+            }
+
+            it = child.unwrap();
+
+            if size == 1 {
+                return self.octants[it].content;
             }
         }
 
@@ -265,6 +296,9 @@ mod tests {
             root: Some(1),
             depth: 2,
         });
+
+        assert_eq!(octree.get_leaf(Position(1, 1, 3)), Some(20));
+        assert_eq!(octree.get_leaf(Position(1, 1, 1)), None);
     }
 
     #[test]

@@ -3,10 +3,12 @@ extern crate gl;
 extern crate memoffset;
 
 use std::{mem, ptr};
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::ops::Add;
 use std::os::raw::c_int;
+use std::rc::Rc;
 use std::time::Instant;
 
 use cgmath;
@@ -15,7 +17,7 @@ use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
 use gl::types::*;
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
-use crate::chunk::BlockId;
+use crate::chunk::{BlockId, ChunkStorage};
 use crate::world::chunk;
 use crate::world::generator::{Noise, SplinePoint};
 use crate::world::octree::{Octree, Position};
@@ -331,7 +333,7 @@ fn main() {
                 let start = Instant::now();
                 for pos in &changed {
                     if let Some(chunk) = world.chunks.get(pos) {
-                        let octree = chunk.build_octree();
+                        let octree = chunk.get_storage();
                         svo.set(Position(pos.x as u32, pos.y as u32, pos.z as u32), Some(octree));
                     }
                 }
@@ -775,7 +777,7 @@ fn build_vao() -> (GLuint, i32) {
     }
 }
 
-fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generator::Config) -> (world::world::World, Svo<Octree<BlockId>>, SerializedSvo, f32) {
+fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generator::Config) -> (world::world::World, Svo<Rc<ChunkStorage>>, SerializedSvo, f32) {
     println!("generating world");
     let start = Instant::now();
     let mut world = world::world::World::new();
@@ -806,7 +808,7 @@ fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generato
     println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
     println!("tree depth: {}", svo_buffer.depth);
 
-    let mut max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
+    let max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
     unsafe {
         ptr::write(world_buffer, max_depth_exp2.to_bits());
         ptr::copy(svo_buffer.buffer.bytes.as_ptr(), world_buffer.offset(1), svo_buffer.buffer.bytes.len());
