@@ -3,6 +3,7 @@ extern crate gl;
 extern crate memoffset;
 
 use std::{mem, ptr};
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::ops::Add;
 use std::os::raw::c_int;
@@ -16,9 +17,10 @@ use imgui::{Condition, Id, TreeNodeFlags, Window};
 
 use crate::chunk::BlockId;
 use crate::world::chunk;
-use crate::world::generator::Octave;
+use crate::world::generator::{Noise, SplinePoint};
 use crate::world::octree::{Octree, Position};
 use crate::world::svo::{SerializedSvo, Svo};
+use crate::world::world::ChunkPos;
 
 mod graphics;
 mod core;
@@ -133,11 +135,29 @@ fn main() {
 
     // WORLD LOADING START
 
-    let mut octaves = vec![
-        Octave { frequency: 0.03, amplitude: 10.0 },
-        Octave { frequency: 0.01, amplitude: 4.0 },
-    ];
-    let (mut world, mut svo, mut svo_buffer, mut max_depth_exp2) = generate_world(world_buffer, &octaves);
+    let mut world_size: i32 = 5;
+    let mut world_cfg = world::generator::Config {
+        sea_level: 70,
+        continentalness: Noise {
+            frequency: 0.02,
+            octaves: 2,
+            spline_points: vec![
+                SplinePoint { x: -1.0, y: 70.0 },
+                SplinePoint { x: 1.0, y: 80.0 },
+            ],
+        },
+        erosion: Noise {
+            frequency: 0.02,
+            octaves: 2,
+            spline_points: vec![],
+        },
+        peaks_and_valleys: Noise {
+            frequency: 0.02,
+            octaves: 2,
+            spline_points: vec![],
+        },
+    };
+    let (mut world, mut svo, mut svo_buffer, mut max_depth_exp2) = generate_world(world_size, world_buffer, &world_cfg);
 
     // WORLD LOADING END
 
@@ -299,6 +319,8 @@ fn main() {
     let mut ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
 
     let mut selected_block: BlockId = 1;
+    // let mut last_chunk_pos = ChunkPos::new(0, 0, 0);
+    // let mut generated_chunk_set = HashSet::new();
 
     window.request_grab_cursor(true);
     while !window.should_close() {
@@ -332,6 +354,50 @@ fn main() {
                 println!("rebuild took {}ms", start.elapsed().as_millis());
             }
         }
+
+        // {
+        //     let pos = camera.position;
+        //     let mut current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
+        //     current_chunk_pos.y = 0;
+        //
+        //     if last_chunk_pos != current_chunk_pos {
+        //         last_chunk_pos = current_chunk_pos;
+        //
+        //         let world_gen = world::generator::Generator::new(1, world_cfg.clone());
+        //
+        //         let r = world_size / 2;
+        //         let mut count = 0;
+        //
+        //         for dx in -r..r {
+        //             for dz in -r..r {
+        //                 let mut pos = ChunkPos {
+        //                     x: current_chunk_pos.x + dx,
+        //                     y: 0,
+        //                     z: current_chunk_pos.z + dz,
+        //                 };
+        //
+        //                 // TODO find a fix
+        //                 if pos.x < 0 || pos.z < 0 {
+        //                     continue;
+        //                 }
+        //
+        //                 if !generated_chunk_set.contains(&pos) {
+        //                     count += 1;
+        //                     generated_chunk_set.insert(pos);
+        //
+        //                     let world_height = 256;
+        //                     for y in 0..(world_height / 32) {
+        //                         pos.y = y;
+        //                         let chunk = world_gen.generate(pos);
+        //                         world.set_chunk(pos, chunk);
+        //                     }
+        //                 }
+        //             }
+        //         }
+        //
+        //         println!("generate {} new chunks", count);
+        //     }
+        // }
 
         window.update(|frame| {
             Window::new("Debug")
@@ -371,36 +437,79 @@ fn main() {
             Window::new("World Gen")
                 .size([300.0, 100.0], Condition::FirstUseEver)
                 .build(&frame.ui, || {
-                    if frame.ui.collapsing_header("octaves", TreeNodeFlags::DEFAULT_OPEN) {
-                        if frame.ui.button("add") {
-                            octaves.push(Octave { frequency: 0.0, amplitude: 0.0 });
-                        }
-                        frame.ui.same_line();
-                        if frame.ui.button("generate") {
-                            (world, svo, svo_buffer, max_depth_exp2) = generate_world(world_buffer, &octaves);
+                    frame.ui.input_int("world size", &mut world_size).build();
+                    frame.ui.input_int("sea level", &mut world_cfg.sea_level).build();
+
+                    if frame.ui.button("generate") {
+                        (world, svo, svo_buffer, max_depth_exp2) = generate_world(world_size, world_buffer, &world_cfg);
+                    }
+
+                    frame.ui.new_line();
+
+                    let display_noise = |label: &str, noise: &mut Noise| {
+                        if !frame.ui.collapsing_header(label, TreeNodeFlags::DEFAULT_OPEN) {
+                            return;
                         }
 
+                        let stack = frame.ui.push_id(Id::Str(label));
+
+                        frame.ui.input_float("frequency", &mut noise.frequency).step(0.01).build();
+                        frame.ui.input_int("octaves", &mut noise.octaves).build();
+
+                        frame.ui.new_line();
+
+                        frame.ui.text("spline points");
+                        frame.ui.same_line();
+                        if frame.ui.small_button("add") {
+                            noise.spline_points.push(world::generator::SplinePoint { x: 0.0, y: 0.0 });
+                        }
+
+                        frame.ui.indent();
+
                         let mut i = 0;
-                        while i < octaves.len() {
+                        while i < noise.spline_points.len() {
                             let stack = frame.ui.push_id(Id::Int(i as i32));
 
                             frame.ui.text(format!("#{}", i));
                             frame.ui.same_line();
                             if frame.ui.small_button("del") {
-                                octaves.remove(i);
+                                noise.spline_points.remove(i);
                                 i -= 1;
                                 continue;
                             }
 
-                            frame.ui.indent();
-                            frame.ui.input_float("frequency", &mut octaves[i].frequency).step(0.01).build();
-                            frame.ui.input_float("amplitude", &mut octaves[i].amplitude).step(1.0).build();
-                            frame.ui.unindent();
+                            if i > 0 {
+                                frame.ui.same_line();
+                                if frame.ui.small_button("up") {
+                                    noise.spline_points.swap(i, i - 1);
+                                }
+                            }
+
+                            if i < noise.spline_points.len() - 1 {
+                                frame.ui.same_line();
+                                if frame.ui.small_button("down") {
+                                    noise.spline_points.swap(i, i + 1);
+                                }
+                            }
+
+                            let mut sp = &mut noise.spline_points[i];
+                            let mut values: [f32; 2] = [sp.x, sp.y];
+                            frame.ui.input_float2("x, y", &mut values).build();
+                            sp.x = values[0];
+                            sp.y = values[1];
 
                             stack.end();
+
                             i += 1;
                         }
-                    }
+
+                        frame.ui.unindent();
+
+                        stack.end();
+                    };
+                    display_noise("continentalness", &mut world_cfg.continentalness);
+                    display_noise("erosion", &mut world_cfg.erosion);
+                    display_noise("peaks & valleys", &mut world_cfg.peaks_and_valleys);
                 });
 
             if frame.was_resized {
@@ -666,14 +775,13 @@ fn build_vao() -> (GLuint, i32) {
     }
 }
 
-fn generate_world(world_buffer: *mut u32, octaves: &Vec<Octave>) -> (world::world::World, Svo<Octree<BlockId>>, SerializedSvo, f32) {
+fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generator::Config) -> (world::world::World, Svo<Octree<BlockId>>, SerializedSvo, f32) {
     println!("generating world");
     let start = Instant::now();
     let mut world = world::world::World::new();
 
-    let world_gen = world::generator::Generator::new(1, octaves.to_vec());
+    let world_gen = world::generator::Generator::new(1, cfg.clone());
 
-    let world_size = 5;
     let world_height = 256;
     for x in 0..world_size {
         for z in 0..world_size {
