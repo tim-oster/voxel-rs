@@ -59,7 +59,6 @@ impl<T: SvoSerializable> Svo<T> {
         }
     }
 
-    // TODO also returns what has changed inside the buffer
     pub fn serialize(&mut self) {
         if self.octree.root.is_none() || self.change_set.is_empty() {
             return;
@@ -152,6 +151,13 @@ impl<T: SvoSerializable> Svo<T> {
         result
     }
 
+    pub fn depth(&self) -> u32 {
+        if self.root_octant_info.is_none() {
+            return 0;
+        }
+        self.root_octant_info.unwrap().serialization.depth
+    }
+
     pub unsafe fn write_to(&self, dst: *mut u32) -> usize {
         if self.root_octant_info.is_none() {
             return 0;
@@ -159,34 +165,37 @@ impl<T: SvoSerializable> Svo<T> {
 
         let start = dst as usize;
         let info = self.root_octant_info.unwrap();
+        let dst = Self::write_preamble(info, dst);
 
-        // TODO do that here?
-        let max_depth_exp2 = (-(info.serialization.depth as f32)).exp2();
-        dst.write(max_depth_exp2.to_bits());
-
-        let dst = dst.offset(1);
-        dst.offset(0).write((info.serialization.child_mask as u32) << 8);
-        dst.offset(1).write(0);
-        dst.offset(2).write(0);
-        dst.offset(3).write(0);
-        dst.offset(4).write(info.buf_offset as u32 + 5); // TODO hardcoded offset
-
-        // TODO only copy changed ranges
-        // for id in &svo_buffer.changed_octants {
-        //     let range = svo_buffer.buffer.octant_to_range.get(id).unwrap();
-        //     unsafe {
-        //         ptr::copy(svo_buffer.buffer.bytes.as_ptr().offset(range.start as isize),
-        //                   world_buffer.offset(1 + range.start as isize),
-        //                   range.length);
-        //     }
-        // }
-
-        let dst = dst.offset(5);
         let len = self.buffer.bytes.len();
         ptr::copy(self.buffer.bytes.as_ptr(), dst, len);
 
         let dst = dst.offset(len as isize);
         ((dst as usize) - start) / 4
+    }
+
+    pub unsafe fn write_changes_to(&mut self, dst: *mut u32) {
+        if self.root_octant_info.is_none() {
+            return;
+        }
+
+        let info = self.root_octant_info.unwrap();
+        let dst = Self::write_preamble(info, dst);
+
+        for changed_range in self.buffer.updated_ranges.drain(..) {
+            let offset = changed_range.start as isize;
+            let src = self.buffer.bytes.as_ptr().offset(offset);
+            ptr::copy(src, dst.offset(offset), changed_range.length);
+        }
+    }
+
+    unsafe fn write_preamble(info: OctantInfo, dst: *mut u32) -> *mut u32 {
+        dst.offset(0).write((info.serialization.child_mask as u32) << 8);
+        dst.offset(1).write(0);
+        dst.offset(2).write(0);
+        dst.offset(3).write(0);
+        dst.offset(4).write(info.buf_offset as u32 + 5); // TODO hardcoded offset
+        dst.offset(5)
     }
 }
 
@@ -489,6 +498,7 @@ mod tests {
         assert_eq!(svo.buffer, SvoBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
+            updated_ranges: vec![],
             octant_to_range: HashMap::from([
                 (1, Range { start: 0, length: 156 }),
                 (usize::MAX, Range { start: 156, length: 12 }),
@@ -525,6 +535,7 @@ struct Range {
 pub struct SvoBuffer {
     bytes: Vec<u32>,
     free_ranges: Vec<Range>,
+    updated_ranges: Vec<Range>,
     octant_to_range: HashMap<OctantId, Range>,
 }
 
@@ -536,6 +547,7 @@ impl SvoBuffer {
         let mut buffer = SvoBuffer {
             bytes,
             free_ranges: Vec::new(),
+            updated_ranges: Vec::new(),
             octant_to_range: HashMap::new(),
         };
         if initial_capacity > 0 {
@@ -570,6 +582,10 @@ impl SvoBuffer {
         }
 
         self.octant_to_range.insert(id, Range { start: ptr, length });
+
+        self.updated_ranges.push(Range { start: ptr, length });
+        Self::merge_ranges(&mut self.updated_ranges);
+
         ptr
     }
 
@@ -581,16 +597,23 @@ impl SvoBuffer {
 
         let range = range.unwrap();
         self.free_ranges.push(range);
-        self.free_ranges.sort_by(|lhs, rhs| lhs.start.cmp(&rhs.start));
+        Self::merge_ranges(&mut self.free_ranges);
+    }
+
+    fn merge_ranges(ranges: &mut Vec<Range>) {
+        ranges.sort_by(|lhs, rhs| lhs.start.cmp(&rhs.start));
 
         let mut i = 1;
-        while i < self.free_ranges.len() {
-            let rhs = self.free_ranges[i];
-            let lhs = &mut self.free_ranges[i - 1];
+        while i < ranges.len() {
+            let rhs = ranges[i];
+            let lhs = &mut ranges[i - 1];
 
-            if (lhs.start + lhs.length) == rhs.start {
-                lhs.length += rhs.length;
-                self.free_ranges.remove(i);
+            if rhs.start <= lhs.start + lhs.length {
+                let diff = lhs.start + lhs.length - rhs.start;
+                if rhs.length > diff {
+                    lhs.length += rhs.length - diff;
+                }
+                ranges.remove(i);
             } else {
                 i += 1;
             }
@@ -612,6 +635,7 @@ mod svo_buffer_tests {
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             free_ranges: vec![Range { start: 0, length: 10 }],
+            updated_ranges: vec![],
             octant_to_range: Default::default(),
         });
 
@@ -623,6 +647,7 @@ mod svo_buffer_tests {
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
             free_ranges: vec![],
+            updated_ranges: vec![Range { start: 0, length: 10 }],
             octant_to_range: HashMap::from([
                 (1, Range { start: 0, length: 5 }),
                 (2, Range { start: 5, length: 2 }),
@@ -636,6 +661,7 @@ mod svo_buffer_tests {
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
             free_ranges: vec![],
+            updated_ranges: vec![Range { start: 0, length: 11 }],
             octant_to_range: HashMap::from([
                 (1, Range { start: 0, length: 5 }),
                 (2, Range { start: 5, length: 2 }),
@@ -650,6 +676,7 @@ mod svo_buffer_tests {
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 11, 8, 9, 10],
             free_ranges: vec![Range { start: 8, length: 2 }],
+            updated_ranges: vec![Range { start: 0, length: 11 }],
             octant_to_range: HashMap::from([
                 (1, Range { start: 0, length: 5 }),
                 (2, Range { start: 5, length: 2 }),
@@ -665,6 +692,7 @@ mod svo_buffer_tests {
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 11, 8, 9, 10],
             free_ranges: vec![Range { start: 5, length: 5 }],
+            updated_ranges: vec![Range { start: 0, length: 11 }],
             octant_to_range: HashMap::from([
                 (1, Range { start: 0, length: 5 }),
                 (4, Range { start: 10, length: 1 }),
@@ -677,6 +705,7 @@ mod svo_buffer_tests {
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 12, 13, 14, 8, 9, 10],
             free_ranges: vec![Range { start: 8, length: 2 }],
+            updated_ranges: vec![Range { start: 0, length: 11 }],
             octant_to_range: HashMap::from([
                 (1, Range { start: 0, length: 5 }),
                 (4, Range { start: 10, length: 1 }),
@@ -692,7 +721,75 @@ mod svo_buffer_tests {
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 12, 13, 14, 8, 9, 10],
             free_ranges: vec![Range { start: 0, length: 11 }],
+            updated_ranges: vec![Range { start: 0, length: 11 }],
             octant_to_range: Default::default(),
         });
+    }
+
+    #[test]
+    fn merge_ranges() {
+        struct TestCase {
+            name: &'static str,
+            input: Vec<Range>,
+            expected: Vec<Range>,
+        }
+        for case in vec![
+            TestCase {
+                name: "join adjacent ranges",
+                input: vec![
+                    Range { start: 0, length: 1 },
+                    Range { start: 1, length: 1 },
+                    Range { start: 2, length: 1 },
+                ],
+                expected: vec![
+                    Range { start: 0, length: 3 },
+                ],
+            },
+            TestCase {
+                name: "ignore non-adjacent ranges",
+                input: vec![
+                    Range { start: 0, length: 1 },
+                    Range { start: 2, length: 1 },
+                ],
+                expected: vec![
+                    Range { start: 0, length: 1 },
+                    Range { start: 2, length: 1 },
+                ],
+            },
+            TestCase {
+                name: "remove fully contained ranges",
+                input: vec![
+                    Range { start: 0, length: 5 },
+                    Range { start: 3, length: 1 },
+                ],
+                expected: vec![
+                    Range { start: 0, length: 5 },
+                ],
+            },
+            TestCase {
+                name: "remove and extend contained ranges",
+                input: vec![
+                    Range { start: 0, length: 5 },
+                    Range { start: 3, length: 5 },
+                ],
+                expected: vec![
+                    Range { start: 0, length: 8 },
+                ],
+            },
+            TestCase {
+                name: "works in inverse order",
+                input: vec![
+                    Range { start: 3, length: 5 },
+                    Range { start: 0, length: 5 },
+                ],
+                expected: vec![
+                    Range { start: 0, length: 8 },
+                ],
+            },
+        ] {
+            let mut input = case.input;
+            SvoBuffer::merge_ranges(&mut input);
+            assert_eq!(input, case.expected, "{}", case.name);
+        }
     }
 }

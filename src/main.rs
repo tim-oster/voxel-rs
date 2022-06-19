@@ -336,7 +336,13 @@ fn main() {
                 }
 
                 svo.serialize();
-                unsafe { svo.write_to(world_buffer); }
+
+                unsafe {
+                    let max_depth_exp = (-(svo.depth() as f32)).exp2();
+                    world_buffer.write(max_depth_exp.to_bits());
+
+                    svo.write_changes_to(world_buffer.offset(1));
+                }
 
                 println!("rebuild took {}ms", start.elapsed().as_millis());
             }
@@ -795,14 +801,14 @@ fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generato
 
     print!("copying buffer");
     let start = Instant::now();
-    let u32s = unsafe { svo.write_to(world_buffer) };
+    unsafe {
+        let max_depth_exp = (-(svo.depth() as f32)).exp2();
+        world_buffer.write(max_depth_exp.to_bits());
+    }
+    let u32s = unsafe { svo.write_to(world_buffer.offset(1)) };
     println!(": {}s", start.elapsed().as_secs_f32());
 
     println!("final size: {} MB", u32s as f32 * 4f32 / 1024f32 / 1024f32);
-
-    let mut result = Vec::new();
-    result.resize(u32s, 0);
-    unsafe { svo.write_to(result.as_mut_ptr()); }
 
     (world, svo)
 }
