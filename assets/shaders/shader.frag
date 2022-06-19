@@ -59,9 +59,12 @@ void main() {
 
     // TODO support translucent objects
 
-    octree_result shadow_res;
-    intersect_octree(res.pos + normal*0.0005, -u_light_dir, -1, true, shadow_res);
-    float shadow = shadow_res.t < 0 ? 1.0 : 0.0;
+    float shadow = 1;
+    if (res.t < 100/octree_scale) {
+        octree_result shadow_res;
+        intersect_octree(res.pos + normal*0.001, -u_light_dir, -1, true, shadow_res);
+        shadow = shadow_res.t < 0 ? 1.0 : 0.0;
+    }
 
     float light = u_ambient + (diffuse + specular) * shadow;
     color = res.color * light;
