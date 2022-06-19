@@ -3,6 +3,7 @@ extern crate gl;
 extern crate memoffset;
 
 use std::{mem, ptr};
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::ops::Add;
 use std::os::raw::c_int;
@@ -20,6 +21,7 @@ use crate::world::chunk;
 use crate::world::generator::{Noise, SplinePoint};
 use crate::world::octree::{Octree, Position};
 use crate::world::svo::Svo;
+use crate::world::world::ChunkPos;
 
 mod graphics;
 mod core;
@@ -318,8 +320,8 @@ fn main() {
     let mut ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
 
     let mut selected_block: BlockId = 1;
-    // let mut last_chunk_pos = ChunkPos::new(0, 0, 0);
-    // let mut generated_chunk_set = HashSet::new();
+    let mut last_chunk_pos = ChunkPos::new(0, 0, 0);
+    let mut generated_chunk_set = HashSet::new();
 
     window.request_grab_cursor(true);
     while !window.should_close() {
@@ -348,49 +350,51 @@ fn main() {
             }
         }
 
-        // {
-        //     let pos = camera.position;
-        //     let mut current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
-        //     current_chunk_pos.y = 0;
-        //
-        //     if last_chunk_pos != current_chunk_pos {
-        //         last_chunk_pos = current_chunk_pos;
-        //
-        //         let world_gen = world::generator::Generator::new(1, world_cfg.clone());
-        //
-        //         let r = world_size / 2;
-        //         let mut count = 0;
-        //
-        //         for dx in -r..r {
-        //             for dz in -r..r {
-        //                 let mut pos = ChunkPos {
-        //                     x: current_chunk_pos.x + dx,
-        //                     y: 0,
-        //                     z: current_chunk_pos.z + dz,
-        //                 };
-        //
-        //                 // TODO find a fix
-        //                 if pos.x < 0 || pos.z < 0 {
-        //                     continue;
-        //                 }
-        //
-        //                 if !generated_chunk_set.contains(&pos) {
-        //                     count += 1;
-        //                     generated_chunk_set.insert(pos);
-        //
-        //                     let world_height = 256;
-        //                     for y in 0..(world_height / 32) {
-        //                         pos.y = y;
-        //                         let chunk = world_gen.generate(pos);
-        //                         world.set_chunk(pos, chunk);
-        //                     }
-        //                 }
-        //             }
-        //         }
-        //
-        //         println!("generate {} new chunks", count);
-        //     }
-        // }
+        {
+            let pos = camera.position;
+            let mut current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
+            current_chunk_pos.y = 0;
+
+            if last_chunk_pos != current_chunk_pos {
+                last_chunk_pos = current_chunk_pos;
+
+                let world_gen = world::generator::Generator::new(1, world_cfg.clone());
+
+                let r = world_size;
+                let mut count = 0;
+
+                for dx in -r..r {
+                    for dz in -r..r {
+                        let mut pos = ChunkPos {
+                            x: current_chunk_pos.x + dx,
+                            y: 0,
+                            z: current_chunk_pos.z + dz,
+                        };
+
+                        // TODO find a fix
+                        if pos.x < 0 || pos.z < 0 {
+                            continue;
+                        }
+
+                        if !generated_chunk_set.contains(&pos) {
+                            count += 1;
+                            generated_chunk_set.insert(pos);
+
+                            let world_height = 256;
+                            for y in 0..(world_height / 32) {
+                                pos.y = y;
+                                let chunk = world_gen.generate(pos);
+                                world.set_chunk(pos, chunk);
+                            }
+                        }
+                    }
+                }
+
+                println!("generate {} new chunks", count);
+                println!("final size: {} MB", svo.size_in_bytes() as f32 / 1024f32 / 1024f32);
+                println!("tree depth: {}", svo.depth());
+            }
+        }
 
         window.update(|frame| {
             Window::new("Debug")
@@ -809,6 +813,7 @@ fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generato
     println!(": {}s", start.elapsed().as_secs_f32());
 
     println!("final size: {} MB", u32s as f32 * 4f32 / 1024f32 / 1024f32);
+    println!("tree depth: {}", svo.depth());
 
     (world, svo)
 }

@@ -151,6 +151,10 @@ impl<T: SvoSerializable> Svo<T> {
         result
     }
 
+    pub fn size_in_bytes(&self) -> usize {
+        self.buffer.bytes.len() * 4
+    }
+
     pub fn depth(&self) -> u32 {
         if self.root_octant_info.is_none() {
             return 0;
