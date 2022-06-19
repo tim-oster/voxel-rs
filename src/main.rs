@@ -21,7 +21,7 @@ use crate::chunk::{BlockId, ChunkStorage};
 use crate::world::chunk;
 use crate::world::generator::{Noise, SplinePoint};
 use crate::world::octree::{Octree, Position};
-use crate::world::svo::{SerializedSvo, Svo};
+use crate::world::svo_new::Svo;
 use crate::world::world::ChunkPos;
 
 mod graphics;
@@ -159,7 +159,7 @@ fn main() {
             spline_points: vec![],
         },
     };
-    let (mut world, mut svo, mut svo_buffer, mut max_depth_exp2) = generate_world(world_size, world_buffer, &world_cfg);
+    let (mut world, mut svo) = generate_world(world_size, world_buffer, &world_cfg);
 
     // WORLD LOADING END
 
@@ -337,21 +337,9 @@ fn main() {
                         svo.set(Position(pos.x as u32, pos.y as u32, pos.z as u32), Some(octree));
                     }
                 }
-                svo_buffer = svo.serialize_delta(svo_buffer);
-                max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
 
-                unsafe {
-                    ptr::write(world_buffer, max_depth_exp2.to_bits());
-                }
-
-                for id in &svo_buffer.changed_octants {
-                    let range = svo_buffer.buffer.octant_to_range.get(id).unwrap();
-                    unsafe {
-                        ptr::copy(svo_buffer.buffer.bytes.as_ptr().offset(range.start as isize),
-                                  world_buffer.offset(1 + range.start as isize),
-                                  range.length);
-                    }
-                }
+                svo.serialize();
+                unsafe { svo.write_to(world_buffer); }
 
                 println!("rebuild took {}ms", start.elapsed().as_millis());
             }
@@ -443,7 +431,7 @@ fn main() {
                     frame.ui.input_int("sea level", &mut world_cfg.sea_level).build();
 
                     if frame.ui.button("generate") {
-                        (world, svo, svo_buffer, max_depth_exp2) = generate_world(world_size, world_buffer, &world_cfg);
+                        (world, svo) = generate_world(world_size, world_buffer, &world_cfg);
                     }
 
                     frame.ui.new_line();
@@ -777,8 +765,8 @@ fn build_vao() -> (GLuint, i32) {
     }
 }
 
-fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generator::Config) -> (world::world::World, Svo<Rc<ChunkStorage>>, SerializedSvo, f32) {
-    println!("generating world");
+fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generator::Config) -> (world::world::World, Svo<Rc<ChunkStorage>>) {
+    print!("generating world");
     let start = Instant::now();
     let mut world = world::world::World::new();
 
@@ -796,23 +784,28 @@ fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generato
     }
 
     world.get_changed_chunks(); // drain all changed chunks
+    println!(": {}s", start.elapsed().as_secs_f32());
 
-    println!("{}s; converting into svo", start.elapsed().as_secs_f32());
+    print!("converting into svo");
     let start = Instant::now();
     let mut svo = world.build_svo();
+    println!(": {}s", start.elapsed().as_secs_f32());
 
-    println!("{}s; serializing svo", start.elapsed().as_secs_f32());
+    print!("serializing svo");
     let start = Instant::now();
-    let mut svo_buffer = svo.serialize();
+    svo.serialize();
+    println!(": {}s", start.elapsed().as_secs_f32());
 
-    println!("{}s; final size: {} MB", start.elapsed().as_secs_f32(), svo_buffer.buffer.bytes.len() as f32 * 4f32 / 1024f32 / 1024f32);
-    println!("tree depth: {}", svo_buffer.depth);
+    print!("copying buffer");
+    let start = Instant::now();
+    let u32s = unsafe { svo.write_to(world_buffer) };
+    println!(": {}s", start.elapsed().as_secs_f32());
 
-    let max_depth_exp2 = (-(svo_buffer.depth as f32)).exp2();
-    unsafe {
-        ptr::write(world_buffer, max_depth_exp2.to_bits());
-        ptr::copy(svo_buffer.buffer.bytes.as_ptr(), world_buffer.offset(1), svo_buffer.buffer.bytes.len());
-    }
+    println!("final size: {} MB", u32s as f32 * 4f32 / 1024f32 / 1024f32);
 
-    (world, svo, svo_buffer, max_depth_exp2)
+    let mut result = Vec::new();
+    result.resize(u32s, 0);
+    unsafe { svo.write_to(result.as_mut_ptr()); }
+
+    (world, svo)
 }

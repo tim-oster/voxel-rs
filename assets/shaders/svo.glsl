@@ -158,7 +158,6 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
                     next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
                 }
                 next_ptr = next_ptr + 4 + octant_idx;
-                next_ptr = descriptors[next_ptr];
 
                 int value = descriptors[next_ptr];
 

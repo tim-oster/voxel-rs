@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use crate::chunk::{BlockId, Chunk, ChunkStorage};
 use crate::world::chunk;
 use crate::world::octree::{Octree, Position};
-use crate::world::svo::Svo;
+use crate::world::svo_new::Svo;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct ChunkPos {
