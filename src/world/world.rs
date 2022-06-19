@@ -1,12 +1,10 @@
-use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
-use std::time::{Duration, Instant};
 
-use crate::chunk::{BlockId, Chunk, ChunkStorage};
+use crate::chunk::ChunkStorage;
 use crate::world::chunk;
-use crate::world::octree::{Octree, Position};
-use crate::world::svo_new::Svo;
+use crate::world::octree::Position;
+use crate::world::svo::Svo;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct ChunkPos {

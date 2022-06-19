@@ -3,8 +3,6 @@ extern crate gl;
 extern crate memoffset;
 
 use std::{mem, ptr};
-use std::cell::RefCell;
-use std::collections::HashSet;
 use std::ffi::c_void;
 use std::ops::Add;
 use std::os::raw::c_int;
@@ -21,8 +19,7 @@ use crate::chunk::{BlockId, ChunkStorage};
 use crate::world::chunk;
 use crate::world::generator::{Noise, SplinePoint};
 use crate::world::octree::{Octree, Position};
-use crate::world::svo_new::Svo;
-use crate::world::world::ChunkPos;
+use crate::world::svo::Svo;
 
 mod graphics;
 mod core;
