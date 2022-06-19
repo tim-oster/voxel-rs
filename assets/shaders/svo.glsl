@@ -1,6 +1,6 @@
 const int MAX_STEPS = 1000;
 
-const vec3 FACE_NORMALS[6] = vec3[6](
+/*const*/ vec3 FACE_NORMALS[6] = vec3[6](
 vec3(-1, 0, 0),
 vec3(1, 0, 0),
 vec3(0, -1, 0),
@@ -9,7 +9,7 @@ vec3(0, 0, -1),
 vec3(0, 0, 1)
 );
 
-const vec3 FACE_TANGENTS[6] = vec3[6](
+/*const*/ vec3 FACE_TANGENTS[6] = vec3[6](
 vec3(0, 0, 1),
 vec3(0, 0, -1),
 vec3(1, 0, 0),
@@ -18,7 +18,7 @@ vec3(-1, 0, 0),
 vec3(1, 0, 0)
 );
 
-const vec3 FACE_BITANGENTS[6] = vec3[6](
+/*const*/ vec3 FACE_BITANGENTS[6] = vec3[6](
 vec3(0, 1, 0),
 vec3(0, 1, 0),
 vec3(0, 0, 1),
