@@ -38,11 +38,17 @@ struct OctantInfo {
 }
 
 impl<T: SvoSerializable> Svo<T> {
+    const PREAMBLE_LENGTH: u32 = 5;
+
     pub fn new() -> Svo<T> {
+        Self::with_capacity(0)
+    }
+
+    pub fn with_capacity(capacity: usize) -> Svo<T> {
         Svo {
             octree: Octree::new(),
             change_set: HashSet::new(),
-            buffer: SvoBuffer::new(0), // TODO find a good size
+            buffer: SvoBuffer::new(capacity),
             octant_info: HashMap::new(),
             root_octant_info: None,
         }
@@ -65,11 +71,10 @@ impl<T: SvoSerializable> Svo<T> {
         }
 
         // rebuild & remove all changed leaf octants
-        let mut octant_buffer = Vec::with_capacity(0); // TODO figure out good size
+        let mut octant_buffer = Vec::with_capacity(56172); // size of a full chunk
         for change in self.change_set.drain() {
             match change {
                 OctantChange::Add(id) => {
-                    // TODO is there any case where this might be None?
                     let octant = self.octree.octants[id].content.as_ref().unwrap();
                     let result = octant.serialize(&mut octant_buffer);
                     if result.depth > 0 {
@@ -119,7 +124,6 @@ impl<T: SvoSerializable> Svo<T> {
             let child = &self.octree.octants[child_id];
 
             if let Some(content) = &child.content {
-                // TODO is there any case where this might be None?
                 let info = self.octant_info.get(&child_id).unwrap();
 
                 let mut mask = ((info.serialization.child_mask as u32) << 8) | info.serialization.leaf_mask as u32;
@@ -128,7 +132,7 @@ impl<T: SvoSerializable> Svo<T> {
                 }
                 dst[start_offset + (idx / 2) as usize] |= mask;
 
-                dst[start_offset + 4 + idx] = info.buf_offset as u32 + 5; // TODO hardcoded offset
+                dst[start_offset + 4 + idx] = info.buf_offset as u32 + Self::PREAMBLE_LENGTH;
 
                 result.depth = result.depth.max(info.serialization.depth + 1);
             } else {
@@ -198,8 +202,8 @@ impl<T: SvoSerializable> Svo<T> {
         dst.offset(1).write(0);
         dst.offset(2).write(0);
         dst.offset(3).write(0);
-        dst.offset(4).write(info.buf_offset as u32 + 5); // TODO hardcoded offset
-        dst.offset(5)
+        dst.offset(4).write(info.buf_offset as u32 + Self::PREAMBLE_LENGTH);
+        dst.offset(Self::PREAMBLE_LENGTH as isize)
     }
 }
 
@@ -271,7 +275,7 @@ impl Octree<BlockId> {
 
 // TODO write more tests
 #[cfg(test)]
-mod tests {
+mod svo_tests {
     use std::collections::{HashMap, HashSet};
 
     use crate::chunk::BlockId;
@@ -378,6 +382,7 @@ mod tests {
             },
         }));
 
+        let preamble_length = 5;
         let expected = vec![
             // core octant header
             (2 << 8) << 16,
@@ -496,13 +501,13 @@ mod tests {
             0,
             0,
             // outer octree, first node body
-            0, 5 /*points to first octree*/, 0, 0, // TODO hardcoded offset
+            0, 0 + preamble_length, 0, 0,
             0, 0, 0, 0,
         ];
         assert_eq!(svo.buffer, SvoBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
-            updated_ranges: vec![],
+            updated_ranges: vec![Range { start: 0, length: 168 }],
             octant_to_range: HashMap::from([
                 (1, Range { start: 0, length: 156 }),
                 (usize::MAX, Range { start: 156, length: 12 }),
@@ -514,15 +519,12 @@ mod tests {
         let size = unsafe { svo.write_to(buffer.as_mut_ptr()) };
         assert_eq!(buffer[..size], [
             vec![
-                // max depth exponent
-                (-6f32).exp2().to_bits(),
-
-                // svo header
+                // preamble
                 2 << 8,
                 0,
                 0,
                 0,
-                156 + 5,// TODO hardcoded offset
+                156 + preamble_length,
             ],
             expected,
         ].concat());
