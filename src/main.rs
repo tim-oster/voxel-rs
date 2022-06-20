@@ -158,7 +158,7 @@ fn main() {
             spline_points: vec![],
         },
     };
-    let (mut world, mut svo) = generate_world(world_size, world_buffer, &world_cfg);
+    let (mut world, mut svo, mut generated_chunk_set) = generate_world(world_size, world_buffer, &world_cfg);
 
     // WORLD LOADING END
 
@@ -321,7 +321,6 @@ fn main() {
 
     let mut selected_block: BlockId = 1;
     let mut last_chunk_pos = ChunkPos::new(0, 0, 0);
-    let mut generated_chunk_set = HashSet::new();
 
     window.request_grab_cursor(true);
     while !window.should_close() {
@@ -391,8 +390,6 @@ fn main() {
                 }
 
                 println!("generate {} new chunks", count);
-                println!("final size: {} MB", svo.size_in_bytes() as f32 / 1024f32 / 1024f32);
-                println!("tree depth: {}", svo.depth());
             }
         }
 
@@ -429,6 +426,11 @@ fn main() {
                         "block normal: ({},{},{})",
                         block_normal.x as i32, block_normal.y as i32, block_normal.z as i32,
                     ));
+
+                    frame.ui.text(format!(
+                        "svo size: {:.3}mb, depth: {}",
+                        svo.size_in_bytes() as f32 / 1024f32 / 1024f32, svo.depth(),
+                    ));
                 });
 
             Window::new("World Gen")
@@ -438,7 +440,7 @@ fn main() {
                     frame.ui.input_int("sea level", &mut world_cfg.sea_level).build();
 
                     if frame.ui.button("generate") {
-                        (world, svo) = generate_world(world_size, world_buffer, &world_cfg);
+                        (world, svo, generated_chunk_set) = generate_world(world_size, world_buffer, &world_cfg);
                     }
 
                     frame.ui.new_line();
@@ -772,10 +774,11 @@ fn build_vao() -> (GLuint, i32) {
     }
 }
 
-fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generator::Config) -> (world::world::World, Svo<Rc<ChunkStorage>>) {
+fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generator::Config) -> (world::world::World, Svo<Rc<ChunkStorage>>, HashSet<ChunkPos>) {
     print!("generating world");
     let start = Instant::now();
     let mut world = world::world::World::new();
+    let mut generated_set = HashSet::new();
 
     let world_gen = world::generator::Generator::new(1, cfg.clone());
 
@@ -783,9 +786,12 @@ fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generato
     for x in 0..world_size {
         for z in 0..world_size {
             for y in 0..(world_height / 32) {
-                let pos = world::world::ChunkPos::new(x, y, z);
+                let mut pos = world::world::ChunkPos::new(x, y, z);
                 let chunk = world_gen.generate(pos);
                 world.set_chunk(pos, chunk);
+
+                pos.y = 0;
+                generated_set.insert(pos);
             }
         }
     }
@@ -809,11 +815,8 @@ fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generato
         let max_depth_exp = (-(svo.depth() as f32)).exp2();
         world_buffer.write(max_depth_exp.to_bits());
     }
-    let u32s = unsafe { svo.write_to(world_buffer.offset(1)) };
+    unsafe { svo.write_to(world_buffer.offset(1)); }
     println!(": {}s", start.elapsed().as_secs_f32());
 
-    println!("final size: {} MB", u32s as f32 * 4f32 / 1024f32 / 1024f32);
-    println!("tree depth: {}", svo.depth());
-
-    (world, svo)
+    (world, svo, generated_set)
 }
