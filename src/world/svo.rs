@@ -273,95 +273,17 @@ impl Octree<BlockId> {
     }
 }
 
-// TODO write more tests
 #[cfg(test)]
 mod svo_tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
 
     use crate::chunk::BlockId;
     use crate::Svo;
     use crate::world::octree::{Octree, Position};
     use crate::world::svo::{OctantInfo, Range, SerializationResult, SvoBuffer};
 
-// #[test]
-    // fn svo_serialize() {
-    //     let mut svo = Svo::new();
-    //     svo.set(Position(0, 0, 0), Some(100 as BlockId));
-    //     svo.set(Position(1, 1, 1), Some(200 as BlockId));
-    //     svo.octree.expand_to(5);
-    //     svo.octree.compact();
-    //
-    //     assert_eq!(svo.serialize(), SerializedSvo {
-    //         header_mask: 1 << 8,
-    //         depth: 5,
-    //         buffer: SvoBuffer {
-    //             root_mask: 1 << 8,
-    //             depth: 5,
-    //             bytes: vec![
-    //                 // svo header
-    //                 1 << 8,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 5,
-    //                 // first octant header
-    //                 1 << 8,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 // first octant body
-    //                 (1 << 31) | 8, 0, 0, 0,
-    //                 0, 0, 0, 0,
-    //                 // second octant header
-    //                 1 << 8,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 // second octant body
-    //                 (1 << 31) | 8, 0, 0, 0,
-    //                 0, 0, 0, 0,
-    //                 // third octant header
-    //                 1 << 8,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 // third octant body
-    //                 (1 << 31) | 8, 0, 0, 0,
-    //                 0, 0, 0, 0,
-    //                 // fourth octant header
-    //                 ((1 | 128) << 8) | (1 | 128),
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 // fourth octant body
-    //                 (1 << 31) | 8, 0, 0, 0,
-    //                 0, 0, 0, 0,
-    //                 // fifth octant header
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 // fifth octant body
-    //                 65, 0, 0, 0,
-    //                 0, 0, 0, 66,
-    //                 // content
-    //                 100,
-    //                 200,
-    //             ],
-    //             free_ranges: vec![],
-    //             octant_to_range: HashMap::from([
-    //                 (1, Range { start: 65, length: 1, ptr: MissingPointer { octant: 1, child_idx: 0, buffer_index: 57 } }),
-    //                 (2, Range { start: 66, length: 1, ptr: MissingPointer { octant: 2, child_idx: 7, buffer_index: 64 } }),
-    //                 (6, Range { start: 5, length: 60, ptr: MissingPointer { octant: 0, child_idx: 0, buffer_index: 5 } }),
-    //             ]),
-    //             rebuild_targets: Default::default(),
-    //         },
-    //         changed_octants: HashSet::from([1, 2, 6]),
-    //     });
-    // }
-
     #[test]
-    fn svo_serialize_nested() {
+    fn svo_serialize() {
         let mut octree = Octree::new();
         octree.add_leaf(Position(31, 0, 0), 1 as BlockId);
         octree.add_leaf(Position(0, 31, 0), 2 as BlockId);
