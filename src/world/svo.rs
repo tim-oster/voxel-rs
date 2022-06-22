@@ -92,67 +92,27 @@ impl<T: SvoSerializable> Svo<T> {
         }
 
         // rebuild root octree
-        let root_id = self.octree.root.unwrap();
-        let root = &self.octree.octants[root_id];
-        let result = self.serialize_octant(root, &mut octant_buffer);
-
+        let result = self.serialize_root(&mut octant_buffer);
         let offset = self.buffer.insert(usize::MAX, &octant_buffer);
         self.root_octant_info = Some(OctantInfo { buf_offset: offset, serialization: result });
     }
 
-    // TODO code duplication
-    fn serialize_octant(&self, octant: &Octant<T>, dst: &mut Vec<u32>) -> SerializationResult {
-        let start_offset = dst.len();
+    fn serialize_root(&self, dst: &mut Vec<u32>) -> SerializationResult {
+        let root_id = self.octree.root.unwrap();
+        let root = &self.octree.octants[root_id];
 
-        dst.reserve(12);
-        dst.extend(std::iter::repeat(0).take(12));
+        serialize_octant(&self.octree, root, dst, &|params| {
+            let info = self.octant_info.get(&params.id).unwrap();
 
-        let mut result = SerializationResult {
-            child_mask: 0,
-            leaf_mask: 0,
-            depth: 0,
-        };
-
-        for (idx, child) in octant.children.iter().enumerate() {
-            if child.is_none() {
-                continue;
+            let mut mask = ((info.serialization.child_mask as u32) << 8) | info.serialization.leaf_mask as u32;
+            if (params.idx % 2) != 0 {
+                mask <<= 16;
             }
 
-            result.child_mask |= 1 << idx;
-
-            let child_id = child.unwrap();
-            let child = &self.octree.octants[child_id];
-
-            if let Some(content) = &child.content {
-                let info = self.octant_info.get(&child_id).unwrap();
-
-                let mut mask = ((info.serialization.child_mask as u32) << 8) | info.serialization.leaf_mask as u32;
-                if (idx % 2) != 0 {
-                    mask <<= 16;
-                }
-                dst[start_offset + (idx / 2) as usize] |= mask;
-
-                dst[start_offset + 4 + idx] = info.buf_offset as u32 + Self::PREAMBLE_LENGTH;
-
-                result.depth = result.depth.max(info.serialization.depth + 1);
-            } else {
-                let child_offset = (dst.len() - start_offset) as u32;
-                let child_result = self.serialize_octant(&self.octree.octants[child_id], dst);
-
-                let mut mask = ((child_result.child_mask as u32) << 8) | child_result.leaf_mask as u32;
-                if (idx % 2) != 0 {
-                    mask <<= 16;
-                }
-                dst[start_offset + (idx / 2) as usize] |= mask;
-
-                dst[start_offset + 4 + idx] = child_offset - 4 - idx as u32; // offset from pointer to start of next block
-                dst[start_offset + 4 + idx] |= 1 << 31; // flag as relative pointer
-
-                result.depth = result.depth.max(child_result.depth + 1);
-            }
-        }
-
-        result
+            params.dst[(params.idx / 2) as usize] |= mask;
+            params.dst[4 + params.idx] = info.buf_offset as u32 + Self::PREAMBLE_LENGTH;
+            params.result.depth = params.result.depth.max(info.serialization.depth + 1);
+        })
     }
 
     pub fn size_in_bytes(&self) -> usize {
@@ -221,56 +181,71 @@ impl SvoSerializable for Octree<BlockId> {
 
         let root_id = self.root.unwrap();
         let root = &self.octants[root_id];
-        self.serialize_octant(root, dst)
+        serialize_octant(self, root, dst, &|params| {
+            params.result.leaf_mask |= 1 << params.idx;
+            params.dst[4 + params.idx] = *params.content as u32;
+            params.result.depth = 1;
+        })
     }
 }
 
-impl Octree<BlockId> {
-    fn serialize_octant(&self, octant: &Octant<BlockId>, dst: &mut Vec<u32>) -> SerializationResult {
-        let start_offset = dst.len();
+struct ChildEncodeParams<'a, T> {
+    id: OctantId,
+    idx: usize,
+    result: &'a mut SerializationResult,
+    dst: &'a mut [u32],
+    content: &'a T,
+}
 
-        dst.reserve(12);
-        dst.extend(std::iter::repeat(0).take(12));
+fn serialize_octant<T, F>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>, child_encoder: &F) -> SerializationResult
+    where F: Fn(ChildEncodeParams<T>) {
+    let start_offset = dst.len();
 
-        let mut result = SerializationResult {
-            child_mask: 0,
-            leaf_mask: 0,
-            depth: 0,
-        };
+    dst.reserve(12);
+    dst.extend(std::iter::repeat(0).take(12));
 
-        for (idx, child) in octant.children.iter().enumerate() {
-            if child.is_none() {
-                continue;
-            }
+    let mut result = SerializationResult {
+        child_mask: 0,
+        leaf_mask: 0,
+        depth: 0,
+    };
 
-            result.child_mask |= 1 << idx;
-
-            let child_id = child.unwrap();
-            let child = &self.octants[child_id];
-
-            if let Some(content) = &child.content {
-                result.leaf_mask |= 1 << idx;
-                dst[start_offset + 4 + idx] = *content as u32;
-                result.depth = 1;
-            } else {
-                let child_offset = (dst.len() - start_offset) as u32;
-                let child_result = self.serialize_octant(&self.octants[child_id], dst);
-
-                let mut mask = ((child_result.child_mask as u32) << 8) | child_result.leaf_mask as u32;
-                if (idx % 2) != 0 {
-                    mask <<= 16;
-                }
-                dst[start_offset + (idx / 2) as usize] |= mask;
-
-                dst[start_offset + 4 + idx] = child_offset - 4 - idx as u32; // offset from pointer to start of next block
-                dst[start_offset + 4 + idx] |= 1 << 31; // flag as relative pointer
-
-                result.depth = result.depth.max(child_result.depth + 1);
-            }
+    for (idx, child) in octant.children.iter().enumerate() {
+        if child.is_none() {
+            continue;
         }
 
-        result
+        result.child_mask |= 1 << idx;
+
+        let child_id = child.unwrap();
+        let child = &octree.octants[child_id];
+
+        if let Some(content) = &child.content {
+            child_encoder(ChildEncodeParams {
+                id: child_id,
+                idx,
+                result: &mut result,
+                dst: &mut dst[start_offset..],
+                content,
+            });
+        } else {
+            let child_offset = (dst.len() - start_offset) as u32;
+            let child_result = serialize_octant(octree, &octree.octants[child_id], dst, child_encoder);
+
+            let mut mask = ((child_result.child_mask as u32) << 8) | child_result.leaf_mask as u32;
+            if (idx % 2) != 0 {
+                mask <<= 16;
+            }
+            dst[start_offset + (idx / 2) as usize] |= mask;
+
+            dst[start_offset + 4 + idx] = child_offset - 4 - idx as u32; // offset from pointer to start of next block
+            dst[start_offset + 4 + idx] |= 1 << 31; // flag as relative pointer
+
+            result.depth = result.depth.max(child_result.depth + 1);
+        }
     }
+
+    result
 }
 
 #[cfg(test)]
