@@ -4,6 +4,7 @@ extern crate memoffset;
 
 use std::{mem, ptr};
 use std::collections::HashSet;
+use std::f32::consts::PI;
 use std::ffi::c_void;
 use std::ops::Add;
 use std::os::raw::c_int;
@@ -584,6 +585,9 @@ fn main() {
                 }
                 if delta.y.abs() > 0.01 {
                     cam_rot.x -= delta.y * cam_rot_speed * frame.stats.delta_time;
+
+                    let limit = PI/2.0 - 0.01;
+                    cam_rot.x = cam_rot.x.clamp(-limit, limit);
                 }
                 camera.set_forward_from_euler(cam_rot);
             }
