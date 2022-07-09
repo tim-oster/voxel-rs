@@ -48,6 +48,15 @@ impl World {
         }
     }
 
+    pub fn remove_chunk(&mut self, pos: &ChunkPos) {
+        self.chunks.remove(pos);
+
+        if !self.changed_chunks_set.contains(pos) {
+            self.changed_chunks_set.insert(*pos);
+            self.changed_chunks.push_back(*pos);
+        }
+    }
+
     pub fn get_block(&self, x: i32, y: i32, z: i32) -> chunk::BlockId {
         let pos = ChunkPos::from_block_pos(x, y, z);
         if let Some(chunk) = self.chunks.get(&pos) {

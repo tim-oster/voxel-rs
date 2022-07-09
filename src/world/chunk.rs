@@ -42,7 +42,7 @@ impl ChunkStorage {
     }
 
     pub fn get_block(&self, x: u32, y: u32, z: u32) -> BlockId {
-        self.octree.borrow().get_leaf(Position(x, y, z)).unwrap_or(NO_BLOCK)
+        *self.octree.borrow().get_leaf(Position(x, y, z)).unwrap_or(&NO_BLOCK)
     }
 
     fn set_block(&self, x: u32, y: u32, z: u32, block: BlockId) {

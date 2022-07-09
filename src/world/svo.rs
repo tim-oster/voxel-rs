@@ -54,19 +54,28 @@ impl<T: SvoSerializable> Svo<T> {
         }
     }
 
-    pub fn set(&mut self, pos: Position, leaf: Option<T>) {
+    pub fn set(&mut self, pos: Position, leaf: Option<T>) -> Option<OctantId> {
         if let Some(leaf) = leaf {
             let id = self.octree.add_leaf(pos, leaf);
             self.change_set.insert(OctantChange::Add(id));
+            return Some(id);
         } else {
             if let Some(id) = self.octree.remove_leaf(pos) {
                 self.change_set.insert(OctantChange::Remove(id));
+                return Some(id);
             }
         }
+        return None;
+    }
+
+    /// replace sets the leaf octant at the given position and returns the previously present leaf
+    /// octant id.
+    pub fn replace(&mut self, pos: Position, leaf: OctantId) -> Option<OctantId> {
+        self.octree.replace_leaf(pos, leaf)
     }
 
     pub fn serialize(&mut self) {
-        if self.octree.root.is_none() || self.change_set.is_empty() {
+        if self.octree.root.is_none() {
             return;
         }
 

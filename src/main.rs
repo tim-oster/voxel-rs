@@ -3,7 +3,7 @@ extern crate gl;
 extern crate memoffset;
 
 use std::{mem, ptr};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::ffi::c_void;
 use std::ops::Add;
@@ -96,10 +96,13 @@ fn main() {
             .build()
     ).unwrap();
 
+    let mut render_distance = 5;
+    let mut absolute_position = Point3::new(16.0, 80.0, 16.0);
+
     let (vao, indices_count) = build_vao();
 
     let mut camera = graphics::Camera::new(72.0, window.get_aspect(), 0.01, 1024.0);
-    camera.position = Point3::new(128.0, 80.0, 128.0);
+    camera.position = absolute_position;
 
     let mut cam_speed = 1f32;
     let cam_rot_speed = 0.005f32;
@@ -137,7 +140,6 @@ fn main() {
 
     // WORLD LOADING START
 
-    let mut world_size: i32 = 5;
     let mut world_cfg = world::generator::Config {
         sea_level: 70,
         continentalness: Noise {
@@ -159,7 +161,9 @@ fn main() {
             spline_points: vec![],
         },
     };
-    let (mut world, mut svo, mut generated_chunk_set) = generate_world(world_size, world_buffer, &world_cfg);
+
+    // TODO initial world gen should be around the octree center
+    let (mut world, mut svo) = generate_world(render_distance, world_buffer, &world_cfg);
 
     // WORLD LOADING END
 
@@ -321,23 +325,93 @@ fn main() {
     let mut ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
 
     let mut selected_block: BlockId = 1;
-    let mut last_chunk_pos = ChunkPos::new(0, 0, 0);
+    let mut last_chunk_pos = ChunkPos::new(-9999, 0, 0); // random number to be different on first iteration
+
+    let mut svo_octant_ids = HashMap::new();
 
     window.request_grab_cursor(true);
     while !window.should_close() {
+        let mut block_pos = None;
+        {
+            let pos = unsafe { (*picker_data).block_pos.0 };
+            if pos.x != f32::MAX {
+                let rel_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
+                let rel_block_pos = Point3::new((pos.x as i32 & 31) as f32, (pos.y as i32 & 31) as f32, (pos.z as i32 & 31) as f32);
+
+                let delta = Point3::new(rel_chunk_pos.x - render_distance, 0, rel_chunk_pos.z - render_distance);
+                let abs_chunk_pos = ChunkPos::from_block_pos(absolute_position.x as i32, 0, absolute_position.z as i32);
+                let abs_chunk_pos = Point3::new((abs_chunk_pos.x + delta.x) as f32, rel_chunk_pos.y as f32, (abs_chunk_pos.z + delta.z) as f32);
+                block_pos = Some((abs_chunk_pos * 32.0) + rel_block_pos.to_vec());
+            }
+        }
+
         // TODO do this in the background
         {
+            let pos = absolute_position;
+            let current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
+
             let changed = world.get_changed_chunks();
             if !changed.is_empty() {
                 let start = Instant::now();
-                for pos in &changed {
-                    if let Some(chunk) = world.chunks.get(pos) {
-                        let octree = chunk.get_storage();
-                        svo.set(Position(pos.x as u32, pos.y as u32, pos.z as u32), Some(octree));
+
+                // TODO wip
+                // move existing chunks
+                let mut move_count = 0;
+                let r = render_distance;
+                for dx in -r..=r {
+                    for dz in -r..=r {
+                        let mut pos = ChunkPos {
+                            x: current_chunk_pos.x + dx,
+                            y: 0,
+                            z: current_chunk_pos.z + dz,
+                        };
+                        let new_x = (render_distance + dx) as u32;
+                        let new_z = (render_distance + dz) as u32;
+
+                        let world_height = 256;
+                        for y in 0..(world_height / 32) {
+                            pos.y = y;
+                            let octant_id = svo_octant_ids.get(&pos);
+                            if octant_id.is_none() {
+                                continue;
+                            }
+                            let octant_id = octant_id.unwrap();
+
+                            move_count += 1;
+                            let svo_pos = Position(new_x, y as u32, new_z);
+                            let old_octant = svo.replace(svo_pos, *octant_id);
+                            // TODO deal with old octant ids
+                        }
                     }
                 }
 
+                // update new chunks
+                for pos in &changed {
+                    let offset_x = pos.x - current_chunk_pos.x;
+                    let offset_z = pos.z - current_chunk_pos.z;
+
+                    if offset_x.abs() > render_distance || offset_z.abs() > render_distance {
+                        // TODO can anything leak in this scenario?
+                        svo_octant_ids.remove(pos);
+                        continue;
+                    }
+
+                    let svo_pos = Position((render_distance + offset_x) as u32, pos.y as u32, (render_distance + offset_z) as u32);
+
+                    if let Some(chunk) = world.chunks.get(pos) {
+                        let octree = chunk.get_storage();
+                        if let Some(id) = svo.set(svo_pos, Some(octree)) {
+                            svo_octant_ids.insert(*pos, id);
+                        }
+                    } else {
+                        svo.set(svo_pos, None);
+                        svo_octant_ids.remove(pos);
+                    }
+                }
+
+                println!("(intermediate) after moving {}ms (changed chunks: {}, moved: {})", start.elapsed().as_millis(), changed.len(), move_count);
                 svo.serialize();
+                println!("(intermediate) after serialization {}ms", start.elapsed().as_millis());
 
                 unsafe {
                     let max_depth_exp = (-(svo.depth() as f32)).exp2();
@@ -351,34 +425,36 @@ fn main() {
         }
 
         {
-            let pos = camera.position;
+            let pos = absolute_position;
             let mut current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
             current_chunk_pos.y = 0;
 
-            if last_chunk_pos != current_chunk_pos {
+            let chunk_world_pos = Point3::new(current_chunk_pos.x as f32, current_chunk_pos.y as f32, current_chunk_pos.z as f32) * 32.0;
+            let delta = pos - chunk_world_pos;
+
+            // TODO test if this is correct to provide smooth transitions
+            camera.position.y = pos.y;
+            camera.position.x = render_distance as f32 * 32.0 + delta.x;
+            camera.position.z = render_distance as f32 * 32.0 + delta.z;
+
+            if last_chunk_pos != current_chunk_pos && current_chunk_pos == ChunkPos::new(0, 0, 0) {
                 last_chunk_pos = current_chunk_pos;
 
                 let world_gen = world::generator::Generator::new(1, world_cfg.clone());
 
-                let r = world_size;
+                let r = render_distance;
                 let mut count = 0;
 
-                for dx in -r..r {
-                    for dz in -r..r {
+                for dx in -r..=r {
+                    for dz in -r..=r {
                         let mut pos = ChunkPos {
                             x: current_chunk_pos.x + dx,
                             y: 0,
                             z: current_chunk_pos.z + dz,
                         };
 
-                        // TODO find a fix
-                        if pos.x < 0 || pos.z < 0 {
-                            continue;
-                        }
-
-                        if !generated_chunk_set.contains(&pos) {
+                        if !world.chunks.contains_key(&pos) {
                             count += 1;
-                            generated_chunk_set.insert(pos);
 
                             let world_height = 256;
                             for y in 0..(world_height / 32) {
@@ -391,6 +467,21 @@ fn main() {
                 }
 
                 println!("generate {} new chunks", count);
+
+                let mut delete_list = Vec::new();
+                for pos in world.chunks.keys() {
+                    let dx = (pos.x - current_chunk_pos.x).abs();
+                    let dz = (pos.z - current_chunk_pos.z).abs();
+
+                    if dx > r || dz > r {
+                        delete_list.push(*pos);
+                    }
+                }
+                for pos in delete_list.iter() {
+                    world.remove_chunk(pos);
+                }
+
+                println!("removed {} chunks", delete_list.len());
             }
         }
 
@@ -405,6 +496,10 @@ fn main() {
                         frame.stats.avg_update_time_per_second * 1000.0,
                     ));
                     frame.ui.text(format!(
+                        "abs pos: ({:.3},{:.3},{:.3})",
+                        absolute_position.x, absolute_position.y, absolute_position.z,
+                    ));
+                    frame.ui.text(format!(
                         "cam pos: ({:.3},{:.3},{:.3})",
                         camera.position.x, camera.position.y, camera.position.z,
                     ));
@@ -413,10 +508,7 @@ fn main() {
                         camera.forward.x, camera.forward.y, camera.forward.z,
                     ));
 
-                    let mut block_pos = unsafe { (*picker_data).block_pos.0 };
-                    if block_pos.x == f32::MAX {
-                        block_pos = Point3::new(0.0, 0.0, 0.0);
-                    }
+                    let block_pos = block_pos.unwrap_or(Point3::new(0.0, 0.0, 0.0));
                     frame.ui.text(format!(
                         "block pos: ({:.2},{:.2},{:.2})",
                         block_pos.x, block_pos.y, block_pos.z,
@@ -437,11 +529,11 @@ fn main() {
             Window::new("World Gen")
                 .size([300.0, 100.0], Condition::FirstUseEver)
                 .build(&frame.ui, || {
-                    frame.ui.input_int("world size", &mut world_size).build();
+                    frame.ui.input_int("render distance", &mut render_distance).build();
                     frame.ui.input_int("sea level", &mut world_cfg.sea_level).build();
 
                     if frame.ui.button("generate") {
-                        (world, svo, generated_chunk_set) = generate_world(world_size, world_buffer, &world_cfg);
+                        (world, svo) = generate_world(render_distance, world_buffer, &world_cfg);
                     }
 
                     frame.ui.new_line();
@@ -523,23 +615,23 @@ fn main() {
             }
             if frame.input.is_key_pressed(&glfw::Key::W) {
                 let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-                camera.position += dir * cam_speed * frame.stats.delta_time;
+                absolute_position += dir * cam_speed * frame.stats.delta_time;
             }
             if frame.input.is_key_pressed(&glfw::Key::S) {
                 let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-                camera.position -= dir * cam_speed * frame.stats.delta_time;
+                absolute_position -= dir * cam_speed * frame.stats.delta_time;
             }
             if frame.input.is_key_pressed(&glfw::Key::A) {
-                camera.position -= camera.right() * cam_speed * frame.stats.delta_time;
+                absolute_position -= camera.right() * cam_speed * frame.stats.delta_time;
             }
             if frame.input.is_key_pressed(&glfw::Key::D) {
-                camera.position += camera.right() * cam_speed * frame.stats.delta_time;
+                absolute_position += camera.right() * cam_speed * frame.stats.delta_time;
             }
             if frame.input.is_key_pressed(&glfw::Key::Space) {
-                camera.position.y += cam_speed * frame.stats.delta_time;
+                absolute_position.y += cam_speed * frame.stats.delta_time;
             }
             if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
-                camera.position.y -= cam_speed * frame.stats.delta_time;
+                absolute_position.y -= cam_speed * frame.stats.delta_time;
             }
             if frame.input.was_key_pressed(&glfw::Key::G) {
                 if cam_speed == 1.0 {
@@ -586,7 +678,7 @@ fn main() {
                 if delta.y.abs() > 0.01 {
                     cam_rot.x -= delta.y * cam_rot_speed * frame.stats.delta_time;
 
-                    let limit = PI/2.0 - 0.01;
+                    let limit = PI / 2.0 - 0.01;
                     cam_rot.x = cam_rot.x.clamp(-limit, limit);
                 }
                 camera.set_forward_from_euler(cam_rot);
@@ -594,8 +686,7 @@ fn main() {
 
             // removing blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
-                let block_pos = unsafe { (*picker_data).block_pos.0 };
-                if block_pos.x != f32::MAX {
+                if let Some(block_pos) = block_pos {
                     let x = block_pos.x as i32;
                     let y = block_pos.y as i32;
                     let z = block_pos.z as i32;
@@ -605,8 +696,7 @@ fn main() {
 
             // block picking
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button3) {
-                let block_pos = unsafe { (*picker_data).block_pos.0 };
-                if block_pos.x != f32::MAX {
+                if let Some(block_pos) = block_pos {
                     let x = block_pos.x as i32;
                     let y = block_pos.y as i32;
                     let z = block_pos.z as i32;
@@ -616,9 +706,8 @@ fn main() {
 
             // adding blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
-                let block_pos = unsafe { (*picker_data).block_pos.0 };
                 let block_normal = unsafe { (*picker_data).block_normal.0 };
-                if block_pos.x != f32::MAX {
+                if let Some(block_pos) = block_pos {
                     let block_pos = block_pos.add(block_normal);
                     let x = block_pos.x as i32;
                     let y = block_pos.y as i32;
@@ -778,27 +867,25 @@ fn build_vao() -> (GLuint, i32) {
     }
 }
 
-fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generator::Config) -> (world::world::World, Svo<Rc<ChunkStorage>>, HashSet<ChunkPos>) {
+fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generator::Config) -> (world::world::World, Svo<Rc<ChunkStorage>>) {
     print!("generating world");
     let start = Instant::now();
     let mut world = world::world::World::new();
-    let mut generated_set = HashSet::new();
 
-    let world_gen = world::generator::Generator::new(1, cfg.clone());
-
-    let world_height = 256;
-    for x in 0..world_size {
-        for z in 0..world_size {
-            for y in 0..(world_height / 32) {
-                let mut pos = world::world::ChunkPos::new(x, y, z);
-                let chunk = world_gen.generate(pos);
-                world.set_chunk(pos, chunk);
-
-                pos.y = 0;
-                generated_set.insert(pos);
-            }
-        }
-    }
+    // let world_gen = world::generator::Generator::new(1, cfg.clone());
+    //
+    // let world_height = 256;
+    // for x in 0..world_size {
+    //     for z in 0..world_size {
+    //         for y in 0..(world_height / 32) {
+    //             let mut pos = world::world::ChunkPos::new(x, y, z);
+    //             let chunk = world_gen.generate(pos);
+    //             world.set_chunk(pos, chunk);
+    //
+    //             pos.y = 0;
+    //         }
+    //     }
+    // }
 
     world.get_changed_chunks(); // drain all changed chunks
     println!(": {}s", start.elapsed().as_secs_f32());
@@ -822,5 +909,5 @@ fn generate_world(world_size: i32, world_buffer: *mut u32, cfg: &world::generato
     unsafe { svo.write_to(world_buffer.offset(1)); }
     println!(": {}s", start.elapsed().as_secs_f32());
 
-    (world, svo, generated_set)
+    (world, svo)
 }
