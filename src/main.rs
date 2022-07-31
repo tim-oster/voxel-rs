@@ -367,12 +367,18 @@ fn main() {
         let running = worker_running.clone();
         let queue = worker_queue.clone();
         let handle = thread::spawn(move || {
+            let mut last_exec = Instant::now();
+
             while running.load(Ordering::Relaxed) {
                 let job = queue.pop();
                 if job.is_none() {
-                    std::thread::park();
+                    if last_exec.elapsed().as_millis() > 100 {
+                        std::thread::park();
+                        last_exec = Instant::now();
+                    }
                     continue;
                 }
+                last_exec = Instant::now();
                 (job.unwrap().exec)();
             }
         });
@@ -914,6 +920,12 @@ fn main() {
                 gl_check_error!();
             }
         });
+    }
+
+    worker_running.store(false, Ordering::Relaxed);
+    for handle in worker_handles {
+        handle.thread().unpark();
+        handle.join().unwrap();
     }
 }
 
