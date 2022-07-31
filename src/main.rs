@@ -22,7 +22,7 @@ use imgui::{Condition, Id, TreeNodeFlags, Window};
 use crate::chunk::{BlockId, Chunk};
 use crate::world::chunk;
 use crate::world::generator::{Noise, SplinePoint};
-use crate::world::octree::{Octree, Position};
+use crate::world::octree::{OctantId, Octree, Position};
 use crate::world::svo::{SerializedChunk, Svo};
 use crate::world::world::ChunkPos;
 
@@ -359,7 +359,9 @@ fn main() {
     let worker_queue = Arc::new(SegQueue::<Job>::new());
 
     let (worker_generated_chunks_tx, worker_generated_chunks_rx) = mpsc::channel::<Chunk>();
-    let (worker_serialized_chunks_tx, worker_serialized_chunks_rx) = mpsc::channel::<(Position, SerializedChunk)>();
+    let (worker_serialized_chunks_tx, worker_serialized_chunks_rx) = mpsc::channel::<SerializedChunk>();
+
+    let mut currently_generating_chunks = HashSet::new();
 
     for _ in 0..worker_count {
         let running = worker_running.clone();
@@ -385,7 +387,7 @@ fn main() {
     let mut selected_block: BlockId = 1;
     let mut last_chunk_pos = ChunkPos::new(-9999, 0, 0); // random number to be different on first iteration
 
-    let mut svo_octant_ids = HashMap::new();
+    let mut svo_octant_ids = HashMap::<ChunkPos, OctantId>::new();
 
     let svo = Arc::new(Mutex::new(svo));
     let mut svo_size = 0f32;
@@ -434,6 +436,10 @@ fn main() {
                     break;
                 }
                 let chunk = result.unwrap();
+                currently_generating_chunks.remove(&chunk.pos);
+                if world.chunks.contains_key(&chunk.pos) {
+                    continue;
+                }
                 world.set_chunk(chunk);
             }
 
@@ -463,12 +469,12 @@ fn main() {
                                 if octant_id.is_none() {
                                     continue;
                                 }
-                                let octant_id = octant_id.unwrap();
+                                let octant_id = *octant_id.unwrap();
 
-                                old_octant_id_set.remove(octant_id);
+                                old_octant_id_set.remove(&octant_id);
 
                                 let svo_pos = Position(new_x, y as u32, new_z);
-                                let old_octant = svo.lock().unwrap().replace(svo_pos, *octant_id);
+                                let old_octant = svo.lock().unwrap().replace(svo_pos, octant_id);
                                 if let Some(id) = old_octant {
                                     old_octant_id_set.insert(id);
                                 }
@@ -476,7 +482,11 @@ fn main() {
                         }
                     }
 
-                    // TODO deal with old octant ids
+                    let mut svo = svo.lock().unwrap();
+                    for id in old_octant_id_set {
+                        svo.remove_octant(id);
+                        svo_octant_ids.retain(|_, v| *v != id);
+                    }
                 }
 
                 let world_gen = Arc::new(world::generator::Generator::new(1, world_cfg.clone()));
@@ -499,7 +509,10 @@ fn main() {
                             for y in 0..(world_height / 32) {
                                 pos.y = y;
 
-                                // TODO ensure chunks are not enqueued twice
+                                if currently_generating_chunks.contains(&pos) {
+                                    continue;
+                                }
+                                currently_generating_chunks.insert(pos);
 
                                 let world_gen = world_gen.clone();
                                 let tx = worker_generated_chunks_tx.clone();
@@ -547,7 +560,7 @@ fn main() {
                     let offset_z = pos.z - current_chunk_pos.z;
 
                     if offset_x.abs() > render_distance || offset_z.abs() > render_distance {
-                        // TODO can anything leak in this scenario?
+                        world.remove_chunk(pos);
                         svo_octant_ids.remove(pos);
                         continue;
                     }
@@ -561,7 +574,7 @@ fn main() {
                         worker_queue.push(Job {
                             exec: Box::new(move || {
                                 let serialized = SerializedChunk::new(pos, storage);
-                                tx.send((svo_pos, serialized)).unwrap();
+                                tx.send(serialized).unwrap();
                             }),
                         });
                     } else {
@@ -572,10 +585,18 @@ fn main() {
                 }
             }
 
-            for (svo_pos, chunk) in worker_serialized_chunks_rx.try_iter() {
-                // TODO should position be recalculated here
-                // TODO this seems to cause holes in the world
+            for chunk in worker_serialized_chunks_rx.try_iter() {
                 let chunk_pos = chunk.pos;
+
+                let offset_x = chunk_pos.x - current_chunk_pos.x;
+                let offset_z = chunk_pos.z - current_chunk_pos.z;
+
+                if offset_x.abs() > render_distance || offset_z.abs() > render_distance {
+                    continue;
+                }
+
+                let svo_pos = Position((render_distance + offset_x) as u32, chunk_pos.y as u32, (render_distance + offset_z) as u32);
+
                 if let Some(id) = svo.lock().unwrap().set(svo_pos, Some(chunk)) {
                     svo_octant_ids.insert(chunk_pos, id);
                 }
@@ -644,6 +665,11 @@ fn main() {
                     frame.ui.text(format!(
                         "svo size: {:.3}mb, depth: {}",
                         svo_size, svo_depth,
+                    ));
+
+                    frame.ui.text(format!(
+                        "queue length: {}",
+                        worker_queue.len(),
                     ));
                 });
 

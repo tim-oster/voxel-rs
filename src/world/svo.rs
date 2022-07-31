@@ -75,6 +75,10 @@ impl<T: SvoSerializable> Svo<T> {
         self.octree.replace_leaf(pos, leaf)
     }
 
+    pub fn remove_octant(&mut self, octant_id: OctantId) {
+        self.octree.delete_octant(octant_id);
+    }
+
     pub fn serialize(&mut self) {
         if self.octree.root.is_none() {
             return;

@@ -96,8 +96,7 @@ impl<T> Octree<T> {
         self.expand_to(pos.required_depth());
 
         if let Some(old_parent_id) = self.octants[leaf].parent {
-            let old_parent = &mut self.octants[old_parent_id];
-            old_parent.remove_child(old_parent.find_child_idx(leaf).unwrap());
+            self.octants[old_parent_id].remove_child_by_octant_id(leaf);
         }
 
         let mut it = self.root.unwrap();
@@ -114,20 +113,19 @@ impl<T> Octree<T> {
             pos.2 %= size;
 
             if size == 1 {
-                let octant = &mut self.octants[it];
-                let previous_child = octant.children[idx];
-
-                octant.add_child(idx, leaf);
-
-                if let Some(previous_child) = previous_child {
-                    self.octants[previous_child].parent = None;
-                }
-
-                self.octants[leaf].parent = Some(it);
-
+                let previous_child = self.octants[it].children[idx];
                 if previous_child == Some(leaf) {
                     return None;
                 }
+
+                if let Some(previous_child) = previous_child {
+                    self.octants[it].remove_child(idx);
+                    self.octants[previous_child].parent = None;
+                }
+
+                self.octants[it].add_child(idx, leaf);
+                self.octants[leaf].parent = Some(it);
+
                 return previous_child;
             }
 
@@ -173,11 +171,9 @@ impl<T> Octree<T> {
                 break;
             }
 
-            let parent = it;
             it = child.unwrap();
 
             if size == 1 {
-                self.octants[parent].remove_child(idx);
                 self.delete_octant(it);
                 break;
             }
@@ -293,7 +289,12 @@ impl<T> Octree<T> {
         id
     }
 
-    fn delete_octant(&mut self, id: OctantId) {
+    pub fn delete_octant(&mut self, id: OctantId) {
+        let octant = &self.octants[id];
+        if let Some(parent) = octant.parent {
+            self.octants[parent].remove_child_by_octant_id(id);
+            self.octants[id].parent = None;
+        }
         self.free_list.push(id);
     }
 }
@@ -316,13 +317,17 @@ impl<T> Octant<T> {
         self.children[idx] = Some(child);
     }
 
-    fn find_child_idx(&self, child: OctantId) -> Option<usize> {
-        self.children.iter().position(|&x| x == Some(child))
+    fn remove_child(&mut self, idx: usize) {
+        if self.children[idx].is_some() {
+            self.children_count -= 1;
+        }
+        self.children[idx] = None;
     }
 
-    fn remove_child(&mut self, idx: usize) {
-        self.children[idx] = None;
-        self.children_count -= 1;
+    fn remove_child_by_octant_id(&mut self, child: OctantId) {
+        if let Some(idx) = self.children.iter().position(|&x| x == Some(child)) {
+            self.remove_child(idx);
+        }
     }
 }
 
@@ -532,7 +537,7 @@ mod tests {
                     content: None,
                 },
                 Octant {
-                    parent: Some(0),
+                    parent: None,
                     children: [None, None, None, None, None, None, None, None],
                     children_count: 0,
                     content: Some(10),
@@ -733,7 +738,7 @@ mod tests {
         assert_eq!(octree, Octree {
             octants: vec![
                 Octant {
-                    parent: Some(1),
+                    parent: None,
                     children: [None, None, None, None, None, None, None, None],
                     children_count: 0,
                     content: None,
