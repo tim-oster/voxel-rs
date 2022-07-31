@@ -368,6 +368,7 @@ fn main() {
             while running.load(Ordering::Relaxed) {
                 let job = queue.pop();
                 if job.is_none() {
+                    std::thread::park();
                     continue;
                 }
                 (job.unwrap().exec)();
@@ -395,6 +396,12 @@ fn main() {
 
     window.request_grab_cursor(true);
     while !window.should_close() {
+        if !worker_queue.is_empty() {
+            for handle in &worker_handles {
+                handle.thread().unpark();
+            }
+        }
+
         let mut block_pos = None;
         {
             let pos = unsafe { (*picker_data).block_pos.0 };
