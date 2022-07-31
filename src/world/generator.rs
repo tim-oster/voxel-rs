@@ -90,14 +90,14 @@ impl Generator {
     }
 
     pub fn generate(&self, pos: ChunkPos) -> Chunk {
-        let mut chunk = Chunk::new();
+        let mut chunk = Chunk::new(pos);
 
         for z in 0..32 {
             for x in 0..32 {
                 let noise_x = pos.x as f64 * 32.0 + x as f64;
                 let noise_z = pos.z as f64 * 32.0 + z as f64;
 
-                let mut height = self.cfg.continentalness.get(&self.perlin, noise_x, noise_z);
+                let height = self.cfg.continentalness.get(&self.perlin, noise_x, noise_z);
                 let height = height as i32;
 
                 for y in 0..32 {
