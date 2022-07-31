@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::ptr;
-use std::rc::Rc;
+use std::sync::{Arc, RwLock};
 
-use crate::{BlockId, ChunkStorage, Octree, Position};
+use crate::{BlockId, Chunk, ChunkPos, Octree, Position};
+use crate::chunk::ChunkStorage;
 use crate::world::octree::{Octant, OctantId};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -72,6 +73,10 @@ impl<T: SvoSerializable> Svo<T> {
     /// octant id.
     pub fn replace(&mut self, pos: Position, leaf: OctantId) -> Option<OctantId> {
         self.octree.replace_leaf(pos, leaf)
+    }
+
+    pub fn remove_octant(&mut self, octant_id: OctantId) {
+        self.octree.delete_octant(octant_id);
     }
 
     pub fn serialize(&mut self) {
@@ -151,19 +156,22 @@ impl<T: SvoSerializable> Svo<T> {
         ((dst as usize) - start) / 4
     }
 
-    pub unsafe fn write_changes_to(&mut self, dst: *mut u32) {
+    // TODO write test
+    pub unsafe fn write_changes_to(&mut self, dst: *mut u32) -> Vec<Range> {
         if self.root_octant_info.is_none() {
-            return;
+            return Vec::new();
         }
 
         let info = self.root_octant_info.unwrap();
         let dst = Self::write_preamble(info, dst);
 
-        for changed_range in self.buffer.updated_ranges.drain(..) {
+        let changes = self.buffer.updated_ranges.drain(..).collect::<Vec<Range>>();
+        for changed_range in &changes {
             let offset = changed_range.start as isize;
             let src = self.buffer.bytes.as_ptr().offset(offset);
             ptr::copy(src, dst.offset(offset), changed_range.length);
         }
+        changes
     }
 
     unsafe fn write_preamble(info: OctantInfo, dst: *mut u32) -> *mut u32 {
@@ -176,9 +184,14 @@ impl<T: SvoSerializable> Svo<T> {
     }
 }
 
-impl SvoSerializable for Rc<ChunkStorage> {
+impl SvoSerializable for SerializedChunk {
     fn serialize(&self, dst: &mut Vec<u32>) -> SerializationResult {
-        self.get_octree_ref().serialize(dst)
+        if self.buffer.is_some() {
+            // TODO is this fast enough?
+            // TODO how to free memory after swap
+            dst.extend(self.buffer.as_ref().unwrap());
+        }
+        self.result
     }
 }
 
@@ -195,6 +208,24 @@ impl SvoSerializable for Octree<BlockId> {
             params.dst[4 + params.idx] = *params.content as u32;
             params.result.depth = 1;
         })
+    }
+}
+
+pub struct SerializedChunk {
+    pub pos: ChunkPos,
+    buffer: Option<Vec<u32>>,
+    result: SerializationResult,
+}
+
+impl SerializedChunk {
+    pub fn new(pos: ChunkPos, storage: Arc<RwLock<ChunkStorage>>) -> SerializedChunk {
+        // TODO use memory pool
+        let mut buffer = Vec::with_capacity(56172); // size of a full chunk
+        let result = storage.read().unwrap().serialize(&mut buffer);
+        if result.depth > 0 {
+            return SerializedChunk { pos, buffer: Some(buffer), result };
+        }
+        SerializedChunk { pos, buffer: None, result }
     }
 }
 
@@ -438,9 +469,9 @@ mod svo_tests {
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-struct Range {
-    start: usize,
-    length: usize,
+pub struct Range {
+    pub start: usize,
+    pub length: usize,
 }
 
 #[derive(Debug, PartialEq)]

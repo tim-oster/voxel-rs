@@ -1,10 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::rc::Rc;
 
-use crate::chunk::ChunkStorage;
 use crate::world::chunk;
-use crate::world::octree::Position;
-use crate::world::svo::Svo;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
 pub struct ChunkPos {
@@ -39,7 +35,8 @@ impl World {
         }
     }
 
-    pub fn set_chunk(&mut self, pos: ChunkPos, chunk: chunk::Chunk) {
+    pub fn set_chunk(&mut self, chunk: chunk::Chunk) {
+        let pos = chunk.pos;
         self.chunks.insert(pos, chunk);
 
         if !self.changed_chunks_set.contains(&pos) {
@@ -69,7 +66,7 @@ impl World {
         let pos = ChunkPos::from_block_pos(x, y, z);
         let mut chunk = self.chunks.get_mut(&pos);
         if chunk.is_none() {
-            self.chunks.insert(pos, chunk::Chunk::new());
+            self.chunks.insert(pos, chunk::Chunk::new(pos));
             chunk = self.chunks.get_mut(&pos);
         }
         chunk.unwrap().set_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32, block);
@@ -84,24 +81,6 @@ impl World {
         let changed = self.changed_chunks.drain(..).collect::<Vec<ChunkPos>>();
         self.changed_chunks_set.clear();
         changed
-    }
-}
-
-impl World {
-    pub fn add_vox_at(&mut self, data: &dot_vox::DotVoxData, block_x: i32, block_y: i32, block_z: i32) {
-        let model = &data.models[0];
-        for v in &model.voxels {
-            self.set_block(block_x + v.x as i32, block_y + v.z as i32, block_z + v.y as i32, data.palette[v.i as usize]);
-        }
-    }
-
-    pub fn build_svo(&self) -> Svo<Rc<ChunkStorage>> {
-        let mut svo = Svo::new();
-        for (pos, chunk) in self.chunks.iter() {
-            let storage = chunk.get_storage();
-            svo.set(Position(pos.x as u32, pos.y as u32, pos.z as u32), Some(storage));
-        }
-        svo
     }
 }
 
@@ -142,35 +121,6 @@ mod tests {
 
         let block = world.get_block(1, 33, 65);
         assert_eq!(block, 99);
-    }
-
-    #[test]
-    fn world_new_from_vox() {
-        let data = dot_vox::DotVoxData {
-            version: 0,
-            models: vec![
-                dot_vox::Model {
-                    size: dot_vox::Size { x: 2, y: 2, z: 2 },
-                    voxels: vec![
-                        dot_vox::Voxel { x: 0, y: 0, z: 0, i: 1 },
-                        dot_vox::Voxel { x: 1, y: 0, z: 0, i: 2 },
-                        dot_vox::Voxel { x: 0, y: 1, z: 0, i: 3 },
-                        dot_vox::Voxel { x: 1, y: 1, z: 0, i: 4 },
-                    ],
-                },
-            ],
-            palette: vec![0, 101, 102, 103, 104],
-            materials: vec![],
-        };
-
-        let mut world = super::World::new();
-        world.add_vox_at(&data, 0, 0, 0);
-        let chunk = world.chunks.get(&super::ChunkPos { x: 0, y: 0, z: 0 }).unwrap();
-
-        assert_eq!(chunk.get_block(0, 0, 0), 101);
-        assert_eq!(chunk.get_block(1, 0, 0), 102);
-        assert_eq!(chunk.get_block(0, 0, 1), 103);
-        assert_eq!(chunk.get_block(1, 0, 1), 104);
     }
 
     #[test]
