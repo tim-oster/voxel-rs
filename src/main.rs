@@ -468,6 +468,10 @@ fn main() {
                             let new_x = (render_distance + dx) as u32;
                             let new_z = (render_distance + dz) as u32;
 
+                            if dx * dx + dz * dz > render_distance * render_distance {
+                                continue;
+                            }
+
                             let world_height = 256;
                             for y in 0..(world_height / 32) {
                                 pos.y = y;
@@ -502,6 +506,10 @@ fn main() {
 
                 for dx in -r..=r {
                     for dz in -r..=r {
+                        if dx * dx + dz * dz > render_distance * render_distance {
+                            continue;
+                        }
+
                         let mut pos = ChunkPos {
                             x: current_chunk_pos.x + dx,
                             y: 0,
@@ -540,7 +548,7 @@ fn main() {
                     let dx = (pos.x - current_chunk_pos.x).abs();
                     let dz = (pos.z - current_chunk_pos.z).abs();
 
-                    if dx > r || dz > r {
+                    if dx * dx + dz * dz > r * r {
                         delete_list.push(*pos);
                     }
                 }
@@ -565,7 +573,7 @@ fn main() {
                     let offset_x = pos.x - current_chunk_pos.x;
                     let offset_z = pos.z - current_chunk_pos.z;
 
-                    if offset_x.abs() > render_distance || offset_z.abs() > render_distance {
+                    if offset_x * offset_x + offset_z * offset_z > render_distance * render_distance {
                         world.remove_chunk(pos);
                         svo_octant_ids.remove(pos);
                         continue;
@@ -597,7 +605,7 @@ fn main() {
                 let offset_x = chunk_pos.x - current_chunk_pos.x;
                 let offset_z = chunk_pos.z - current_chunk_pos.z;
 
-                if offset_x.abs() > render_distance || offset_z.abs() > render_distance {
+                if offset_x * offset_x + offset_z * offset_z > render_distance * render_distance {
                     continue;
                 }
 
