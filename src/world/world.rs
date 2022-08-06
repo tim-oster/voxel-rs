@@ -17,6 +17,13 @@ impl ChunkPos {
     pub fn from_block_pos(x: i32, y: i32, z: i32) -> ChunkPos {
         ChunkPos { x: x >> 5, y: y >> 5, z: z >> 5 }
     }
+
+    pub fn dst_sq(&self, other: &ChunkPos) -> f32 {
+        let dx = (other.x - self.x) as f32;
+        let dy = (other.y - self.y) as f32;
+        let dz = (other.z - self.z) as f32;
+        dx * dx + dy * dy + dz * dz
+    }
 }
 
 pub struct World {

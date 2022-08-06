@@ -2,7 +2,7 @@ extern crate gl;
 #[macro_use]
 extern crate memoffset;
 
-use std::{mem, ptr, thread};
+use std::{cmp, mem, ptr, thread};
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::ffi::c_void;
@@ -356,7 +356,9 @@ fn main() {
     let worker_count = num_cpus::get() - 1;
     let mut worker_handles = Vec::new();
     let worker_running = Arc::new(AtomicBool::new(true));
+
     let worker_queue = Arc::new(SegQueue::<Job>::new());
+    let worker_prio_queue = Arc::new(SegQueue::<Job>::new());
 
     let (worker_generated_chunks_tx, worker_generated_chunks_rx) = mpsc::channel::<Chunk>();
     let (worker_serialized_chunks_tx, worker_serialized_chunks_rx) = mpsc::channel::<SerializedChunk>();
@@ -366,11 +368,12 @@ fn main() {
     for _ in 0..worker_count {
         let running = worker_running.clone();
         let queue = worker_queue.clone();
+        let prio_queue = worker_prio_queue.clone();
         let handle = thread::spawn(move || {
             let mut last_exec = Instant::now();
 
             while running.load(Ordering::Relaxed) {
-                let job = queue.pop();
+                let job = prio_queue.pop().or_else(|| queue.pop());
                 if job.is_none() {
                     if last_exec.elapsed().as_millis() > 100 {
                         std::thread::park();
@@ -504,6 +507,7 @@ fn main() {
                 let r = render_distance;
                 let mut count = 0;
 
+                let mut chunk_pos_to_generate = Vec::new();
                 for dx in -r..=r {
                     for dz in -r..=r {
                         if dx * dx + dz * dz > render_distance * render_distance {
@@ -527,17 +531,27 @@ fn main() {
                                     continue;
                                 }
                                 currently_generating_chunks.insert(pos);
-
-                                let world_gen = world_gen.clone();
-                                let tx = worker_generated_chunks_tx.clone();
-                                worker_queue.push(Job {
-                                    exec: Box::new(move || {
-                                        let chunk = world_gen.generate(pos);
-                                        tx.send(chunk).unwrap();
-                                    }),
-                                })
+                                chunk_pos_to_generate.push(pos);
                             }
                         }
+                    }
+                }
+
+                if chunk_pos_to_generate.len() > 0 {
+                    chunk_pos_to_generate.sort_by(|a, b| {
+                        let da = a.dst_sq(&current_chunk_pos);
+                        let db = b.dst_sq(&current_chunk_pos);
+                        da.partial_cmp(&db).unwrap_or(cmp::Ordering::Equal)
+                    });
+                    for pos in chunk_pos_to_generate {
+                        let world_gen = world_gen.clone();
+                        let tx = worker_generated_chunks_tx.clone();
+                        worker_queue.push(Job {
+                            exec: Box::new(move || {
+                                let chunk = world_gen.generate(pos);
+                                tx.send(chunk).unwrap();
+                            }),
+                        })
                     }
                 }
 
@@ -585,7 +599,7 @@ fn main() {
                         let storage = chunk.get_storage();
                         let pos = *pos;
                         let tx = worker_serialized_chunks_tx.clone();
-                        worker_queue.push(Job {
+                        worker_prio_queue.push(Job {
                             exec: Box::new(move || {
                                 let serialized = SerializedChunk::new(pos, storage);
                                 tx.send(serialized).unwrap();
@@ -683,7 +697,7 @@ fn main() {
 
                     frame.ui.text(format!(
                         "queue length: {}",
-                        worker_queue.len(),
+                        worker_queue.len() + worker_prio_queue.len(),
                     ));
                 });
 
