@@ -122,7 +122,7 @@ fn main() {
             .build()
     ).unwrap();
 
-    let mut render_distance = 5;
+    let mut render_distance = 15;
     let mut absolute_position = Point3::new(16.0, 80.0, 16.0);
 
     let (vao, indices_count) = build_vao();
@@ -189,7 +189,7 @@ fn main() {
     };
 
     let mut world = world::world::World::new();
-    let svo = Svo::new();
+    let svo = Svo::<SerializedChunk>::new();
 
     // WORLD LOADING END
 
@@ -407,7 +407,7 @@ fn main() {
 
     window.request_grab_cursor(true);
     while !window.should_close() {
-        if !worker_queue.is_empty() {
+        if !worker_queue.is_empty() || !worker_prio_queue.is_empty() {
             for handle in &worker_handles {
                 handle.thread().unpark();
             }
@@ -427,6 +427,7 @@ fn main() {
             }
         }
 
+        let mut force_rerender = Vec::new();
         {
             let pos = absolute_position;
             let mut current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
@@ -475,6 +476,8 @@ fn main() {
                                 continue;
                             }
 
+                            let new_lod = calculate_lod(&current_chunk_pos, &pos);
+
                             let world_height = 256;
                             for y in 0..(world_height / 32) {
                                 pos.y = y;
@@ -490,6 +493,12 @@ fn main() {
                                 let old_octant = svo.lock().unwrap().replace(svo_pos, octant_id);
                                 if let Some(id) = old_octant {
                                     old_octant_id_set.insert(id);
+                                }
+
+                                if let Some(sc) = svo.lock().unwrap().get(octant_id) {
+                                    if sc.lod != new_lod {
+                                        force_rerender.push(pos);
+                                    }
                                 }
                             }
                         }
@@ -580,7 +589,8 @@ fn main() {
 
             let mut did_update_svo = false;
 
-            let changed = world.get_changed_chunks();
+            let mut changed = world.get_changed_chunks();
+            changed.extend(force_rerender.iter());
             if !changed.is_empty() {
                 // update new chunks
                 for pos in &changed {
@@ -598,10 +608,11 @@ fn main() {
                     if let Some(chunk) = world.chunks.get(pos) {
                         let storage = chunk.get_storage();
                         let pos = *pos;
+                        let lod = calculate_lod(&current_chunk_pos, &pos);
                         let tx = worker_serialized_chunks_tx.clone();
                         worker_prio_queue.push(Job {
                             exec: Box::new(move || {
-                                let serialized = SerializedChunk::new(pos, storage);
+                                let serialized = SerializedChunk::new(pos, storage, lod);
                                 tx.send(serialized).unwrap();
                             }),
                         });
@@ -1047,5 +1058,14 @@ fn build_vao() -> (GLuint, i32) {
         gl::BindVertexArray(0);
 
         (vao, vertices.len() as i32 / 4 * 6)
+    }
+}
+
+fn calculate_lod(center: &ChunkPos, pos: &ChunkPos) -> u8 {
+    match pos.dst_2d_sq(center).sqrt() as i32 {
+        0..=6 => 5,
+        7..=12 => 4,
+        13..=19 => 3,
+        _ => 2,
     }
 }

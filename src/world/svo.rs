@@ -13,7 +13,7 @@ enum OctantChange {
 }
 
 pub trait SvoSerializable {
-    fn serialize(&self, dst: &mut Vec<u32>) -> SerializationResult;
+    fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -79,6 +79,14 @@ impl<T: SvoSerializable> Svo<T> {
         self.octree.delete_octant(octant_id);
     }
 
+    pub fn get(&self, octant_id: OctantId) -> Option<&T> {
+        let octant = self.octree.octants.get(octant_id);
+        if octant.is_none() {
+            return None;
+        }
+        return octant.unwrap().content.as_ref();
+    }
+
     pub fn serialize(&mut self) {
         if self.octree.root.is_none() {
             return;
@@ -90,7 +98,7 @@ impl<T: SvoSerializable> Svo<T> {
             match change {
                 OctantChange::Add(id) => {
                     let octant = self.octree.octants[id].content.as_ref().unwrap();
-                    let result = octant.serialize(&mut octant_buffer);
+                    let result = octant.serialize(&mut octant_buffer, 0);
                     if result.depth > 0 {
                         let offset = self.buffer.insert(id, &octant_buffer);
                         octant_buffer.clear();
@@ -115,8 +123,12 @@ impl<T: SvoSerializable> Svo<T> {
         let root_id = self.octree.root.unwrap();
         let root = &self.octree.octants[root_id];
 
-        serialize_octant(&self.octree, root, dst, &|params| {
-            let info = self.octant_info.get(&params.id).unwrap();
+        serialize_octant(&self.octree, root, dst, 0, &|params| {
+            let info = self.octant_info.get(&params.id);
+            if info.is_none() {
+                return;
+            }
+            let info = info.unwrap();
 
             let mut mask = ((info.serialization.child_mask as u32) << 8) | info.serialization.leaf_mask as u32;
             if (params.idx % 2) != 0 {
@@ -185,7 +197,7 @@ impl<T: SvoSerializable> Svo<T> {
 }
 
 impl SvoSerializable for SerializedChunk {
-    fn serialize(&self, dst: &mut Vec<u32>) -> SerializationResult {
+    fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult {
         if self.buffer.is_some() {
             // TODO is this fast enough?
             // TODO how to free memory after swap
@@ -196,14 +208,14 @@ impl SvoSerializable for SerializedChunk {
 }
 
 impl SvoSerializable for Octree<BlockId> {
-    fn serialize(&self, dst: &mut Vec<u32>) -> SerializationResult {
+    fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult {
         if self.root.is_none() {
             return SerializationResult { child_mask: 0, leaf_mask: 0, depth: 0 };
         }
 
         let root_id = self.root.unwrap();
         let root = &self.octants[root_id];
-        serialize_octant(self, root, dst, &|params| {
+        serialize_octant(self, root, dst, lod, &|params| {
             params.result.leaf_mask |= 1 << params.idx;
             params.dst[4 + params.idx] = *params.content as u32;
             params.result.depth = 1;
@@ -213,19 +225,20 @@ impl SvoSerializable for Octree<BlockId> {
 
 pub struct SerializedChunk {
     pub pos: ChunkPos,
+    pub lod: u8,
     buffer: Option<Vec<u32>>,
     result: SerializationResult,
 }
 
 impl SerializedChunk {
-    pub fn new(pos: ChunkPos, storage: Arc<RwLock<ChunkStorage>>) -> SerializedChunk {
+    pub fn new(pos: ChunkPos, storage: Arc<RwLock<ChunkStorage>>, lod: u8) -> SerializedChunk {
         // TODO use memory pool
         let mut buffer = Vec::with_capacity(56172); // size of a full chunk
-        let result = storage.read().unwrap().serialize(&mut buffer);
+        let result = storage.read().unwrap().serialize(&mut buffer, lod);
         if result.depth > 0 {
-            return SerializedChunk { pos, buffer: Some(buffer), result };
+            return SerializedChunk { pos, lod, buffer: Some(buffer), result };
         }
-        SerializedChunk { pos, buffer: None, result }
+        SerializedChunk { pos, lod, buffer: None, result }
     }
 }
 
@@ -237,7 +250,7 @@ struct ChildEncodeParams<'a, T> {
     content: &'a T,
 }
 
-fn serialize_octant<T, F>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>, child_encoder: &F) -> SerializationResult
+fn serialize_octant<T, F>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>, lod: u8, child_encoder: &F) -> SerializationResult
     where F: Fn(ChildEncodeParams<T>) {
     let start_offset = dst.len();
 
@@ -260,7 +273,16 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<
         let child_id = child.unwrap();
         let child = &octree.octants[child_id];
 
-        if let Some(content) = &child.content {
+        if child.content.is_some() || lod == 1 {
+            let mut content = child.content.as_ref();
+            if content.is_none() {
+                content = breadth_first(&octree, &child);
+            }
+            if content.is_none() {
+                continue;
+            }
+
+            let content = content.unwrap();
             child_encoder(ChildEncodeParams {
                 id: child_id,
                 idx,
@@ -269,8 +291,9 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<
                 content,
             });
         } else {
+            let child_lod = if lod > 0 { lod - 1 } else { 0 };
             let child_offset = (dst.len() - start_offset) as u32;
-            let child_result = serialize_octant(octree, &octree.octants[child_id], dst, child_encoder);
+            let child_result = serialize_octant(octree, &octree.octants[child_id], dst, child_lod, child_encoder);
 
             let mut mask = ((child_result.child_mask as u32) << 8) | child_result.leaf_mask as u32;
             if (idx % 2) != 0 {
@@ -286,6 +309,29 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<
     }
 
     result
+}
+
+fn breadth_first<'a, T>(octree: &'a Octree<T>, parent: &'a Octant<T>) -> Option<&'a T> {
+    for child in parent.children.iter() {
+        if child.is_none() {
+            continue;
+        }
+        let child = &octree.octants[child.unwrap()];
+        if child.content.is_some() {
+            return child.content.as_ref();
+        }
+    }
+    for child in parent.children.iter() {
+        if child.is_none() {
+            continue;
+        }
+        let child = &octree.octants[child.unwrap()];
+        let result = breadth_first(octree, child);
+        if result.is_some() {
+            return result;
+        }
+    }
+    return None;
 }
 
 #[cfg(test)]

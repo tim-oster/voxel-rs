@@ -24,6 +24,12 @@ impl ChunkPos {
         let dz = (other.z - self.z) as f32;
         dx * dx + dy * dy + dz * dz
     }
+
+    pub fn dst_2d_sq(&self, other: &ChunkPos) -> f32 {
+        let dx = (other.x - self.x) as f32;
+        let dz = (other.z - self.z) as f32;
+        dx * dx + dz * dz
+    }
 }
 
 pub struct World {
@@ -84,8 +90,8 @@ impl World {
         }
     }
 
-    pub fn get_changed_chunks(&mut self) -> Vec<ChunkPos> {
-        let changed = self.changed_chunks.drain(..).collect::<Vec<ChunkPos>>();
+    pub fn get_changed_chunks(&mut self) -> HashSet<ChunkPos> {
+        let changed = self.changed_chunks.drain(..).collect::<HashSet<ChunkPos>>();
         self.changed_chunks_set.clear();
         changed
     }
@@ -145,7 +151,7 @@ mod tests {
         assert_eq!(world.changed_chunks, VecDeque::from(vec![ChunkPos::from_block_pos(0, 0, 0)]));
 
         let changed = world.get_changed_chunks();
-        assert_eq!(changed, vec![ChunkPos::from_block_pos(0, 0, 0)]);
+        assert_eq!(changed, HashSet::from([ChunkPos::from_block_pos(0, 0, 0)]));
 
         assert_eq!(true, world.changed_chunks_set.is_empty());
         assert_eq!(true, world.changed_chunks.is_empty());
