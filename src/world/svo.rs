@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::ptr;
 use std::sync::{Arc, RwLock};
 
-use crate::{BlockId, Chunk, ChunkPos, Octree, Position};
+use crate::{BlockId, ChunkPos, Octree, Position};
 use crate::chunk::ChunkStorage;
+use crate::world::allocator::Allocated;
 use crate::world::octree::{Octant, OctantId};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -231,7 +232,7 @@ pub struct SerializedChunk {
 }
 
 impl SerializedChunk {
-    pub fn new(pos: ChunkPos, storage: Arc<RwLock<ChunkStorage>>, lod: u8) -> SerializedChunk {
+    pub fn new(pos: ChunkPos, storage: Arc<RwLock<Allocated<ChunkStorage>>>, lod: u8) -> SerializedChunk {
         // TODO use memory pool
         let mut buffer = Vec::with_capacity(56172); // size of a full chunk
         let result = storage.read().unwrap().serialize(&mut buffer, lod);

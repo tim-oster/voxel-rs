@@ -1,6 +1,8 @@
+use std::sync::Arc;
 use noise::{NoiseFn, Perlin, Seedable};
 
-use crate::chunk::Chunk;
+use crate::chunk::{Chunk, ChunkStorage};
+use crate::world::allocator::Allocator;
 use crate::world::world::ChunkPos;
 
 #[derive(Clone)]
@@ -65,6 +67,7 @@ impl Noise {
 pub struct Generator {
     perlin: Perlin,
     cfg: Config,
+    allocator: Arc<Allocator<ChunkStorage>>,
 }
 
 #[derive(Clone)]
@@ -83,14 +86,14 @@ pub struct Config {
 }
 
 impl Generator {
-    pub fn new(seed: u32, cfg: Config) -> Generator {
+    pub fn new(seed: u32, cfg: Config, allocator: Arc<Allocator<ChunkStorage>>) -> Generator {
         let perlin = Perlin::new();
         let perlin = perlin.set_seed(seed);
-        Generator { perlin, cfg }
+        Generator { perlin, cfg, allocator }
     }
 
     pub fn generate(&self, pos: ChunkPos) -> Chunk {
-        let mut chunk = Chunk::new(pos);
+        let mut chunk = Chunk::new(pos, self.allocator.clone());
 
         for z in 0..32 {
             for x in 0..32 {

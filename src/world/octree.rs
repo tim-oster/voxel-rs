@@ -40,6 +40,13 @@ impl<T> Octree<T> {
         octree
     }
 
+    pub fn reset(&mut self) {
+        self.octants.clear();
+        self.free_list.clear();
+        self.root = None;
+        self.depth = 0;
+    }
+
     /// Adds the given leaf value at the given position. If the tree is not big enough yet,
     /// it expands it until it can successfully insert. Children along the path are overridden,
     /// if any exist.

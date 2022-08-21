@@ -1,5 +1,8 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::Arc;
 
+use crate::chunk::ChunkStorage;
+use crate::world::allocator::Allocator;
 use crate::world::chunk;
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
@@ -37,14 +40,21 @@ pub struct World {
     pub chunks: HashMap<ChunkPos, chunk::Chunk>,
     changed_chunks_set: HashSet<ChunkPos>,
     changed_chunks: VecDeque<ChunkPos>,
+    // TODO do not make public later
+    pub allocator: Arc<Allocator<ChunkStorage>>,
 }
 
 impl World {
     pub fn new() -> World {
+        let allocator = Allocator::new(
+            Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
+            Some(Box::new(|storage| storage.reset())),
+        );
         World {
             chunks: HashMap::new(),
             changed_chunks_set: HashSet::new(),
             changed_chunks: VecDeque::new(),
+            allocator: Arc::new(allocator),
         }
     }
 
@@ -79,7 +89,7 @@ impl World {
         let pos = ChunkPos::from_block_pos(x, y, z);
         let mut chunk = self.chunks.get_mut(&pos);
         if chunk.is_none() {
-            self.chunks.insert(pos, chunk::Chunk::new(pos));
+            self.chunks.insert(pos, chunk::Chunk::new(pos, self.allocator.clone()));
             chunk = self.chunks.get_mut(&pos);
         }
         chunk.unwrap().set_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32, block);

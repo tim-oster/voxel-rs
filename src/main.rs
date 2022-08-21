@@ -511,7 +511,7 @@ fn main() {
                     }
                 }
 
-                let world_gen = Arc::new(world::generator::Generator::new(1, world_cfg.clone()));
+                let world_gen = Arc::new(world::generator::Generator::new(1, world_cfg.clone(), world.allocator.clone()));
 
                 let r = render_distance;
                 let mut count = 0;
@@ -607,6 +607,11 @@ fn main() {
 
                     if let Some(chunk) = world.chunks.get(pos) {
                         let storage = chunk.get_storage();
+                        if storage.is_none() {
+                            continue;
+                        }
+                        let storage = storage.unwrap();
+
                         let pos = *pos;
                         let lod = calculate_lod(&current_chunk_pos, &pos);
                         let tx = worker_serialized_chunks_tx.clone();
@@ -709,6 +714,11 @@ fn main() {
                     frame.ui.text(format!(
                         "queue length: {}",
                         worker_queue.len() + worker_prio_queue.len(),
+                    ));
+
+                    frame.ui.text(format!(
+                        "chunk allocs - used: {}, total: {}",
+                        world.allocator.used_count(), world.allocator.allocated_count(),
                     ));
                 });
 
