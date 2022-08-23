@@ -198,6 +198,13 @@ impl ShaderProgram {
     }
 
     //noinspection RsSelfConvention
+    pub fn set_f32vec3s(&self, name: &'static str, values: Vec<cgmath::Vector3<f32>>) {
+        unsafe {
+            gl::Uniform3fv(self.get_uniform_location(name), values.len() as GLsizei, values.as_ptr() as *const f32);
+        }
+    }
+
+    //noinspection RsSelfConvention
     pub fn set_i32(&self, name: &'static str, value: i32) {
         unsafe {
             gl::Uniform1i(self.get_uniform_location(name), value);

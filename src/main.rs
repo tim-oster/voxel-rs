@@ -81,6 +81,26 @@ fn create_replace_fence(last_fence: Option<GLsync>) -> Option<GLsync> {
     }
 }
 
+#[repr(align(16))]
+struct AlignedVec3<T>(cgmath::Vector3<T>);
+
+#[repr(align(16))]
+struct AlignedPoint3<T>(cgmath::Point3<T>);
+
+#[repr(C)]
+struct PickerTask {
+    max_dst: f32,
+    pos: AlignedPoint3<f32>,
+    dir: AlignedVec3<f32>,
+}
+
+#[repr(C)]
+struct PickerResult {
+    dst: f32,
+    pos: AlignedPoint3<f32>,
+    normal: AlignedVec3<f32>,
+}
+
 fn main() {
     let mut window = core::Window::new(1024, 768, "voxel engine");
     window.request_grab_cursor(false);
@@ -133,6 +153,7 @@ fn main() {
     let mut cam_speed = 1f32;
     let cam_rot_speed = 0.005f32;
     let mut cam_rot = cgmath::Vector3::new(0.0, -90f32.to_radians(), 0.0);
+    let mut fly_mode = true;
 
     let ambient_intensity = 0.3f32;
     let mut light_dir = Vector3::new(-1.0, -1.0, -1.0).normalize();
@@ -144,24 +165,22 @@ fn main() {
     let world_buffer_size = 1000 * 1024 * 1024; // 1000 MB
 
     unsafe {
-        gl::GenBuffers(1, &mut world_ssbo);
-        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, world_ssbo);
+        gl::CreateBuffers(1, &mut world_ssbo);
 
-        gl::BufferStorage(
-            gl::SHADER_STORAGE_BUFFER,
+        gl::NamedBufferStorage(
+            world_ssbo,
             world_buffer_size,
             ptr::null(),
             gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
         );
-        world_buffer = gl::MapBufferRange(
-            gl::SHADER_STORAGE_BUFFER,
+        world_buffer = gl::MapNamedBufferRange(
+            world_ssbo,
             0,
             world_buffer_size,
             gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
         ) as *mut u32;
 
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
-        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
 
     // WORLD LOADING START
@@ -204,40 +223,63 @@ fn main() {
 
     // BLOCK PICKING START
 
-    #[repr(align(16))]
-    struct AlignedVec3<T>(cgmath::Vector3<T>);
-    #[repr(align(16))]
-    struct AlignedPoint3<T>(cgmath::Point3<T>);
+    const PICKER_IDX_BLOCK: usize = 0;
 
     #[repr(C)]
     struct PickerData {
-        block_pos: AlignedPoint3<f32>,
-        block_normal: AlignedVec3<f32>,
+        results: [PickerResult; 50],
     }
     let picker_data;
 
+    let mut picker_fence = None;
     let mut picker_ssbo = 0;
     unsafe {
-        gl::GenBuffers(1, &mut picker_ssbo);
-        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, picker_ssbo);
+        gl::CreateBuffers(1, &mut picker_ssbo);
 
         // create an immutable buffer and persistently map to it for stream reading
         // from GPU to CPU
-        gl::BufferStorage(
-            gl::SHADER_STORAGE_BUFFER,
+        gl::NamedBufferStorage(
+            picker_ssbo,
             mem::size_of::<PickerData>() as GLsizeiptr,
             ptr::null(),
-            gl::MAP_READ_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+            gl::MAP_READ_BIT | gl::MAP_PERSISTENT_BIT,
         );
-        picker_data = gl::MapBufferRange(
-            gl::SHADER_STORAGE_BUFFER,
+        picker_data = gl::MapNamedBufferRange(
+            picker_ssbo,
             0,
             mem::size_of::<PickerData>() as GLsizeiptr,
-            gl::MAP_READ_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+            gl::MAP_READ_BIT | gl::MAP_PERSISTENT_BIT,
         ) as *mut PickerData;
 
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 1, picker_ssbo);
-        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
+    }
+
+    #[repr(C)]
+    struct PickerInput {
+        tasks: [PickerTask; 50],
+    }
+    let picker_input_data;
+
+    let mut picker_input_ssbo = 0;
+    unsafe {
+        gl::CreateBuffers(1, &mut picker_input_ssbo);
+
+        // create an immutable buffer and persistently map to it for stream reading
+        // from GPU to CPU
+        gl::NamedBufferStorage(
+            picker_input_ssbo,
+            mem::size_of::<PickerInput>() as GLsizeiptr,
+            ptr::null(),
+            gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+        );
+        picker_input_data = gl::MapNamedBufferRange(
+            picker_input_ssbo,
+            0,
+            mem::size_of::<PickerInput>() as GLsizeiptr,
+            gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+        ) as *mut PickerInput;
+
+        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 3, picker_input_ssbo);
     }
 
     // BLOCK PICKING END
@@ -331,18 +373,16 @@ fn main() {
 
     let mut material_ssbo = 0;
     unsafe {
-        gl::GenBuffers(1, &mut material_ssbo);
-        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, material_ssbo);
+        gl::CreateBuffers(1, &mut material_ssbo);
 
-        gl::BufferData(
-            gl::SHADER_STORAGE_BUFFER,
+        gl::NamedBufferData(
+            material_ssbo,
             (mem::size_of::<Material>() * materials.len()) as GLsizeiptr,
             &materials[0] as *const Material as *const c_void,
             gl::STATIC_READ,
         );
 
         gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, material_ssbo);
-        gl::BindBuffer(gl::SHADER_STORAGE_BUFFER, 0);
     }
 
     // BLOCKS END
@@ -405,6 +445,10 @@ fn main() {
 
     let mut did_cam_repos = false;
 
+    let mut vertical_velocity = 0.0f32;
+    let mut is_jumping = false;
+    let mut was_grounded = false;
+
     window.request_grab_cursor(true);
     while !window.should_close() {
         if !worker_queue.is_empty() || !worker_prio_queue.is_empty() {
@@ -415,8 +459,8 @@ fn main() {
 
         let mut block_pos = None;
         {
-            let pos = unsafe { (*picker_data).block_pos.0 };
-            if pos.x != f32::MAX {
+            let pos = unsafe { (*picker_data).results[PICKER_IDX_BLOCK].pos.0 };
+            if unsafe { (*picker_data).results[PICKER_IDX_BLOCK].dst } != -1.0 {
                 let rel_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
                 let rel_block_pos = Point3::new((pos.x as i32 & 31) as f32, (pos.y as i32 & 31) as f32, (pos.z as i32 & 31) as f32);
 
@@ -650,7 +694,6 @@ fn main() {
             if did_update_svo || did_cam_repos {
                 did_cam_repos = false;
 
-                let start = Instant::now();
                 let mut svo = svo.lock().unwrap();
 
                 svo.serialize();
@@ -666,11 +709,42 @@ fn main() {
                     svo_size = svo.size_in_bytes() as f32 / 1024f32 / 1024f32;
                     svo_depth = svo.depth();
                 }
-
-                println!("rebuild took {}ms", start.elapsed().as_millis());
             }
         }
 
+        // picker logic
+        let aabb_result;
+        unsafe {
+            picker_shader.bind();
+
+            (*picker_input_data).tasks[PICKER_IDX_BLOCK] = PickerTask {
+                max_dst: 30.0,
+                pos: AlignedPoint3(camera.position),
+                dir: AlignedVec3(camera.forward),
+            };
+
+            // TODO does not fit into one block spaces
+            let aabb = AABB::new(camera.position - Vector3::new(0.45, 1.7, 0.45), Vector3::new(0.9, 1.8, 0.9));
+            let aabb_tasks = aabb.generate_picker_tasks();
+            for (i, task) in aabb_tasks.into_iter().enumerate() {
+                (*picker_input_data).tasks[1 + i] = task;
+            }
+
+            gl::MemoryBarrier(gl::BUFFER_UPDATE_BARRIER_BIT);
+            gl::DispatchCompute(50, 1, 1);
+
+            // memory barrier + sync fence necessary to ensure that persistently mapped buffer changes
+            // are loaded from the server
+            gl::MemoryBarrier(gl::CLIENT_MAPPED_BUFFER_BARRIER_BIT);
+            picker_fence = create_replace_fence(picker_fence);
+            wait_fence(picker_fence);
+
+            picker_shader.unbind();
+
+            aabb_result = aabb.parse_results(&(*picker_data).results[1..]);
+        }
+
+        // debug UI
         window.update(|frame| {
             Window::new("Debug")
                 .size([300.0, 100.0], Condition::FirstUseEver)
@@ -700,7 +774,7 @@ fn main() {
                         block_pos.x, block_pos.y, block_pos.z,
                     ));
 
-                    let block_normal = unsafe { (*picker_data).block_normal.0 };
+                    let block_normal = unsafe { (*picker_data).results[PICKER_IDX_BLOCK].normal.0 };
                     frame.ui.text(format!(
                         "block normal: ({},{},{})",
                         block_normal.x as i32, block_normal.y as i32, block_normal.z as i32,
@@ -717,7 +791,7 @@ fn main() {
                     ));
 
                     frame.ui.text(format!(
-                        "chunk allocs - used: {}, total: {}",
+                        "chunk allocs: {}, total: {}",
                         world.allocator.used_count(), world.allocator.allocated_count(),
                     ));
                 });
@@ -809,32 +883,118 @@ fn main() {
             if frame.input.was_key_pressed(&glfw::Key::Escape) {
                 frame.request_close();
             }
+            let apply_horizontal_physics = |speed: Vector3<f32>| -> Vector3<f32> {
+                let x_dot = speed.dot(Vector3::new(1.0, 0.0, 0.0));
+                let z_dot = speed.dot(Vector3::new(0.0, 0.0, 1.0));
+                let x_dst = if x_dot > 0.0 { aabb_result.x_pos } else { aabb_result.x_neg };
+                let z_dst = if z_dot > 0.0 { aabb_result.z_pos } else { aabb_result.z_neg };
+
+                let bounds_padding = 0.005;
+                let mut speed = speed;
+                if x_dst != -1.0 && speed.magnitude() > (x_dst - bounds_padding) {
+                    speed.x = (x_dst - bounds_padding) * speed.x.signum();
+                }
+                if z_dst != -1.0 && speed.z.abs() > (z_dst - bounds_padding) {
+                    speed.z = (z_dst - bounds_padding) * speed.z.signum();
+                }
+
+                speed
+            };
+            let apply_vertical_physics = |speed: Vector3<f32>| -> Vector3<f32> {
+                let y_dot = speed.dot(Vector3::new(0.0, 1.0, 0.0));
+                let y_dst = if y_dot > 0.0 { aabb_result.y_pos } else { aabb_result.y_neg };
+
+                let bounds_padding = 0.005;
+                let mut speed = speed;
+                if y_dst != -1.0 && speed.y.abs() > y_dst {
+                    speed.y = (y_dst - bounds_padding) * speed.y.signum();
+                }
+                speed
+            };
+
+            let mut horizontal_speed = Vector3::new(0.0, 0.0, 0.0);
             if frame.input.is_key_pressed(&glfw::Key::W) {
                 let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-                absolute_position += dir * cam_speed * frame.stats.delta_time;
+                let speed = dir * cam_speed * frame.stats.delta_time;
+                horizontal_speed += speed;
             }
             if frame.input.is_key_pressed(&glfw::Key::S) {
-                let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-                absolute_position -= dir * cam_speed * frame.stats.delta_time;
+                let dir = -camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
+                let speed = dir * cam_speed * frame.stats.delta_time;
+                horizontal_speed += speed;
             }
             if frame.input.is_key_pressed(&glfw::Key::A) {
-                absolute_position -= camera.right() * cam_speed * frame.stats.delta_time;
+                let speed = -camera.right() * cam_speed * frame.stats.delta_time;
+                horizontal_speed += speed;
             }
             if frame.input.is_key_pressed(&glfw::Key::D) {
-                absolute_position += camera.right() * cam_speed * frame.stats.delta_time;
+                let speed = camera.right() * cam_speed * frame.stats.delta_time;
+                horizontal_speed += speed;
             }
-            if frame.input.is_key_pressed(&glfw::Key::Space) {
-                absolute_position.y += cam_speed * frame.stats.delta_time;
+
+            // clamp horizontal speed
+            if !fly_mode {
+                horizontal_speed = apply_horizontal_physics(horizontal_speed);
             }
-            if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
-                absolute_position.y -= cam_speed * frame.stats.delta_time;
+            let speed = horizontal_speed.magnitude();
+            let max_speed = cam_speed * frame.stats.delta_time;
+            if speed > max_speed {
+                horizontal_speed = horizontal_speed.normalize() * max_speed;
             }
-            if frame.input.was_key_pressed(&glfw::Key::G) {
-                if cam_speed == 1.0 {
-                    cam_speed = 0.25;
+            absolute_position += horizontal_speed;
+
+            let mut vertical_speed = Vector3::new(0.0, 0.0, 0.0);
+            if !fly_mode {
+                const MAX_FALL_VELOCITY: f32 = 2.0;
+                const ACCELERATION: f32 = 0.01;
+
+                let is_grounded = aabb_result.y_neg < 0.01 && aabb_result.y_neg != -1.0;
+                if is_grounded {
+                    vertical_velocity = 0.0;
+                    cam_speed = 0.15;
+                    is_jumping = false;
+                    was_grounded = true;
+
+                    if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
+                        cam_speed = 0.22;
+                    }
+                    if frame.input.is_key_pressed(&glfw::Key::Space) {
+                        vertical_velocity = 0.25;
+                        is_jumping = true;
+                    }
                 } else {
-                    cam_speed = 1.0;
+                    if !is_jumping && !was_grounded {
+                        cam_speed = 0.1;
+                    }
+                    vertical_velocity -= ACCELERATION;
+                    vertical_velocity = vertical_velocity.clamp(-MAX_FALL_VELOCITY, MAX_FALL_VELOCITY);
                 }
+
+                vertical_speed.y = vertical_velocity * frame.stats.delta_time;
+            } else {
+                vertical_velocity = 0.0;
+                is_jumping = false;
+                was_grounded = false;
+
+                if frame.input.is_key_pressed(&glfw::Key::Space) {
+                    let speed = cam_speed * frame.stats.delta_time;
+                    let speed = Vector3::new(0.0, speed, 0.0);
+                    vertical_speed += speed;
+                }
+                if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
+                    let speed = cam_speed * frame.stats.delta_time;
+                    let speed = Vector3::new(0.0, -speed, 0.0);
+                    vertical_speed += speed;
+                }
+            }
+            if !fly_mode {
+                vertical_speed = apply_vertical_physics(vertical_speed);
+            }
+            absolute_position += vertical_speed;
+
+            if frame.input.was_key_pressed(&glfw::Key::F) {
+                fly_mode = !fly_mode;
+                cam_speed = if fly_mode { 1.0 } else { 0.15 };
             }
             if frame.input.was_key_pressed(&glfw::Key::E) {
                 light_dir = camera.forward;
@@ -902,7 +1062,8 @@ fn main() {
 
             // adding blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
-                let block_normal = unsafe { (*picker_data).block_normal.0 };
+                // TODO don't allow placing blocks where you stand
+                let block_normal = unsafe { (*picker_data).results[PICKER_IDX_BLOCK].normal.0 };
                 if let Some(block_pos) = block_pos {
                     let block_pos = block_pos.add(block_normal);
                     let x = block_pos.x as i32;
@@ -930,7 +1091,7 @@ fn main() {
                 world_shader.set_f32("u_fovy", 70.0f32.to_radians());
                 world_shader.set_f32("u_aspect", frame.get_aspect());
                 // shader.set_i32("u_max_depth", svo.max_depth);
-                world_shader.set_f32vec3("u_highlight_pos", &(*picker_data).block_pos.0.to_vec());
+                world_shader.set_f32vec3("u_highlight_pos", &(*picker_data).results[PICKER_IDX_BLOCK].pos.0.to_vec());
 
                 gl::ActiveTexture(gl::TEXTURE0);
                 tex_array.bind();
@@ -950,13 +1111,6 @@ fn main() {
                 ui_shader.unbind();
 
                 gl::BindVertexArray(0);
-
-                // picker logic
-                picker_shader.bind();
-                picker_shader.set_f32vec3("u_cam_pos", &camera.position.to_vec());
-                picker_shader.set_f32vec3("u_cam_dir", &camera.forward);
-                gl::DispatchCompute(1, 1, 1);
-                picker_shader.unbind();
 
                 svo_fence = create_replace_fence(svo_fence);
 
@@ -981,45 +1135,12 @@ fn build_vao() -> (GLuint, i32) {
             normal: cgmath::Vector3<f32>,
         }
 
-        // let pos = Point3::new(0.0, 0.0, -5.0);
-        // let scl = 0.5;
         let vertices = vec![
             // screen quad
             Vertex { position: Point3::new(1.0, 1.0, -1.0), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, 0.0, 1.0) },
             Vertex { position: Point3::new(-1.0, 1.0, -1.0), uv: Point2::new(0.0, 1.0), normal: Vector3::new(0.0, 0.0, 1.0) },
             Vertex { position: Point3::new(-1.0, -1.0, -1.0), uv: Point2::new(0.0, 0.0), normal: Vector3::new(0.0, 0.0, 1.0) },
             Vertex { position: Point3::new(1.0, -1.0, -1.0), uv: Point2::new(1.0, 0.0), normal: Vector3::new(0.0, 0.0, 1.0) },
-
-            // // front
-            // Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z + scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, 0.0, 1.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z + scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(0.0, 0.0, 1.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z + scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(0.0, 0.0, 1.0) },
-            // Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z + scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(0.0, 0.0, 1.0) },
-            // // back
-            // Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z - scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(0.0, 0.0, -1.0) },
-            // Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z - scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(0.0, 0.0, -1.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z - scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(0.0, 0.0, -1.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z - scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, 0.0, -1.0) },
-            // // left
-            // Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z + scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(-1.0, 0.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z - scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(-1.0, 0.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z - scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(-1.0, 0.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z + scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(-1.0, 0.0, 0.0) },
-            // // right
-            // Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z + scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(1.0, 0.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z + scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(1.0, 0.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z - scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(1.0, 0.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z - scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(1.0, 0.0, 0.0) },
-            // // top
-            // Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z + scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(0.0, 1.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x + scl, pos.y + scl, pos.z - scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, 1.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z - scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(0.0, 1.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y + scl, pos.z + scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(0.0, 1.0, 0.0) },
-            // // bottom
-            // Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z + scl), uv: Point2::new(1.0, 1.0), normal: Vector3::new(0.0, -1.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z + scl), uv: Point2::new(0.0, 1.0), normal: Vector3::new(0.0, -1.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x - scl, pos.y - scl, pos.z - scl), uv: Point2::new(0.0, 0.0), normal: Vector3::new(0.0, -1.0, 0.0) },
-            // Vertex { position: Point3::new(pos.x + scl, pos.y - scl, pos.z - scl), uv: Point2::new(1.0, 0.0), normal: Vector3::new(0.0, -1.0, 0.0) },
         ];
 
         let mut indices = Vec::<i32>::new();
@@ -1077,5 +1198,106 @@ fn calculate_lod(center: &ChunkPos, pos: &ChunkPos) -> u8 {
         7..=12 => 4,
         13..=19 => 3,
         _ => 2,
+    }
+}
+
+struct AABB {
+    pos: Point3<f32>,
+    extents: Vector3<f32>,
+}
+
+struct AABBResult {
+    x_pos: f32,
+    x_neg: f32,
+    y_pos: f32,
+    y_neg: f32,
+    z_pos: f32,
+    z_neg: f32,
+}
+
+impl AABB {
+    fn new(pos: Point3<f32>, extents: Vector3<f32>) -> AABB {
+        AABB { pos, extents }
+    }
+
+    fn generate_picker_tasks(&self) -> Vec<PickerTask> {
+        let max = vec![
+            self.extents.x.ceil() as i32,
+            self.extents.y.ceil() as i32,
+            self.extents.z.ceil() as i32,
+        ];
+
+        let mut tasks = Vec::new();
+        for x in 0..=max[0] {
+            for y in 0..=max[1] {
+                for z in 0..=max[2] {
+                    for (i, v) in vec![x, y, z].into_iter().enumerate() {
+                        if v == 0 || v == max[i] {
+                            let dir = |index: i32| {
+                                if index == i as i32 && (v == 0 || v == max[i]) {
+                                    if v == 0 {
+                                        return -1.0;
+                                    }
+                                    return 1.0;
+                                }
+                                0.001 // TODO why does straight down not work?
+                            };
+
+                            tasks.push(PickerTask {
+                                max_dst: 10.0,
+                                pos: AlignedPoint3(self.pos + Vector3::new(x as f32, y as f32, z as f32)),
+                                dir: AlignedVec3(Vector3::new(dir(0), dir(1), dir(2)).normalize()),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        tasks
+    }
+
+    fn parse_results(&self, data: &[PickerResult]) -> AABBResult {
+        let max = vec![
+            self.extents.x.ceil() as i32,
+            self.extents.y.ceil() as i32,
+            self.extents.z.ceil() as i32,
+        ];
+
+        let mut result = AABBResult {
+            x_pos: -1.0,
+            x_neg: -1.0,
+            y_pos: -1.0,
+            y_neg: -1.0,
+            z_pos: -1.0,
+            z_neg: -1.0,
+        };
+        let mut references = vec![&mut result.x_pos, &mut result.x_neg, &mut result.y_pos, &mut result.y_neg, &mut result.z_pos, &mut result.z_neg];
+
+        let mut res_index: usize = 0;
+        for x in 0..=max[0] {
+            for y in 0..=max[1] {
+                for z in 0..=max[2] {
+                    for (i, v) in vec![x, y, z].into_iter().enumerate() {
+                        if v != 0 && v != max[i] {
+                            continue;
+                        }
+
+                        let dst = data[res_index].dst;
+                        res_index += 1;
+                        if dst == -1.0 {
+                            continue;
+                        }
+
+                        let ref_index = i * 2 + if v == 0 { 1 } else { 0 };
+                        if *references[ref_index] == -1.0 {
+                            *references[ref_index] = dst;
+                        } else {
+                            *references[ref_index] = references[ref_index].min(dst);
+                        }
+                    }
+                }
+            }
+        }
+        result
     }
 }
