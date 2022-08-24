@@ -723,8 +723,7 @@ fn main() {
                 dir: AlignedVec3(camera.forward),
             };
 
-            // TODO does not fit into one block spaces
-            let aabb = AABB::new(camera.position - Vector3::new(0.45, 1.7, 0.45), Vector3::new(0.9, 1.8, 0.9));
+            let aabb = AABB::new(camera.position - Vector3::new(0.4, 1.7, 0.4), Vector3::new(0.8, 1.8, 0.8));
             let aabb_tasks = aabb.generate_picker_tasks();
             for (i, task) in aabb_tasks.into_iter().enumerate() {
                 (*picker_input_data).tasks[1 + i] = task;
@@ -889,13 +888,13 @@ fn main() {
                 let x_dst = if x_dot > 0.0 { aabb_result.x_pos } else { aabb_result.x_neg };
                 let z_dst = if z_dot > 0.0 { aabb_result.z_pos } else { aabb_result.z_neg };
 
-                let bounds_padding = 0.005;
+                let epsilon = 0.005;
                 let mut speed = speed;
-                if x_dst != -1.0 && speed.magnitude() > (x_dst - bounds_padding) {
-                    speed.x = (x_dst - bounds_padding) * speed.x.signum();
+                if x_dst != -1.0 && speed.x.abs() + epsilon > x_dst {
+                    speed.x = (x_dst - epsilon) * speed.x.signum();
                 }
-                if z_dst != -1.0 && speed.z.abs() > (z_dst - bounds_padding) {
-                    speed.z = (z_dst - bounds_padding) * speed.z.signum();
+                if z_dst != -1.0 && speed.z.abs() + epsilon > z_dst {
+                    speed.z = (z_dst - epsilon) * speed.z.signum();
                 }
 
                 speed
@@ -904,10 +903,10 @@ fn main() {
                 let y_dot = speed.dot(Vector3::new(0.0, 1.0, 0.0));
                 let y_dst = if y_dot > 0.0 { aabb_result.y_pos } else { aabb_result.y_neg };
 
-                let bounds_padding = 0.005;
+                let epsilon = 0.005;
                 let mut speed = speed;
-                if y_dst != -1.0 && speed.y.abs() > y_dst {
-                    speed.y = (y_dst - bounds_padding) * speed.y.signum();
+                if y_dst != -1.0 && speed.y.abs() > (y_dst + epsilon) {
+                    speed.y = (y_dst - epsilon) * speed.y.signum();
                 }
                 speed
             };
@@ -1221,20 +1220,25 @@ impl AABB {
     }
 
     fn generate_picker_tasks(&self) -> Vec<PickerTask> {
-        let max = vec![
+        let blocks_per_axis = vec![
             self.extents.x.ceil() as i32,
             self.extents.y.ceil() as i32,
             self.extents.z.ceil() as i32,
         ];
+        let step_size_per_axis = vec![
+            self.extents.x / blocks_per_axis[0] as f32,
+            self.extents.y / blocks_per_axis[1] as f32,
+            self.extents.z / blocks_per_axis[2] as f32,
+        ];
 
         let mut tasks = Vec::new();
-        for x in 0..=max[0] {
-            for y in 0..=max[1] {
-                for z in 0..=max[2] {
+        for x in 0..=blocks_per_axis[0] {
+            for y in 0..=blocks_per_axis[1] {
+                for z in 0..=blocks_per_axis[2] {
                     for (i, v) in vec![x, y, z].into_iter().enumerate() {
-                        if v == 0 || v == max[i] {
+                        if v == 0 || v == blocks_per_axis[i] {
                             let dir = |index: i32| {
-                                if index == i as i32 && (v == 0 || v == max[i]) {
+                                if index == i as i32 && (v == 0 || v == blocks_per_axis[i]) {
                                     if v == 0 {
                                         return -1.0;
                                     }
@@ -1245,7 +1249,7 @@ impl AABB {
 
                             tasks.push(PickerTask {
                                 max_dst: 10.0,
-                                pos: AlignedPoint3(self.pos + Vector3::new(x as f32, y as f32, z as f32)),
+                                pos: AlignedPoint3(self.pos + Vector3::new(x as f32 * step_size_per_axis[0], y as f32 * step_size_per_axis[1], z as f32 * step_size_per_axis[2])),
                                 dir: AlignedVec3(Vector3::new(dir(0), dir(1), dir(2)).normalize()),
                             });
                         }
@@ -1257,7 +1261,7 @@ impl AABB {
     }
 
     fn parse_results(&self, data: &[PickerResult]) -> AABBResult {
-        let max = vec![
+        let blocks_per_axis = vec![
             self.extents.x.ceil() as i32,
             self.extents.y.ceil() as i32,
             self.extents.z.ceil() as i32,
@@ -1274,11 +1278,11 @@ impl AABB {
         let mut references = vec![&mut result.x_pos, &mut result.x_neg, &mut result.y_pos, &mut result.y_neg, &mut result.z_pos, &mut result.z_neg];
 
         let mut res_index: usize = 0;
-        for x in 0..=max[0] {
-            for y in 0..=max[1] {
-                for z in 0..=max[2] {
+        for x in 0..=blocks_per_axis[0] {
+            for y in 0..=blocks_per_axis[1] {
+                for z in 0..=blocks_per_axis[2] {
                     for (i, v) in vec![x, y, z].into_iter().enumerate() {
-                        if v != 0 && v != max[i] {
+                        if v != 0 && v != blocks_per_axis[i] {
                             continue;
                         }
 
