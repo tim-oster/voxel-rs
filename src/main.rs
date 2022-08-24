@@ -713,6 +713,7 @@ fn main() {
         }
 
         // picker logic
+        let aabb = AABB::new(camera.position, -Vector3::new(0.4, 1.7, 0.4), Vector3::new(0.8, 1.8, 0.8));
         let aabb_result;
         unsafe {
             picker_shader.bind();
@@ -723,7 +724,6 @@ fn main() {
                 dir: AlignedVec3(camera.forward),
             };
 
-            let aabb = AABB::new(camera.position - Vector3::new(0.4, 1.7, 0.4), Vector3::new(0.8, 1.8, 0.8));
             let aabb_tasks = aabb.generate_picker_tasks();
             for (i, task) in aabb_tasks.into_iter().enumerate() {
                 (*picker_input_data).tasks[1 + i] = task;
@@ -1061,14 +1061,25 @@ fn main() {
 
             // adding blocks
             if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
-                // TODO don't allow placing blocks where you stand
                 let block_normal = unsafe { (*picker_data).results[PICKER_IDX_BLOCK].normal.0 };
                 if let Some(block_pos) = block_pos {
                     let block_pos = block_pos.add(block_normal);
-                    let x = block_pos.x as i32;
-                    let y = block_pos.y as i32;
-                    let z = block_pos.z as i32;
-                    world.set_block(x, y, z, selected_block);
+                    let x = block_pos.x as i32 as f32;
+                    let y = block_pos.y as i32 as f32;
+                    let z = block_pos.z as i32 as f32;
+
+                    let player_min_x = absolute_position.x + aabb.offset.x;
+                    let player_min_y = absolute_position.y + aabb.offset.y;
+                    let player_min_z = absolute_position.z + aabb.offset.z;
+                    let player_max_x = absolute_position.x + aabb.extents.x;
+                    let player_max_y = absolute_position.y + aabb.extents.y;
+                    let player_max_z = absolute_position.z + aabb.extents.z;
+
+                    if (player_max_x < x || player_min_x > x + 1.0) ||
+                        (player_max_y < y || player_min_y > y + 1.0) ||
+                        (player_max_z < z || player_min_z > z + 1.0) {
+                        world.set_block(x as i32, y as i32, z as i32, selected_block);
+                    }
                 }
             }
 
@@ -1202,6 +1213,7 @@ fn calculate_lod(center: &ChunkPos, pos: &ChunkPos) -> u8 {
 
 struct AABB {
     pos: Point3<f32>,
+    offset: Vector3<f32>,
     extents: Vector3<f32>,
 }
 
@@ -1215,8 +1227,8 @@ struct AABBResult {
 }
 
 impl AABB {
-    fn new(pos: Point3<f32>, extents: Vector3<f32>) -> AABB {
-        AABB { pos, extents }
+    fn new(pos: Point3<f32>, offset: Vector3<f32>, extents: Vector3<f32>) -> AABB {
+        AABB { pos, offset, extents }
     }
 
     fn generate_picker_tasks(&self) -> Vec<PickerTask> {
@@ -1249,7 +1261,7 @@ impl AABB {
 
                             tasks.push(PickerTask {
                                 max_dst: 10.0,
-                                pos: AlignedPoint3(self.pos + Vector3::new(x as f32 * step_size_per_axis[0], y as f32 * step_size_per_axis[1], z as f32 * step_size_per_axis[2])),
+                                pos: AlignedPoint3(self.pos + self.offset + Vector3::new(x as f32 * step_size_per_axis[0], y as f32 * step_size_per_axis[1], z as f32 * step_size_per_axis[2])),
                                 dir: AlignedVec3(Vector3::new(dir(0), dir(1), dir(2)).normalize()),
                             });
                         }
