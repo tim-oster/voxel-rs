@@ -97,6 +97,7 @@ struct PickerTask {
 #[repr(C)]
 struct PickerResult {
     dst: f32,
+    inside_block: bool,
     pos: AlignedPoint3<f32>,
     normal: AlignedVec3<f32>,
 }
@@ -893,10 +894,32 @@ fn main() {
                 let z_dst = if z_dot > 0.0 { aabb_result.z_pos } else { aabb_result.z_neg };
 
                 let mut speed = speed;
-                if x_dst != -1.0 && speed.x.abs() > (x_dst - PHYSICS_EPSILON) {
+
+                if x_dst == 0.0 {
+                    if x_dot > 0.0 {
+                        let actual = aabb.pos.x + aabb.offset.x + aabb.extents.x;
+                        let expected = actual.floor() - 2.0 * PHYSICS_EPSILON;
+                        speed.x = expected - actual;
+                    } else {
+                        let actual = aabb.pos.x + aabb.offset.x;
+                        let expected = actual.ceil() + 2.0 * PHYSICS_EPSILON;
+                        speed.x = expected - actual;
+                    }
+                } else if x_dst != -1.0 && speed.x.abs() > (x_dst - PHYSICS_EPSILON) {
                     speed.x = (x_dst - 2.0 * PHYSICS_EPSILON) * speed.x.signum();
                 }
-                if z_dst != -1.0 && speed.z.abs() > (z_dst - PHYSICS_EPSILON) {
+
+                if z_dst == 0.0 {
+                    if z_dot > 0.0 {
+                        let actual = aabb.pos.z + aabb.offset.z + aabb.extents.z;
+                        let expected = actual.floor() - 2.0 * PHYSICS_EPSILON;
+                        speed.x = expected - actual;
+                    } else {
+                        let actual = aabb.pos.z + aabb.offset.z;
+                        let expected = actual.ceil() + 2.0 * PHYSICS_EPSILON;
+                        speed.z = expected - actual;
+                    }
+                } else if z_dst != -1.0 && speed.z.abs() > (z_dst - PHYSICS_EPSILON) {
                     speed.z = (z_dst - 2.0 * PHYSICS_EPSILON) * speed.z.signum();
                 }
 
@@ -907,7 +930,17 @@ fn main() {
                 let y_dst = if y_dot > 0.0 { aabb_result.y_pos } else { aabb_result.y_neg };
 
                 let mut speed = speed;
-                if y_dst != -1.0 && speed.y.abs() > (y_dst - PHYSICS_EPSILON) {
+                if y_dst == 0.0 {
+                    if y_dot > 0.0 {
+                        let actual = aabb.pos.y + aabb.offset.y + aabb.extents.y;
+                        let expected = actual.floor() - 2.0 * PHYSICS_EPSILON;
+                        speed.y = expected - actual;
+                    } else {
+                        let actual = aabb.pos.y + aabb.offset.y;
+                        let expected = actual.ceil() + 2.0 * PHYSICS_EPSILON;
+                        speed.y = expected - actual;
+                    }
+                } else if y_dst != -1.0 && speed.y.abs() > (y_dst - PHYSICS_EPSILON) {
                     speed.y = (y_dst - 2.0 * PHYSICS_EPSILON) * speed.y.signum();
                 }
                 speed
@@ -1087,7 +1120,8 @@ fn main() {
 
                     if (player_max_x < x || player_min_x > x + 1.0) ||
                         (player_max_y < y || player_min_y > y + 1.0) ||
-                        (player_max_z < z || player_min_z > z + 1.0) {
+                        (player_max_z < z || player_min_z > z + 1.0) ||
+                        fly_mode {
                         world.set_block(x as i32, y as i32, z as i32, selected_block);
                     }
                 }
@@ -1316,7 +1350,7 @@ impl AABB {
 
                         let ref_index = i * 2 + if v == 0 { 1 } else { 0 };
                         if *references[ref_index] == -1.0 {
-                            *references[ref_index] = dst;
+                            *references[ref_index] = if data[res_index].inside_block { 0.0 } else { dst };
                         } else {
                             *references[ref_index] = references[ref_index].min(dst);
                         }

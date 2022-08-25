@@ -6,6 +6,7 @@ layout (local_size_x = 1) in;
 
 struct PickerResult {
     float dst;
+    bool inside_block;
     vec3 pos;
     vec3 normal;
 };
@@ -31,10 +32,12 @@ void main() {
 
     if (res.t > 0) {
         results[index].dst = res.t;
+        results[index].inside_block = res.inside_block;
         results[index].pos = res.pos;
         results[index].normal = FACE_NORMALS[res.face_id];
     } else {
         results[index].dst = -1;
+        results[index].inside_block = false;
         results[index].pos = vec3(0);
         results[index].normal = vec3(0);
     }

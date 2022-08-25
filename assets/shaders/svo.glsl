@@ -34,6 +34,7 @@ struct octree_result {
     vec3 pos;
     vec2 uv;
     vec4 color;
+    bool inside_block;
 };
 
 // https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Buffer_backed
@@ -70,6 +71,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
 
     res.t = -1;
     res.value = 0;
+    res.inside_block = false;
 
     // shift input coordinate system so that the octree spans from [1;2]
     ro += 1;
@@ -151,7 +153,10 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
         bool is_leaf = (descriptor & bit) != 0;
 
         if (is_child && t_min <= t_max) {
-            if (is_leaf) {
+            if (is_leaf && t_min == 0) {
+                res.inside_block = true;
+            }
+            if (is_leaf && t_min > 0) {
                 int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
                 if ((next_ptr & (1 << 31)) != 0) {
                     // use as relative offset if relative bit is set
@@ -223,8 +228,6 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
 
                 ++adjecent_leaf_count;
                 last_leaf_value = value;
-
-                // TODO rendering bug when inside a block (best to be observed in transparent blocks)
             } else {
                 // INTERSECT
                 float tv_max = min(t_max, tc_max);
