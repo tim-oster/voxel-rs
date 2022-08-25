@@ -154,6 +154,7 @@ fn main() {
     let cam_rot_speed = 0.005f32;
     let mut cam_rot = cgmath::Vector3::new(0.0, -90f32.to_radians(), 0.0);
     let mut fly_mode = true;
+    let mut slow_mode = false;
 
     let ambient_intensity = 0.3f32;
     let mut light_dir = Vector3::new(-1.0, -1.0, -1.0).normalize();
@@ -446,6 +447,7 @@ fn main() {
     let mut did_cam_repos = false;
 
     let mut vertical_velocity = 0.0f32;
+    let mut pre_jump_velocity = Vector3::new(0.0, 0.0, 0.0);
     let mut is_jumping = false;
     let mut was_grounded = false;
 
@@ -882,19 +884,20 @@ fn main() {
             if frame.input.was_key_pressed(&glfw::Key::Escape) {
                 frame.request_close();
             }
+
+            const PHYSICS_EPSILON: f32 = 0.005;
             let apply_horizontal_physics = |speed: Vector3<f32>| -> Vector3<f32> {
                 let x_dot = speed.dot(Vector3::new(1.0, 0.0, 0.0));
                 let z_dot = speed.dot(Vector3::new(0.0, 0.0, 1.0));
                 let x_dst = if x_dot > 0.0 { aabb_result.x_pos } else { aabb_result.x_neg };
                 let z_dst = if z_dot > 0.0 { aabb_result.z_pos } else { aabb_result.z_neg };
 
-                let epsilon = 0.005;
                 let mut speed = speed;
-                if x_dst != -1.0 && speed.x.abs() + epsilon > x_dst {
-                    speed.x = (x_dst - epsilon) * speed.x.signum();
+                if x_dst != -1.0 && speed.x.abs() > (x_dst - PHYSICS_EPSILON) {
+                    speed.x = (x_dst - 2.0 * PHYSICS_EPSILON) * speed.x.signum();
                 }
-                if z_dst != -1.0 && speed.z.abs() + epsilon > z_dst {
-                    speed.z = (z_dst - epsilon) * speed.z.signum();
+                if z_dst != -1.0 && speed.z.abs() > (z_dst - PHYSICS_EPSILON) {
+                    speed.z = (z_dst - 2.0 * PHYSICS_EPSILON) * speed.z.signum();
                 }
 
                 speed
@@ -903,10 +906,9 @@ fn main() {
                 let y_dot = speed.dot(Vector3::new(0.0, 1.0, 0.0));
                 let y_dst = if y_dot > 0.0 { aabb_result.y_pos } else { aabb_result.y_neg };
 
-                let epsilon = 0.005;
                 let mut speed = speed;
-                if y_dst != -1.0 && speed.y.abs() > (y_dst + epsilon) {
-                    speed.y = (y_dst - epsilon) * speed.y.signum();
+                if y_dst != -1.0 && speed.y.abs() > (y_dst - PHYSICS_EPSILON) {
+                    speed.y = (y_dst - 2.0 * PHYSICS_EPSILON) * speed.y.signum();
                 }
                 speed
             };
@@ -940,33 +942,34 @@ fn main() {
             if speed > max_speed {
                 horizontal_speed = horizontal_speed.normalize() * max_speed;
             }
-            absolute_position += horizontal_speed;
 
             let mut vertical_speed = Vector3::new(0.0, 0.0, 0.0);
             if !fly_mode {
                 const MAX_FALL_VELOCITY: f32 = 2.0;
-                const ACCELERATION: f32 = 0.01;
+                const ACCELERATION: f32 = 0.008;
 
-                let is_grounded = aabb_result.y_neg < 0.01 && aabb_result.y_neg != -1.0;
+                let is_grounded = aabb_result.y_neg < 0.02 && aabb_result.y_neg != -1.0;
                 if is_grounded {
                     vertical_velocity = 0.0;
                     cam_speed = 0.15;
                     is_jumping = false;
                     was_grounded = true;
+                    pre_jump_velocity = Vector3::new(0.0, 0.0, 0.0);
 
                     if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
                         cam_speed = 0.22;
                     }
                     if frame.input.is_key_pressed(&glfw::Key::Space) {
-                        vertical_velocity = 0.25;
+                        vertical_velocity = 0.2;
                         is_jumping = true;
+                        pre_jump_velocity = horizontal_speed;
                     }
                 } else {
-                    if !is_jumping && !was_grounded {
-                        cam_speed = 0.1;
-                    }
+                    cam_speed = 0.1;
                     vertical_velocity -= ACCELERATION;
                     vertical_velocity = vertical_velocity.clamp(-MAX_FALL_VELOCITY, MAX_FALL_VELOCITY);
+
+                    horizontal_speed += pre_jump_velocity;
                 }
 
                 vertical_speed.y = vertical_velocity * frame.stats.delta_time;
@@ -974,6 +977,7 @@ fn main() {
                 vertical_velocity = 0.0;
                 is_jumping = false;
                 was_grounded = false;
+                pre_jump_velocity = Vector3::new(0.0, 0.0, 0.0);
 
                 if frame.input.is_key_pressed(&glfw::Key::Space) {
                     let speed = cam_speed * frame.stats.delta_time;
@@ -989,11 +993,17 @@ fn main() {
             if !fly_mode {
                 vertical_speed = apply_vertical_physics(vertical_speed);
             }
+
+            absolute_position += horizontal_speed;
             absolute_position += vertical_speed;
 
             if frame.input.was_key_pressed(&glfw::Key::F) {
                 fly_mode = !fly_mode;
                 cam_speed = if fly_mode { 1.0 } else { 0.15 };
+            }
+            if frame.input.was_key_pressed(&glfw::Key::G) {
+                slow_mode = !slow_mode;
+                cam_speed *= if slow_mode { 0.1 } else { 1.0 / 0.1 };
             }
             if frame.input.was_key_pressed(&glfw::Key::E) {
                 light_dir = camera.forward;
@@ -1069,7 +1079,7 @@ fn main() {
                     let z = block_pos.z as i32 as f32;
 
                     let player_min_x = absolute_position.x + aabb.offset.x;
-                    let player_min_y = absolute_position.y + aabb.offset.y;
+                    let player_min_y = absolute_position.y + aabb.offset.y - 0.1; // add offset to prevent physics glitches
                     let player_min_z = absolute_position.z + aabb.offset.z;
                     let player_max_x = absolute_position.x + aabb.extents.x;
                     let player_max_y = absolute_position.y + aabb.extents.y;
