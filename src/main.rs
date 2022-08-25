@@ -143,7 +143,7 @@ fn main() {
             .build()
     ).unwrap();
 
-    let mut render_distance = 15;
+    let render_distance = 15;
     let mut absolute_position = Point3::new(16.0, 80.0, 16.0);
 
     let (vao, indices_count) = build_vao();
@@ -801,11 +801,20 @@ fn main() {
             Window::new("World Gen")
                 .size([300.0, 100.0], Condition::FirstUseEver)
                 .build(&frame.ui, || {
-                    frame.ui.input_int("render distance", &mut render_distance).build();
                     frame.ui.input_int("sea level", &mut world_cfg.sea_level).build();
 
                     if frame.ui.button("generate") {
-                        // (world, svo) = generate_world(render_distance, world_buffer, &world_cfg);
+                        while !worker_queue.is_empty() { worker_queue.pop(); }
+                        while !worker_prio_queue.is_empty() { worker_prio_queue.pop(); }
+
+                        last_chunk_pos = ChunkPos::new(-9999, 0, 0);
+                        svo_octant_ids.clear();
+                        currently_generating_chunks.clear();
+                        did_cam_repos = false;
+
+                        world = world::world::World::new();
+                        svo.lock().unwrap().clear();
+                        fly_mode = true;
                     }
 
                     frame.ui.new_line();

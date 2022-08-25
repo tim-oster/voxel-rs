@@ -56,6 +56,14 @@ impl<T: SvoSerializable> Svo<T> {
         }
     }
 
+    pub fn clear(&mut self) {
+        self.octree.reset();
+        self.change_set.clear();
+        self.buffer.clear();
+        self.octant_info.clear();
+        self.root_octant_info = None;
+    }
+
     pub fn set(&mut self, pos: Position, leaf: Option<T>) -> Option<OctantId> {
         if let Some(leaf) = leaf {
             let id = self.octree.add_leaf(pos, leaf);
@@ -544,6 +552,13 @@ impl SvoBuffer {
             buffer.free_ranges.push(Range { start: 0, length: initial_capacity })
         }
         buffer
+    }
+
+    fn clear(&mut self) {
+        self.free_ranges.clear();
+        self.free_ranges.push(Range { start: 0, length: self.bytes.capacity() });
+        self.updated_ranges.clear();
+        self.octant_to_range.clear();
     }
 
     fn insert(&mut self, id: OctantId, buf: &Vec<u32>) -> usize {
