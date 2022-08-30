@@ -79,7 +79,7 @@ pub struct Config {
     pub continentalness: Noise,
     /// Defines how much the point is affected by erosion, which in turn determines how
     /// mountainous it is.
-    /// -1 = tibet, 1 = netherlands
+    /// -1 = netherlands, 1 = tibet
     pub erosion: Noise,
     // TODO
     pub peaks_and_valleys: Noise,
@@ -101,6 +101,7 @@ impl Generator {
                 let noise_z = pos.z as f64 * 32.0 + z as f64;
 
                 let height = self.cfg.continentalness.get(&self.perlin, noise_x, noise_z);
+                let height = height + self.cfg.erosion.get(&self.perlin, noise_x, noise_z);
                 let height = height as i32;
 
                 for y in 0..32 {

@@ -190,17 +190,24 @@ fn main() {
     let mut world_cfg = world::generator::Config {
         sea_level: 70,
         continentalness: Noise {
-            frequency: 0.02,
-            octaves: 2,
+            frequency: 0.001,
+            octaves: 3,
             spline_points: vec![
-                SplinePoint { x: -1.0, y: 70.0 },
-                SplinePoint { x: 1.0, y: 80.0 },
+                SplinePoint { x: -1.0, y: 20.0 },
+                SplinePoint { x: 0.4, y: 50.0 },
+                SplinePoint { x: 0.6, y: 70.0 },
+                SplinePoint { x: 0.8, y: 120.0 },
+                SplinePoint { x: 0.9, y: 190.0 },
+                SplinePoint { x: 1.0, y: 200.0 },
             ],
         },
         erosion: Noise {
-            frequency: 0.02,
-            octaves: 2,
-            spline_points: vec![],
+            frequency: 0.01,
+            octaves: 4,
+            spline_points: vec![
+                SplinePoint { x: -1.0, y: -10.0 },
+                SplinePoint { x: 1.0, y: 4.0 },
+            ],
         },
         peaks_and_valleys: Noise {
             frequency: 0.02,
