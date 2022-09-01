@@ -103,7 +103,8 @@ struct PickerResult {
 }
 
 fn main() {
-    let mut window = core::Window::new(1024, 768, "voxel engine");
+    let msaa_samples = 0;
+    let mut window = core::Window::new(1024, 768, "voxel engine", msaa_samples);
     window.request_grab_cursor(false);
 
     let mut world_shader = graphics::Resource::new(
@@ -228,6 +229,12 @@ fn main() {
         gl::Enable(gl::CULL_FACE);
         gl::CullFace(gl::BACK);
         gl::FrontFace(gl::CCW);
+
+        if msaa_samples > 0 {
+            gl::Enable(gl::MULTISAMPLE);
+            gl::Enable(gl::SAMPLE_SHADING);
+            gl::MinSampleShading(1.0);
+        }
     }
 
     // BLOCK PICKING START

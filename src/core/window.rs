@@ -32,10 +32,14 @@ pub struct FrameStats {
 }
 
 impl Window {
-    pub fn new(width: u32, height: u32, title: &str) -> Self {
+    pub fn new(width: u32, height: u32, title: &str, msaa_samples: u32) -> Self {
         let mut context = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
         context.window_hint(glfw::WindowHint::ContextVersion(4, 6));
         context.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
+
+        if msaa_samples > 0 {
+            context.window_hint(glfw::WindowHint::Samples(Some(msaa_samples)));
+        }
 
         let (mut window, events) = context
             .create_window(width, height, title, glfw::WindowMode::Windowed)

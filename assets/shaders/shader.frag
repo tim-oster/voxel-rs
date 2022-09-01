@@ -18,23 +18,20 @@ uniform vec3 u_cam_pos;
 // block highlighting
 uniform vec3 u_highlight_pos;
 
-void main() {
-    vec2 uv = v_uv * 2.0 - 1.0;
-    uv.x *= u_aspect;
-    uv *= tan(u_fovy * 0.5);
-
-    vec3 ro = vec3(0.0, 0.0, 0.0);
-    vec3 look_at = vec3(uv, -1.0);
-    ro = (u_view * vec4(ro, 1.0)).xyz;
-    look_at = (u_view * vec4(look_at, 1.0)).xyz;
-    vec3 rd = normalize(look_at - ro);
-
+vec4 trace_ray(vec3 ro, vec3 rd) {
     octree_result res;
     intersect_octree(ro, rd, -1, true, res);
 
     if (res.t < 0) {
-        color = vec4(0);
-        return;
+        return vec4(0);
+    }
+    if (floor(res.pos) == floor(u_highlight_pos)) {
+        const float thickness = 1./16.;
+        vec2 local = abs(res.uv - 0.5) * 2;
+        float lmax = max(local.x, local.y);
+        if (lmax > 1.0 - thickness) {
+            return vec4(1-color.rgb, 1);
+        }
     }
 
     Material mat = materials[res.value];
@@ -46,7 +43,8 @@ void main() {
     vec3 tangent = FACE_TANGENTS[res.face_id];
     vec3 bitangent = FACE_BITANGENTS[res.face_id];
     if (tex_normal_id != -1) {
-        vec3 tex = texture(u_texture, vec3(res.uv, float(tex_normal_id))).xzy;// blue = up -> y axis
+        vec3 tex = texture(u_texture, vec3(res.uv, float(tex_normal_id))).xzy; // blue = up -> y axis
+        if (res.t < 5) tex = textureLod(u_texture, vec3(res.uv, float(tex_normal_id)), 0).xzy;
         tex = normalize(tex * 2 - 1);
         normal = tex.x * tangent + tex.y * normal + tex.z * bitangent;
     }
@@ -67,15 +65,19 @@ void main() {
     }
 
     float light = u_ambient + (diffuse + specular) * shadow;
-    color = res.color * light;
+    return res.color * light;
+}
 
-    if (floor(res.pos) == floor(u_highlight_pos)) {
-        const float thickness = 1./16.;
-        vec2 local = abs(res.uv - 0.5) * 2;
-        float lmax = max(local.x, local.y);
-        if (lmax > 1.0 - thickness) {
-            color = vec4(1-color.rgb, 1);
-            return;
-        }
-    }
+void main() {
+    vec2 uv = v_uv * 2.0 - 1.0;
+    uv.x *= u_aspect;
+    uv *= tan(u_fovy * 0.5);
+
+    vec3 ro = vec3(0.0, 0.0, 0.0);
+    vec3 look_at = vec3(uv, -1.0);
+    ro = (u_view * vec4(ro, 1.0)).xyz;
+    look_at = (u_view * vec4(look_at, 1.0)).xyz;
+    vec3 rd = normalize(look_at - ro);
+
+    color = trace_ray(ro, rd);
 }
