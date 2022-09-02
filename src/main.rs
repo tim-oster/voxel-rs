@@ -2,32 +2,31 @@ extern crate gl;
 #[macro_use]
 extern crate memoffset;
 
-use std::{cmp, mem, ptr, thread};
+use std::{cmp, mem, ptr};
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::ffi::c_void;
 use std::ops::Add;
 use std::os::raw::c_int;
 use std::sync::{Arc, mpsc, Mutex};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::Instant;
 
 use cgmath;
 use cgmath::{Point2, Point3, Vector2, Vector3};
 use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
-use crossbeam_queue::SegQueue;
 use gl::types::*;
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
 use crate::chunk::{BlockId, Chunk};
+use crate::systems::jobs::JobSystem;
 use crate::world::chunk;
 use crate::world::generator::{Noise, SplinePoint};
 use crate::world::octree::{OctantId, Octree, Position};
 use crate::world::svo::{SerializedChunk, Svo};
 use crate::world::world::ChunkPos;
 
-mod graphics;
 mod core;
+mod graphics;
+mod systems;
 mod world;
 
 unsafe fn gl_check_error_(file: &str, line: u32) -> u32 {
@@ -405,46 +404,10 @@ fn main() {
 
     // WORKER SYSTEM START
 
-    struct Job {
-        exec: Box<dyn FnOnce() + Send>,
-    }
-
-    let worker_count = num_cpus::get() - 1;
-    let mut worker_handles = Vec::new();
-    let worker_running = Arc::new(AtomicBool::new(true));
-
-    let worker_queue = Arc::new(SegQueue::<Job>::new());
-    let worker_prio_queue = Arc::new(SegQueue::<Job>::new());
-
+    let jobs = JobSystem::new(num_cpus::get() - 1);
+    let mut currently_generating_chunks = HashSet::new();
     let (worker_generated_chunks_tx, worker_generated_chunks_rx) = mpsc::channel::<Chunk>();
     let (worker_serialized_chunks_tx, worker_serialized_chunks_rx) = mpsc::channel::<SerializedChunk>();
-
-    let mut currently_generating_chunks = HashSet::new();
-
-    for _ in 0..worker_count {
-        let running = worker_running.clone();
-        let queue = worker_queue.clone();
-        let prio_queue = worker_prio_queue.clone();
-        let handle = thread::spawn(move || {
-            let mut last_exec = Instant::now();
-
-            while running.load(Ordering::Relaxed) {
-                let job = prio_queue.pop().or_else(|| queue.pop());
-                if job.is_none() {
-                    if last_exec.elapsed().as_millis() > 100 {
-                        std::thread::park();
-                        last_exec = Instant::now();
-                    }
-                    continue;
-                }
-                last_exec = Instant::now();
-                (job.unwrap().exec)();
-            }
-        });
-        worker_handles.push(handle);
-    }
-
-    // WORKER SYSTEM END
 
     let (w, h) = window.get_size();
     let mut ui_view = cgmath::ortho(0.0, w as f32, h as f32, 0.0, -1.0, 1.0);
@@ -468,12 +431,6 @@ fn main() {
 
     window.request_grab_cursor(true);
     while !window.should_close() {
-        if !worker_queue.is_empty() || !worker_prio_queue.is_empty() {
-            for handle in &worker_handles {
-                handle.thread().unpark();
-            }
-        }
-
         let mut block_pos = None;
         {
             let pos = unsafe { (*picker_data).results[PICKER_IDX_BLOCK].pos.0 };
@@ -616,12 +573,10 @@ fn main() {
                     for pos in chunk_pos_to_generate {
                         let world_gen = world_gen.clone();
                         let tx = worker_generated_chunks_tx.clone();
-                        worker_queue.push(Job {
-                            exec: Box::new(move || {
-                                let chunk = world_gen.generate(pos);
-                                tx.send(chunk).unwrap();
-                            }),
-                        })
+                        jobs.push(false, Box::new(move || {
+                            let chunk = world_gen.generate(pos);
+                            tx.send(chunk).unwrap();
+                        }));
                     }
                 }
 
@@ -676,12 +631,10 @@ fn main() {
                         let pos = *pos;
                         let lod = calculate_lod(&current_chunk_pos, &pos);
                         let tx = worker_serialized_chunks_tx.clone();
-                        worker_prio_queue.push(Job {
-                            exec: Box::new(move || {
-                                let serialized = SerializedChunk::new(pos, storage, lod);
-                                tx.send(serialized).unwrap();
-                            }),
-                        });
+                        jobs.push(true, Box::new(move || {
+                            let serialized = SerializedChunk::new(pos, storage, lod);
+                            tx.send(serialized).unwrap();
+                        }));
                     } else {
                         svo.lock().unwrap().set(svo_pos, None);
                         svo_octant_ids.remove(pos);
@@ -803,7 +756,7 @@ fn main() {
 
                     frame.ui.text(format!(
                         "queue length: {}",
-                        worker_queue.len() + worker_prio_queue.len(),
+                        jobs.len(),
                     ));
 
                     frame.ui.text(format!(
@@ -818,8 +771,7 @@ fn main() {
                     frame.ui.input_int("sea level", &mut world_cfg.sea_level).build();
 
                     if frame.ui.button("generate") {
-                        while !worker_queue.is_empty() { worker_queue.pop(); }
-                        while !worker_prio_queue.is_empty() { worker_prio_queue.pop(); }
+                        jobs.clear();
 
                         last_chunk_pos = ChunkPos::new(-9999, 0, 0);
                         svo_octant_ids.clear();
@@ -1196,11 +1148,7 @@ fn main() {
         });
     }
 
-    worker_running.store(false, Ordering::Relaxed);
-    for handle in worker_handles {
-        handle.thread().unpark();
-        handle.join().unwrap();
-    }
+    jobs.stop();
 }
 
 fn build_vao() -> (GLuint, i32) {
