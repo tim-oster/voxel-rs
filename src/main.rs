@@ -139,7 +139,6 @@ fn main() {
             .add_texture("stone_bricks", "assets/textures/stone_bricks.png")?
             .add_texture("stone_bricks_normal", "assets/textures/stone_bricks_n.png")?
             .add_texture("glass", "assets/textures/glass.png")?
-            .add_texture("glass_light_blue", "assets/textures/glass_light_blue.png")?
             .build()
     ).unwrap();
 
@@ -370,16 +369,6 @@ fn main() {
             tex_top: tex_array.lookup("glass").unwrap() as i32,
             tex_side: tex_array.lookup("glass").unwrap() as i32,
             tex_bottom: tex_array.lookup("glass").unwrap() as i32,
-            tex_top_normal: -1,
-            tex_side_normal: -1,
-            tex_bottom_normal: -1,
-        },
-        Material { // glass light blue
-            specular_pow: 70.0,
-            specular_strength: 0.4,
-            tex_top: tex_array.lookup("glass_light_blue").unwrap() as i32,
-            tex_side: tex_array.lookup("glass_light_blue").unwrap() as i32,
-            tex_bottom: tex_array.lookup("glass_light_blue").unwrap() as i32,
             tex_top_normal: -1,
             tex_side_normal: -1,
             tex_bottom_normal: -1,
