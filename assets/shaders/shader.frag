@@ -44,7 +44,9 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
     vec3 bitangent = FACE_BITANGENTS[res.face_id];
     if (tex_normal_id != -1) {
         vec3 tex = texture(u_texture, vec3(res.uv, float(tex_normal_id))).xzy; // blue = up -> y axis
-        if (res.t < 5) tex = textureLod(u_texture, vec3(res.uv, float(tex_normal_id)), 0).xzy;
+        // NOTE: since automatic mipmap generation is used, the resulting textures do not look that nicely. To
+        // prevent this from being noticable, texture lookups at the base mip level are forced for close distances.
+        if (res.t < 20) tex = textureLod(u_texture, vec3(res.uv, float(tex_normal_id)), smoothstep(15, 20, res.t)).xzy;
         tex = normalize(tex * 2 - 1);
         normal = tex.x * tangent + tex.y * normal + tex.z * bitangent;
     }
@@ -54,8 +56,6 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
     vec3 view_dir = normalize(res.pos - u_cam_pos);
     vec3 reflect_dir = reflect(-u_light_dir, normal);
     float specular = pow(max(dot(view_dir, reflect_dir), 0.0), mat.specular_pow) * mat.specular_strength;
-
-    // TODO support translucent objects
 
     float shadow = 1;
     if (res.t < 100/octree_scale) {

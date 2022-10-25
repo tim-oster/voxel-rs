@@ -206,7 +206,6 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
                 if (face_id == 3) { tex_id = mat.tex_top; }
                 else if (face_id == 2) { tex_id = mat.tex_bottom; }
                 vec4 tex_color = texture(u_texture, vec3(uv, float(tex_id)));
-                if (t_min / octree_scale < 5) tex_color = textureLod(u_texture, vec3(uv, float(tex_id)), 0);
 
                 bool first_of_kind = adjecent_leaf_count == 0 || value != last_leaf_value;
                 if ((tex_color.a > 0 || !cast_translucent) && first_of_kind) {
