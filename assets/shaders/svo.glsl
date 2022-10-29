@@ -63,6 +63,10 @@ layout (std430, binding = 2) readonly buffer material_registry {
 
 uniform sampler2DArray u_texture;// TODO rename or as param
 
+#if !defined(OCTREE_RAYTRACE_DEBUG_FN)
+#define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf) ;
+#endif
+
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
 void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, out octree_result res) {
@@ -151,6 +155,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
 
         bool is_child = (descriptor & (bit << 8)) != 0;
         bool is_leaf = (descriptor & bit) != 0;
+
+        OCTREE_RAYTRACE_DEBUG_FN(t_min/octree_scale, ptr, idx, parent_octant_idx, scale, is_child, is_leaf);
 
         if (is_child && t_min <= t_max) {
             if (is_leaf && t_min == 0) {

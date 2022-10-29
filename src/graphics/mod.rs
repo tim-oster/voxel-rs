@@ -1,3 +1,5 @@
+mod testing;
+
 mod camera;
 pub use camera::Camera;
 

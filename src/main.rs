@@ -662,6 +662,7 @@ fn main() {
                     world_buffer.write(max_depth_exp.to_bits());
 
                     // wait for last draw call to finish so that updates and draws do not race and produce temporary "holes" in the world
+                    // TODO does this issue still occur if new memory blobs are written first and after that related pointers are updated?
                     wait_fence(svo_fence);
                     svo.write_changes_to(world_buffer.offset(1));
 
