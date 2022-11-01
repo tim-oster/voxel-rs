@@ -4,18 +4,28 @@ mod tests {
     use std::ffi::c_void;
     use std::sync::Arc;
 
-    use cgmath::{InnerSpace, Point3, Vector3};
+    use cgmath::{InnerSpace, Point2, Point3, Vector3, Vector4};
     use gl::types::{GLsizeiptr, GLvoid};
     use glfw::Context;
 
     use crate::{Chunk, ChunkPos, graphics, Position, SerializedChunk, Svo};
-    use crate::chunk::{ChunkStorage, NO_BLOCK};
+    use crate::chunk::ChunkStorage;
     use crate::world::allocator::Allocator;
 
     #[repr(align(16))]
+    #[derive(Copy, Clone, Debug)]
     struct AlignedVec3<T>(cgmath::Vector3<T>);
 
     #[repr(align(16))]
+    #[derive(Copy, Clone, Debug)]
+    struct AlignedVec4<T>(cgmath::Vector4<T>);
+
+    #[repr(align(8))]
+    #[derive(Copy, Clone, Debug)]
+    struct AlignedPoint2<T>(cgmath::Point2<T>);
+
+    #[repr(align(16))]
+    #[derive(Copy, Clone, Debug)]
     struct AlignedPoint3<T>(cgmath::Point3<T>);
 
     #[repr(align(4))]
@@ -75,20 +85,14 @@ mod tests {
             svo.write_changes_to(world_buffer.offset(1));
         }
 
-        // TODO generate custom textures in code for better testing
         let tex_array = graphics::Resource::new(
-            || graphics::TextureArrayBuilder::new(4)
-                .add_texture("dirt", "assets/textures/dirt.png")?
-                .add_texture("dirt_normal", "assets/textures/dirt_n.png")?
-                .add_texture("grass_side", "assets/textures/grass_side.png")?
-                .add_texture("grass_side_normal", "assets/textures/grass_side_n.png")?
-                .add_texture("grass_top", "assets/textures/grass_top.png")?
-                .add_texture("grass_top_normal", "assets/textures/grass_top_n.png")?
-                .add_texture("stone", "assets/textures/stone.png")?
-                .add_texture("stone_normal", "assets/textures/stone_n.png")?
-                .add_texture("stone_bricks", "assets/textures/stone_bricks.png")?
-                .add_texture("stone_bricks_normal", "assets/textures/stone_bricks_n.png")?
-                .add_texture("glass", "assets/textures/glass.png")?
+            || graphics::TextureArrayBuilder::new(1)
+                .add_rgba8("test", 2, 2, vec![
+                    255, 0, 0, 255,
+                    0, 255, 0, 255,
+                    0, 0, 255, 255,
+                    255, 255, 0, 255,
+                ])?
                 .build()
         ).unwrap();
 
@@ -116,14 +120,14 @@ mod tests {
                 tex_bottom_normal: -1,
             },
             Material { // grass
-                specular_pow: 14.0,
-                specular_strength: 0.4,
-                tex_top: tex_array.lookup("grass_top").unwrap() as i32,
-                tex_side: tex_array.lookup("grass_side").unwrap() as i32,
-                tex_bottom: tex_array.lookup("dirt").unwrap() as i32,
-                tex_top_normal: tex_array.lookup("grass_top_normal").unwrap() as i32,
-                tex_side_normal: tex_array.lookup("grass_side_normal").unwrap() as i32,
-                tex_bottom_normal: tex_array.lookup("dirt_normal").unwrap() as i32,
+                specular_pow: 0.0,
+                specular_strength: 0.0,
+                tex_top: tex_array.lookup("test").unwrap() as i32,
+                tex_side: tex_array.lookup("test").unwrap() as i32,
+                tex_bottom: tex_array.lookup("test").unwrap() as i32,
+                tex_top_normal: -1,
+                tex_side_normal: -1,
+                tex_bottom_normal: -1,
             },
         ];
         let mut material_ssbo = 0;
@@ -151,11 +155,13 @@ mod tests {
             max_dst: f32,
             pos: AlignedPoint3<f32>,
             dir: AlignedVec3<f32>,
+            cast_translucent: AlignedBool,
         }
         let buffer_in = BufferIn {
             max_dst: 32.0,
-            pos: AlignedPoint3(Point3::new(0.0, 0.5, 0.0)),
-            dir: AlignedVec3(Vector3::new(1.0, 0.0001, 0.0001).normalize()),
+            pos: AlignedPoint3(Point3::new(0.0, 0.01, 0.0)),
+            dir: AlignedVec3(Vector3::new(1.0, 0.00001, 0.00001).normalize()),
+            cast_translucent: AlignedBool(false),
         };
         let mut buffer_in_ssbo = 0;
         unsafe {
@@ -171,6 +177,17 @@ mod tests {
 
         #[repr(C)]
         #[derive(Copy, Clone, Debug)]
+        struct OctreeResult {
+            t: f32,
+            value: u32,
+            face_id: i32,
+            pos: AlignedPoint3<f32>,
+            uv: AlignedPoint2<f32>,
+            color: AlignedVec4<f32>,
+            inside_block: AlignedBool,
+        }
+        #[repr(C)]
+        #[derive(Copy, Clone, Debug)]
         struct StackFrame {
             t_min: f32,
             ptr: i32,
@@ -180,14 +197,22 @@ mod tests {
             is_child: AlignedBool,
             is_leaf: AlignedBool,
         }
-
-        // TODO get final octree_result struct
         #[repr(C)]
         struct BufferOut {
+            result: OctreeResult,
             stack_ptr: i32,
             stack: [StackFrame; 100],
         }
         let mut buffer_out = BufferOut {
+            result: OctreeResult {
+                t: 0.0,
+                value: 0,
+                face_id: 0,
+                pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)),
+                uv: AlignedPoint2(Point2::new(0.0, 0.0)),
+                color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
+                inside_block: AlignedBool(false),
+            },
             stack_ptr: 0,
             stack: [StackFrame {
                 t_min: 0.0,
@@ -212,6 +237,10 @@ mod tests {
         }
 
         unsafe {
+            gl::ActiveTexture(gl::TEXTURE0);
+            tex_array.bind();
+            shader.set_i32("u_texture", 0);
+
             shader.bind();
             gl::DispatchCompute(1, 1, 1);
             gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
@@ -229,6 +258,7 @@ mod tests {
         for i in 0..=buffer_out.stack_ptr {
             println!("f{}: {:?}", i, buffer_out.stack[i as usize]);
         }
+        println!("\n{:?}", buffer_out.result);
 
         window.close();
     }

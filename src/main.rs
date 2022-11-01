@@ -128,17 +128,17 @@ fn main() {
 
     let tex_array = graphics::Resource::new(
         || graphics::TextureArrayBuilder::new(4)
-            .add_texture("dirt", "assets/textures/dirt.png")?
-            .add_texture("dirt_normal", "assets/textures/dirt_n.png")?
-            .add_texture("grass_side", "assets/textures/grass_side.png")?
-            .add_texture("grass_side_normal", "assets/textures/grass_side_n.png")?
-            .add_texture("grass_top", "assets/textures/grass_top.png")?
-            .add_texture("grass_top_normal", "assets/textures/grass_top_n.png")?
-            .add_texture("stone", "assets/textures/stone.png")?
-            .add_texture("stone_normal", "assets/textures/stone_n.png")?
-            .add_texture("stone_bricks", "assets/textures/stone_bricks.png")?
-            .add_texture("stone_bricks_normal", "assets/textures/stone_bricks_n.png")?
-            .add_texture("glass", "assets/textures/glass.png")?
+            .add_file("dirt", "assets/textures/dirt.png")?
+            .add_file("dirt_normal", "assets/textures/dirt_n.png")?
+            .add_file("grass_side", "assets/textures/grass_side.png")?
+            .add_file("grass_side_normal", "assets/textures/grass_side_n.png")?
+            .add_file("grass_top", "assets/textures/grass_top.png")?
+            .add_file("grass_top_normal", "assets/textures/grass_top_n.png")?
+            .add_file("stone", "assets/textures/stone.png")?
+            .add_file("stone_normal", "assets/textures/stone_n.png")?
+            .add_file("stone_bricks", "assets/textures/stone_bricks.png")?
+            .add_file("stone_bricks_normal", "assets/textures/stone_bricks_n.png")?
+            .add_file("glass", "assets/textures/glass.png")?
             .build()
     ).unwrap();
 
