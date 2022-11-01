@@ -1,13 +1,15 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::fmt::Write;
+use std::fmt::{format, Write};
 use std::io::Error;
 use std::ptr;
 
 use cgmath::{Array, Matrix};
 use gl::types::*;
 use regex::Regex;
+
+use crate::graphics::ShaderType::Compute;
 
 #[derive(Debug)]
 pub enum ShaderError {
@@ -64,16 +66,52 @@ impl ShaderProgramBuilder {
 
     pub fn load_shader(&mut self, type_: ShaderType, path: &str) -> Result<&mut ShaderProgramBuilder, ShaderError> {
         let src = self.load_file(path)?;
-        self.add_shader(type_, &src)
+        if src.len() != 1 || !src.keys().next().unwrap().is_empty() {
+            return Err(ShaderError::Other(String::from("file must not contain any #shader_type directives")));
+        }
+        self.add_shader(type_, src.get("").unwrap())
     }
 
-    fn load_file(&mut self, path: &str) -> Result<String, ShaderError> {
+    pub fn load_shader_bundle(&mut self, path: &str) -> Result<&mut ShaderProgramBuilder, ShaderError> {
+        let src = self.load_file(path)?;
+        for (type_, src) in src {
+            let type_ = match type_.as_str() {
+                "vertex" => ShaderType::Vertex,
+                "fragment" => ShaderType::Fragment,
+                "compute" => ShaderType::Compute,
+                _ => {
+                    return Err(ShaderError::Other(format!("unsupported shader type: {}", type_)));
+                }
+            };
+            self.add_shader(type_, &src)?;
+        }
+        Ok(self)
+    }
+
+    fn load_file(&mut self, path: &str) -> Result<HashMap<String, String>, ShaderError> {
         let re_include = Regex::new("^#include\\s\"(.*)\"$").unwrap();
 
         let src = std::fs::read_to_string(path)?;
-        let mut final_src = String::new();
+        let mut current_type = String::from("");
+        let mut final_srcs = HashMap::new();
 
         for line in src.split("\n") {
+            if line.starts_with("#shader_type") {
+                let parts: Vec<_> = line.split(" ").collect();
+                if parts.len() != 2 {
+                    return Err(ShaderError::Other(format!(
+                        "invalid shader type directive: {}", line,
+                    )));
+                }
+                current_type = String::from(parts[1].to_lowercase());
+                continue;
+            }
+
+            if !final_srcs.contains_key(&current_type) {
+                final_srcs.insert(current_type.clone(), String::new());
+            }
+            let final_src = final_srcs.get_mut(&current_type).unwrap();
+
             if line.starts_with("#include") {
                 let caps = re_include.captures(line).unwrap();
                 let rel_path = caps.get(1).map_or("", |m| m.as_str());
@@ -105,7 +143,14 @@ impl ShaderProgramBuilder {
                         ));
                     }
 
-                    let src = src.unwrap();
+                    let mut src = src.unwrap();
+                    if src.len() != 1 || !src.keys().next().unwrap().is_empty() {
+                        return Err(ShaderError::Other(
+                            format!("error including {} in {}: included files must not contain any #shader_type directives", rel_path, path),
+                        ));
+                    }
+
+                    let src = src.remove("").unwrap();
                     final_src.write_str(&src).unwrap();
                     final_src.write_char('\n').unwrap();
 
@@ -119,7 +164,7 @@ impl ShaderProgramBuilder {
             final_src.write_char('\n').unwrap();
         }
 
-        Ok(final_src)
+        Ok(final_srcs)
     }
 
     pub fn add_shader(&mut self, type_: ShaderType, src: &str) -> Result<&mut ShaderProgramBuilder, ShaderError> {

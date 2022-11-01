@@ -145,9 +145,7 @@ mod tests {
         }
 
         let shader = graphics::Resource::new(
-            || graphics::ShaderProgramBuilder::new()
-                .load_shader(graphics::ShaderType::Compute, "assets/shaders/svo.test.glsl")?
-                .build()
+            || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/svo.test.glsl")?.build()
         ).unwrap();
 
         #[repr(C)]

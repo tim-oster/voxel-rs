@@ -107,23 +107,15 @@ fn main() {
     window.request_grab_cursor(false);
 
     let mut world_shader = graphics::Resource::new(
-        || graphics::ShaderProgramBuilder::new()
-            .load_shader(graphics::ShaderType::Vertex, "assets/shaders/shader.vert")?
-            .load_shader(graphics::ShaderType::Fragment, "assets/shaders/shader.frag")?
-            .build()
+        || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
     ).unwrap();
 
     let mut picker_shader = graphics::Resource::new(
-        || graphics::ShaderProgramBuilder::new()
-            .load_shader(graphics::ShaderType::Compute, "assets/shaders/picker.glsl")?
-            .build()
+        || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/picker.glsl")?.build()
     ).unwrap();
 
-    let mut ui_shader = graphics::Resource::new(
-        || graphics::ShaderProgramBuilder::new()
-            .load_shader(graphics::ShaderType::Vertex, "assets/shaders/ui.vert")?
-            .load_shader(graphics::ShaderType::Fragment, "assets/shaders/ui.frag")?
-            .build()
+    let mut crosshair_shader = graphics::Resource::new(
+        || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/crosshair.glsl")?.build()
     ).unwrap();
 
     let tex_array = graphics::Resource::new(
@@ -1010,7 +1002,7 @@ fn main() {
                 for shader in vec![
                     &mut world_shader,
                     &mut picker_shader,
-                    &mut ui_shader,
+                    &mut crosshair_shader,
                 ] {
                     if let Err(err) = shader.reload() {
                         println!("error loading shader: {:?}", err);
@@ -1120,14 +1112,14 @@ fn main() {
                 world_shader.unbind();
 
                 // render ui
-                ui_shader.bind();
-                ui_shader.set_f32mat4("u_view", &ui_view);
-                ui_shader.set_f32vec2("u_dimensions", &Vector2::new(frame.size.0 as f32, frame.size.1 as f32));
+                crosshair_shader.bind();
+                crosshair_shader.set_f32mat4("u_view", &ui_view);
+                crosshair_shader.set_f32vec2("u_dimensions", &Vector2::new(frame.size.0 as f32, frame.size.1 as f32));
                 gl::Enable(gl::BLEND);
                 gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
                 gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
                 gl::Disable(gl::BLEND);
-                ui_shader.unbind();
+                crosshair_shader.unbind();
 
                 gl::BindVertexArray(0);
 
