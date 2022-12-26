@@ -1,4 +1,5 @@
 mod testing;
+pub mod buffer;
 
 mod camera;
 pub use camera::Camera;
