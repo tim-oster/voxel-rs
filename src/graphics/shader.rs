@@ -96,6 +96,8 @@ impl ShaderProgramBuilder {
         let mut final_srcs = HashMap::new();
 
         for line in src.split("\n") {
+            let line = line.trim_end();
+
             if line.starts_with("#shader_type") {
                 let parts: Vec<_> = line.split(" ").collect();
                 if parts.len() != 2 {
