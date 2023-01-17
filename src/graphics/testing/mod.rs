@@ -13,23 +13,23 @@ mod tests {
     use crate::world::allocator::Allocator;
 
     #[repr(align(16))]
-    #[derive(Copy, Clone, Debug)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     struct AlignedVec3<T>(cgmath::Vector3<T>);
 
     #[repr(align(16))]
-    #[derive(Copy, Clone, Debug)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     struct AlignedVec4<T>(cgmath::Vector4<T>);
 
     #[repr(align(8))]
-    #[derive(Copy, Clone, Debug)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     struct AlignedPoint2<T>(cgmath::Point2<T>);
 
     #[repr(align(16))]
-    #[derive(Copy, Clone, Debug)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     struct AlignedPoint3<T>(cgmath::Point3<T>);
 
     #[repr(align(4))]
-    #[derive(Copy, Clone, Debug)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     struct AlignedBool(bool);
 
     #[test]
@@ -185,7 +185,7 @@ mod tests {
             inside_block: AlignedBool,
         }
         #[repr(C)]
-        #[derive(Copy, Clone, Debug)]
+        #[derive(Copy, Clone, Debug, PartialEq)]
         struct StackFrame {
             t_min: f32,
             ptr: i32,
@@ -259,6 +259,19 @@ mod tests {
         println!("\n{:?}", buffer_out.result);
 
         window.close();
+
+        // assert last frame to be:
+        //  f18: StackFrame { t_min: 31.0, ptr: 89, idx: 6, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(true), is_leaf: AlignedBool(true) }
+        assert_eq!(buffer_out.stack_ptr, 18);
+        assert_eq!(buffer_out.stack[18], StackFrame {
+            t_min: 31.0,
+            ptr: 89,
+            idx: 6,
+            parent_octant_idx: 1,
+            scale: 17,
+            is_child: AlignedBool(true),
+            is_leaf: AlignedBool(true),
+        });
     }
 }
 
