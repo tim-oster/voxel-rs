@@ -1,7 +1,7 @@
-use std::mem;
+use std::{mem, ptr};
 use std::ops::{Deref, DerefMut};
 
-use gl::types::{GLenum, GLsizeiptr, GLuint, GLvoid};
+use gl::types::{GLsizeiptr, GLuint, GLvoid};
 
 // doc: https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBufferData.xhtml
 type BufferUsage = u32;
@@ -38,7 +38,7 @@ impl<T> DerefMut for Buffer<T> {
 impl<T> Drop for Buffer<T> {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteBuffers(1, &self. handle);
+            gl::DeleteBuffers(1, &self.handle);
         }
     }
 }
@@ -69,7 +69,65 @@ impl<T> Buffer<T> {
         }
     }
 
-    pub fn bind_base_as_ssbo(&self, index: u32) {
+    pub fn bind_as_storage_buffer(&self, index: u32) {
+        unsafe {
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index, self.handle);
+        }
+    }
+}
+
+pub struct MappedBuffer<T> {
+    handle: GLuint,
+    mapped_ptr: *mut T,
+}
+
+impl<T> Drop for MappedBuffer<T> {
+    fn drop(&mut self) {
+        unsafe {
+            gl::DeleteBuffers(1, &self.handle);
+        }
+    }
+}
+
+impl<T> Deref for MappedBuffer<T> {
+    type Target = *mut T;
+
+    fn deref(&self) -> &Self::Target {
+        &self.mapped_ptr
+    }
+}
+
+impl<T> DerefMut for MappedBuffer<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.mapped_ptr
+    }
+}
+
+impl<T> MappedBuffer<T> {
+    pub fn new(size: usize) -> MappedBuffer<T> {
+        let mut handle = 0;
+        let mapped_ptr;
+        unsafe {
+            gl::CreateBuffers(1, &mut handle);
+
+            let size_bytes = mem::size_of::<T>() * size;
+            gl::NamedBufferStorage(
+                handle,
+                size_bytes as GLsizeiptr,
+                ptr::null(),
+                gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+            );
+            mapped_ptr = gl::MapNamedBufferRange(
+                handle,
+                0,
+                size_bytes as isize,
+                gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+            ) as *mut T;
+        }
+        MappedBuffer { handle, mapped_ptr }
+    }
+
+    pub fn bind_as_storage_buffer(&self, index: u32) {
         unsafe {
             gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index, self.handle);
         }

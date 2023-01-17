@@ -17,6 +17,7 @@ use gl::types::*;
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
 use crate::chunk::{BlockId, Chunk};
+use crate::graphics::types::{AlignedPoint3, AlignedVec3};
 use crate::systems::jobs::JobSystem;
 use crate::world::chunk;
 use crate::world::generator::{Noise, SplinePoint};
@@ -79,12 +80,6 @@ fn create_replace_fence(last_fence: Option<GLsync>) -> Option<GLsync> {
         Some(gl::FenceSync(gl::SYNC_GPU_COMMANDS_COMPLETE, 0))
     }
 }
-
-#[repr(align(16))]
-struct AlignedVec3<T>(cgmath::Vector3<T>);
-
-#[repr(align(16))]
-struct AlignedPoint3<T>(cgmath::Point3<T>);
 
 #[repr(C)]
 struct PickerTask {

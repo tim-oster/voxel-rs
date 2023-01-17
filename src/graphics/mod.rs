@@ -9,6 +9,7 @@ pub use resource::Resource;
 
 mod shader;
 mod texture_array;
+pub mod types;
 
 pub use shader::ShaderProgramBuilder;
 pub use shader::ShaderProgram;

@@ -1,36 +1,16 @@
 #[cfg(test)]
 mod tests {
-    use std::{mem, ptr};
-    use std::ffi::c_void;
     use std::sync::Arc;
 
     use cgmath::{InnerSpace, Point2, Point3, Vector3, Vector4};
-    use gl::types::{GLsizeiptr, GLvoid};
     use glfw::Context;
 
-    use crate::{Chunk, ChunkPos, graphics, Position, SerializedChunk, Svo};
+    use crate::{AlignedPoint3, AlignedVec3, Chunk, ChunkPos, graphics, Position, SerializedChunk, Svo};
     use crate::chunk::ChunkStorage;
+    use crate::graphics::buffer;
+    use crate::graphics::buffer::{Buffer, MappedBuffer};
+    use crate::graphics::types::{AlignedBool, AlignedPoint2, AlignedVec4};
     use crate::world::allocator::Allocator;
-
-    #[repr(align(16))]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    struct AlignedVec3<T>(cgmath::Vector3<T>);
-
-    #[repr(align(16))]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    struct AlignedVec4<T>(cgmath::Vector4<T>);
-
-    #[repr(align(8))]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    struct AlignedPoint2<T>(cgmath::Point2<T>);
-
-    #[repr(align(16))]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    struct AlignedPoint3<T>(cgmath::Point3<T>);
-
-    #[repr(align(4))]
-    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-    struct AlignedBool(bool);
 
     #[test]
     fn test() {
@@ -59,27 +39,9 @@ mod tests {
         svo.set(Position(0, 0, 0), Some(chunk));
         svo.serialize();
 
-        let mut world_ssbo = 0;
-        let world_buffer;
-        let world_buffer_size = 1000 * 1024 * 1024; // 1000 MB
+        let world_buffer = MappedBuffer::<u32>::new(1000 * 1024 * 1024 / 4);
+        world_buffer.bind_as_storage_buffer(0);
         unsafe {
-            gl::CreateBuffers(1, &mut world_ssbo);
-
-            gl::NamedBufferStorage(
-                world_ssbo,
-                world_buffer_size,
-                ptr::null(),
-                gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
-            );
-            world_buffer = gl::MapNamedBufferRange(
-                world_ssbo,
-                0,
-                world_buffer_size,
-                gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
-            ) as *mut u32;
-
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
-
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             world_buffer.write(max_depth_exp.to_bits());
             svo.write_changes_to(world_buffer.offset(1));
@@ -107,8 +69,7 @@ mod tests {
             tex_side_normal: i32,
             tex_bottom_normal: i32,
         }
-
-        let materials = vec![
+        let material_buffer = Buffer::new(vec![
             Material { // air
                 specular_pow: 0.0,
                 specular_strength: 0.0,
@@ -129,20 +90,8 @@ mod tests {
                 tex_side_normal: -1,
                 tex_bottom_normal: -1,
             },
-        ];
-        let mut material_ssbo = 0;
-        unsafe {
-            gl::CreateBuffers(1, &mut material_ssbo);
-
-            gl::NamedBufferData(
-                material_ssbo,
-                (mem::size_of::<Material>() * materials.len()) as GLsizeiptr,
-                &materials[0] as *const Material as *const c_void,
-                gl::STATIC_READ,
-            );
-
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 2, material_ssbo);
-        }
+        ], buffer::STATIC_READ);
+        material_buffer.bind_as_storage_buffer(2);
 
         let shader = graphics::Resource::new(
             || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/svo.test.glsl")?.build()
@@ -155,23 +104,13 @@ mod tests {
             dir: AlignedVec3<f32>,
             cast_translucent: AlignedBool,
         }
-        let buffer_in = BufferIn {
+        let new_buffer_in = Buffer::new(BufferIn {
             max_dst: 32.0,
             pos: AlignedPoint3(Point3::new(0.0, 0.01, 0.0)),
             dir: AlignedVec3(Vector3::new(1.0, 0.00001, 0.00001).normalize()),
             cast_translucent: AlignedBool(false),
-        };
-        let mut buffer_in_ssbo = 0;
-        unsafe {
-            gl::CreateBuffers(1, &mut buffer_in_ssbo);
-            gl::NamedBufferData(
-                buffer_in_ssbo,
-                mem::size_of::<BufferIn>() as GLsizeiptr,
-                &buffer_in as *const BufferIn as *const GLvoid,
-                gl::STATIC_READ,
-            );
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 11, buffer_in_ssbo);
-        }
+        }, buffer::STATIC_READ);
+        new_buffer_in.bind_as_storage_buffer(11);
 
         #[repr(C)]
         #[derive(Copy, Clone, Debug)]
@@ -201,7 +140,7 @@ mod tests {
             stack_ptr: i32,
             stack: [StackFrame; 100],
         }
-        let mut buffer_out = BufferOut {
+        let mut buffer_out = Buffer::new(BufferOut {
             result: OctreeResult {
                 t: 0.0,
                 value: 0,
@@ -221,18 +160,8 @@ mod tests {
                 is_child: AlignedBool(false),
                 is_leaf: AlignedBool(false),
             }; 100],
-        };
-        let mut buffer_out_ssbo = 0;
-        unsafe {
-            gl::CreateBuffers(1, &mut buffer_out_ssbo);
-            gl::NamedBufferData(
-                buffer_out_ssbo,
-                mem::size_of::<BufferOut>() as GLsizeiptr,
-                &buffer_out as *const BufferOut as *const GLvoid,
-                gl::STATIC_DRAW | gl::STATIC_READ,
-            );
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 12, buffer_out_ssbo);
-        }
+        }, buffer::STATIC_DRAW | buffer::STATIC_READ);
+        buffer_out.bind_as_storage_buffer(12);
 
         unsafe {
             gl::ActiveTexture(gl::TEXTURE0);
@@ -244,12 +173,7 @@ mod tests {
             gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
             shader.unbind();
 
-            gl::GetNamedBufferSubData(
-                buffer_out_ssbo,
-                0,
-                mem::size_of::<BufferOut>() as GLsizeiptr,
-                &mut buffer_out as *mut BufferOut as *mut GLvoid,
-            );
+            buffer_out.pull_data();
         }
 
         println!("total stack frames: {}", buffer_out.stack_ptr + 1);
