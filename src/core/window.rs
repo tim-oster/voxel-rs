@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use glfw::Context;
@@ -6,12 +7,52 @@ use glfw::Context;
 use crate::core::imgui as imgui_wrapper;
 use crate::core::Input;
 
-pub struct Window {
-    context: glfw::Glfw,
-    imgui: imgui_wrapper::Wrapper,
+pub struct Config {
+    pub width: u32,
+    pub height: u32,
+    pub title: &'static str,
+    pub msaa_samples: u32,
+    pub headless: bool,
+}
 
-    window: RefCell<glfw::Window>,
-    events: std::sync::mpsc::Receiver<(f64, glfw::WindowEvent)>,
+pub struct GlContext {
+    context: glfw::Glfw,
+    window: glfw::Window,
+    events: mpsc::Receiver<(f64, glfw::WindowEvent)>,
+}
+
+impl GlContext {
+    pub fn new(cfg: Config) -> GlContext {
+        let mut context = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
+        context.window_hint(glfw::WindowHint::ContextVersion(4, 6));
+        context.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
+
+        if cfg.msaa_samples > 0 {
+            context.window_hint(glfw::WindowHint::Samples(Some(cfg.msaa_samples)));
+        }
+        if cfg.headless {
+            context.window_hint(glfw::WindowHint::Visible(false));
+        }
+
+        let (mut window, events) = context
+            .create_window(cfg.width, cfg.height, &cfg.title, glfw::WindowMode::Windowed)
+            .expect("failed to create window");
+
+        window.make_current();
+
+        gl::load_with(|symbol| window.get_proc_address(symbol) as *const _);
+
+        GlContext { context, window, events }
+    }
+
+    pub fn close(self) {
+        self.window.close();
+    }
+}
+
+pub struct Window {
+    context: RefCell<GlContext>,
+    imgui: imgui_wrapper::Wrapper,
 
     current_stats: FrameStats,
     is_cursor_grabbed: bool,
@@ -32,32 +73,17 @@ pub struct FrameStats {
 }
 
 impl Window {
-    pub fn new(width: u32, height: u32, title: &str, msaa_samples: u32) -> Self {
-        let mut context = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
-        context.window_hint(glfw::WindowHint::ContextVersion(4, 6));
-        context.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
+    pub fn new(cfg: Config) -> Self {
+        let mut context = GlContext::new(cfg);
 
-        if msaa_samples > 0 {
-            context.window_hint(glfw::WindowHint::Samples(Some(msaa_samples)));
-        }
+        context.window.set_all_polling(true);
+        context.window.set_cursor_mode(glfw::CursorMode::Disabled);
 
-        let (mut window, events) = context
-            .create_window(width, height, title, glfw::WindowMode::Windowed)
-            .expect("failed to create window");
-
-        window.make_current();
-        window.set_all_polling(true);
-        window.set_cursor_mode(glfw::CursorMode::Disabled);
-
-        gl::load_with(|symbol| window.get_proc_address(symbol) as *const _);
-
-        let imgui = imgui_wrapper::Wrapper::new(&mut window);
+        let imgui = imgui_wrapper::Wrapper::new(&mut context.window);
 
         Window {
-            context,
+            context: RefCell::new(context),
             imgui,
-            window: RefCell::new(window),
-            events,
             current_stats: FrameStats {
                 last_frame: Instant::now(),
                 last_measurement: Instant::now(),
@@ -98,7 +124,7 @@ impl Window {
         let mut was_resized = false;
         let size = self.get_size();
 
-        for (_, event) in glfw::flush_messages(&self.events) {
+        for (_, event) in glfw::flush_messages(&self.context.borrow().events) {
             match event {
                 glfw::WindowEvent::FramebufferSize(width, height) => {
                     unsafe { gl::Viewport(0, 0, width, height); }
@@ -143,34 +169,34 @@ impl Window {
             self.request_grab_cursor(grab);
         }
 
-        self.context.poll_events();
+        self.context.borrow_mut().context.poll_events();
 
         let delta_time = self.current_stats.last_frame.elapsed();
         self.current_stats.update_time_accumulation += delta_time;
 
-        self.window.borrow_mut().swap_buffers();
+        self.context.borrow_mut().window.swap_buffers();
     }
 
     pub fn should_close(&self) -> bool {
-        self.window.borrow().should_close()
+        self.context.borrow_mut().window.should_close()
     }
 
     pub fn request_close(&self) {
-        self.window.borrow_mut().set_should_close(true);
+        self.context.borrow_mut().window.set_should_close(true);
     }
 
     pub fn request_grab_cursor(&mut self, grab: bool) {
         self.is_cursor_grabbed = grab;
 
         if grab {
-            self.window.borrow_mut().set_cursor_mode(glfw::CursorMode::Disabled);
+            self.context.borrow_mut().window.set_cursor_mode(glfw::CursorMode::Disabled);
         } else {
-            self.window.borrow_mut().set_cursor_mode(glfw::CursorMode::Normal);
+            self.context.borrow_mut().window.set_cursor_mode(glfw::CursorMode::Normal);
         }
     }
 
     pub fn get_size(&self) -> (i32, i32) {
-        self.window.borrow().get_size()
+        self.context.borrow().window.get_size()
     }
 
     pub fn get_aspect(&self) -> f32 {

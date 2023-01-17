@@ -7,6 +7,7 @@ mod tests {
 
     use crate::{AlignedPoint3, AlignedVec3, Chunk, ChunkPos, graphics, Position, SerializedChunk, Svo};
     use crate::chunk::ChunkStorage;
+    use crate::core::{Config, GlContext};
     use crate::graphics::buffer;
     use crate::graphics::buffer::{Buffer, MappedBuffer};
     use crate::graphics::types::{AlignedBool, AlignedPoint2, AlignedVec4};
@@ -14,18 +15,15 @@ mod tests {
 
     #[test]
     fn test() {
-        let mut context = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
-        context.window_hint(glfw::WindowHint::ContextVersion(4, 6));
-        context.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
-        context.window_hint(glfw::WindowHint::Visible(false));
+        let context = GlContext::new(Config {
+            width: 640,
+            height: 490,
+            title: "",
+            msaa_samples: 0,
+            headless: true,
+        });
 
-        let (mut window, _) = context
-            .create_window(640, 490, "", glfw::WindowMode::Windowed)
-            .expect("failed to create window");
-        window.make_current();
-
-        gl::load_with(|symbol| window.get_proc_address(symbol) as *const _);
-
+        // TODO refactor world & svo setup logic once rest of codebase has been refactored
         let allocator = Allocator::new(
             Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
             Some(Box::new(|storage| storage.reset())),
@@ -34,7 +32,6 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), allocator);
         chunk.set_block(31, 0, 0, 1);
         let chunk = SerializedChunk::new(chunk.pos, chunk.get_storage().unwrap(), 5);
-
         let mut svo = Svo::<SerializedChunk>::new();
         svo.set(Position(0, 0, 0), Some(chunk));
         svo.serialize();
@@ -182,7 +179,7 @@ mod tests {
         }
         println!("\n{:?}", buffer_out.result);
 
-        window.close();
+        context.close();
 
         // assert last frame to be:
         //  f18: StackFrame { t_min: 31.0, ptr: 89, idx: 6, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(true), is_leaf: AlignedBool(true) }

@@ -98,7 +98,13 @@ struct PickerResult {
 
 fn main() {
     let msaa_samples = 0;
-    let mut window = core::Window::new(1024, 768, "voxel engine", msaa_samples);
+    let mut window = core::Window::new(core::Config {
+        width: 1024,
+        height: 768,
+        title: "voxel engine",
+        msaa_samples,
+        headless: false,
+    });
     window.request_grab_cursor(false);
 
     let mut world_shader = graphics::Resource::new(
