@@ -17,6 +17,7 @@ use gl::types::*;
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
 use crate::chunk::{BlockId, Chunk};
+use crate::graphics::resource::{Bind, Resource};
 use crate::graphics::types::{AlignedPoint3, AlignedVec3};
 use crate::systems::jobs::JobSystem;
 use crate::world::chunk;
@@ -107,19 +108,19 @@ fn main() {
     });
     window.request_grab_cursor(false);
 
-    let mut world_shader = graphics::Resource::new(
+    let mut world_shader = Resource::new(
         || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
     ).unwrap();
 
-    let mut picker_shader = graphics::Resource::new(
+    let mut picker_shader = Resource::new(
         || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/picker.glsl")?.build()
     ).unwrap();
 
-    let mut crosshair_shader = graphics::Resource::new(
+    let mut crosshair_shader = Resource::new(
         || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/crosshair.glsl")?.build()
     ).unwrap();
 
-    let tex_array = graphics::Resource::new(
+    let tex_array = Resource::new(
         || graphics::TextureArrayBuilder::new(4)
             .add_file("dirt", "assets/textures/dirt.png")?
             .add_file("dirt_normal", "assets/textures/dirt_n.png")?
@@ -1104,10 +1105,7 @@ fn main() {
                 world_shader.set_f32("u_aspect", frame.get_aspect());
                 // shader.set_i32("u_max_depth", svo.max_depth);
                 world_shader.set_f32vec3("u_highlight_pos", &(*picker_data).results[PICKER_IDX_BLOCK].pos.0.to_vec());
-
-                gl::ActiveTexture(gl::TEXTURE0);
-                tex_array.bind();
-                world_shader.set_i32("u_texture", 0);
+                world_shader.set_texture("u_texture", 0, &tex_array);
 
                 gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
                 world_shader.unbind();

@@ -3,48 +3,85 @@ mod tests {
     use std::sync::Arc;
 
     use cgmath::{InnerSpace, Point2, Point3, Vector3, Vector4};
-    use glfw::Context;
 
     use crate::{AlignedPoint3, AlignedVec3, Chunk, ChunkPos, graphics, Position, SerializedChunk, Svo};
     use crate::chunk::ChunkStorage;
     use crate::core::{Config, GlContext};
-    use crate::graphics::buffer;
+    use crate::graphics::{buffer, ShaderProgram, TextureArray, TextureArrayError};
     use crate::graphics::buffer::{Buffer, MappedBuffer};
+    use crate::graphics::resource::Resource;
+    use crate::graphics::shader::ShaderError;
+    use crate::graphics::svo::Material;
     use crate::graphics::types::{AlignedBool, AlignedPoint2, AlignedVec4};
     use crate::world::allocator::Allocator;
 
-    #[test]
-    fn test() {
-        let context = GlContext::new(Config {
-            width: 640,
-            height: 490,
-            title: "",
-            msaa_samples: 0,
-            headless: true,
-        });
+    #[repr(C)]
+    struct BufferIn {
+        max_dst: f32,
+        pos: AlignedPoint3<f32>,
+        dir: AlignedVec3<f32>,
+        cast_translucent: AlignedBool,
+    }
 
+    #[repr(C)]
+    struct BufferOut {
+        result: OctreeResult,
+        stack_ptr: i32,
+        stack: [StackFrame; 100],
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug)]
+    struct OctreeResult {
+        t: f32,
+        value: u32,
+        face_id: i32,
+        pos: AlignedPoint3<f32>,
+        uv: AlignedPoint2<f32>,
+        color: AlignedVec4<f32>,
+        inside_block: AlignedBool,
+    }
+
+    #[repr(C)]
+    #[derive(Copy, Clone, Debug, PartialEq)]
+    struct StackFrame {
+        t_min: f32,
+        ptr: i32,
+        idx: i32,
+        parent_octant_idx: i32,
+        scale: i32,
+        is_child: AlignedBool,
+        is_leaf: AlignedBool,
+    }
+
+    fn create_test_world<F>(builder: F) -> MappedBuffer<u32>
+        where F: FnOnce(&mut Chunk) {
         // TODO refactor world & svo setup logic once rest of codebase has been refactored
         let allocator = Allocator::new(
             Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
             Some(Box::new(|storage| storage.reset())),
         );
         let allocator = Arc::new(allocator);
+
         let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), allocator);
-        chunk.set_block(31, 0, 0, 1);
+        builder(&mut chunk);
+
         let chunk = SerializedChunk::new(chunk.pos, chunk.get_storage().unwrap(), 5);
         let mut svo = Svo::<SerializedChunk>::new();
         svo.set(Position(0, 0, 0), Some(chunk));
         svo.serialize();
 
         let world_buffer = MappedBuffer::<u32>::new(1000 * 1024 * 1024 / 4);
-        world_buffer.bind_as_storage_buffer(0);
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             world_buffer.write(max_depth_exp.to_bits());
             svo.write_changes_to(world_buffer.offset(1));
         }
+        world_buffer
+    }
 
-        let tex_array = graphics::Resource::new(
+    fn create_test_materials() -> (Buffer<Vec<Material>>, Resource<TextureArray, TextureArrayError>) {
+        let tex_array = Resource::new(
             || graphics::TextureArrayBuilder::new(1)
                 .add_rgba8("test", 2, 2, vec![
                     255, 0, 0, 255,
@@ -55,17 +92,6 @@ mod tests {
                 .build()
         ).unwrap();
 
-        #[repr(C)]
-        struct Material {
-            specular_pow: f32,
-            specular_strength: f32,
-            tex_top: i32,
-            tex_side: i32,
-            tex_bottom: i32,
-            tex_top_normal: i32,
-            tex_side_normal: i32,
-            tex_bottom_normal: i32,
-        }
         let material_buffer = Buffer::new(vec![
             Material { // air
                 specular_pow: 0.0,
@@ -88,55 +114,51 @@ mod tests {
                 tex_bottom_normal: -1,
             },
         ], buffer::STATIC_READ);
-        material_buffer.bind_as_storage_buffer(2);
 
-        let shader = graphics::Resource::new(
+        (material_buffer, tex_array)
+    }
+
+    struct TestSetup {
+        context: GlContext,
+        world_buffer: MappedBuffer<u32>,
+        shader: Resource<ShaderProgram, ShaderError>,
+        material_buffer: Buffer<Vec<Material>>,
+        tex_array: Resource<TextureArray, TextureArrayError>,
+    }
+
+    fn setup_test<F>(world_builder: F) -> TestSetup
+        where F: FnOnce(&mut Chunk) {
+        let context = GlContext::new(Config {
+            width: 640,
+            height: 490,
+            title: "",
+            msaa_samples: 0,
+            headless: true,
+        });
+
+        let world_buffer = create_test_world(world_builder);
+        world_buffer.bind_as_storage_buffer(0);
+
+        let shader = Resource::new(
             || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/svo.test.glsl")?.build()
         ).unwrap();
 
-        #[repr(C)]
-        struct BufferIn {
-            max_dst: f32,
-            pos: AlignedPoint3<f32>,
-            dir: AlignedVec3<f32>,
-            cast_translucent: AlignedBool,
-        }
+        let (material_buffer, tex_array) = create_test_materials();
+        material_buffer.bind_as_storage_buffer(2);
+        shader.set_texture("u_texture", 0, &tex_array);
+
+        TestSetup { context, world_buffer, shader, material_buffer, tex_array }
+    }
+
+    fn cast_ray(shader: &Resource<ShaderProgram, ShaderError>, pos: Point3<f32>, dir: Vector3<f32>, max_dst: f32, cast_translucent: bool) -> BufferOut {
         let new_buffer_in = Buffer::new(BufferIn {
-            max_dst: 32.0,
-            pos: AlignedPoint3(Point3::new(0.0, 0.01, 0.0)),
-            dir: AlignedVec3(Vector3::new(1.0, 0.00001, 0.00001).normalize()),
-            cast_translucent: AlignedBool(false),
+            max_dst,
+            pos: AlignedPoint3(pos),
+            dir: AlignedVec3(dir.normalize()),
+            cast_translucent: AlignedBool(cast_translucent),
         }, buffer::STATIC_READ);
         new_buffer_in.bind_as_storage_buffer(11);
 
-        #[repr(C)]
-        #[derive(Copy, Clone, Debug)]
-        struct OctreeResult {
-            t: f32,
-            value: u32,
-            face_id: i32,
-            pos: AlignedPoint3<f32>,
-            uv: AlignedPoint2<f32>,
-            color: AlignedVec4<f32>,
-            inside_block: AlignedBool,
-        }
-        #[repr(C)]
-        #[derive(Copy, Clone, Debug, PartialEq)]
-        struct StackFrame {
-            t_min: f32,
-            ptr: i32,
-            idx: i32,
-            parent_octant_idx: i32,
-            scale: i32,
-            is_child: AlignedBool,
-            is_leaf: AlignedBool,
-        }
-        #[repr(C)]
-        struct BufferOut {
-            result: OctreeResult,
-            stack_ptr: i32,
-            stack: [StackFrame; 100],
-        }
         let mut buffer_out = Buffer::new(BufferOut {
             result: OctreeResult {
                 t: 0.0,
@@ -161,17 +183,27 @@ mod tests {
         buffer_out.bind_as_storage_buffer(12);
 
         unsafe {
-            gl::ActiveTexture(gl::TEXTURE0);
-            tex_array.bind();
-            shader.set_i32("u_texture", 0);
-
             shader.bind();
             gl::DispatchCompute(1, 1, 1);
             gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
             shader.unbind();
-
-            buffer_out.pull_data();
         }
+
+        buffer_out.pull_data();
+        buffer_out.take()
+    }
+
+    #[test]
+    fn test() {
+        let setup = setup_test(|chunk| chunk.set_block(31, 0, 0, 1));
+
+        let buffer_out = cast_ray(
+            &setup.shader,
+            Point3::new(0.0, 0.01, 0.0),
+            Vector3::new(1.0, 0.00001, 0.00001),
+            32.0,
+            false,
+        );
 
         println!("total stack frames: {}", buffer_out.stack_ptr + 1);
         for i in 0..=buffer_out.stack_ptr {
@@ -179,7 +211,7 @@ mod tests {
         }
         println!("\n{:?}", buffer_out.result);
 
-        context.close();
+        setup.context.close();
 
         // assert last frame to be:
         //  f18: StackFrame { t_min: 31.0, ptr: 89, idx: 6, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(true), is_leaf: AlignedBool(true) }

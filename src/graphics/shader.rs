@@ -9,6 +9,7 @@ use cgmath::{Array, Matrix};
 use gl::types::*;
 use regex::Regex;
 
+use crate::graphics::resource::Bind;
 use crate::graphics::ShaderType::Compute;
 
 #[derive(Debug)]
@@ -256,6 +257,15 @@ impl ShaderProgram {
         unsafe {
             gl::Uniform1i(self.get_uniform_location(name), value);
         }
+    }
+
+    //noinspection RsSelfConvention
+    pub fn set_texture<T: Bind>(&self, name: &'static str, slot: u8, texture: &T) {
+        unsafe {
+            gl::ActiveTexture(gl::TEXTURE0 + slot as GLenum);
+            texture.bind();
+        }
+        self.set_i32(name, slot as i32);
     }
 
     fn get_uniform_location(&self, name: &'static str) -> GLint {

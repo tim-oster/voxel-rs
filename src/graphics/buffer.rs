@@ -17,7 +17,7 @@ pub const DYNAMIC_DRAW: BufferUsage = gl::DYNAMIC_DRAW;
 pub const DYNAMIC_COPY: BufferUsage = gl::DYNAMIC_COPY;
 
 pub struct Buffer<T> {
-    data: T,
+    data: Option<T>,
     handle: GLuint,
 }
 
@@ -25,13 +25,13 @@ impl<T> Deref for Buffer<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
-        &self.data
+        self.data.as_ref().unwrap()
     }
 }
 
 impl<T> DerefMut for Buffer<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.data
+        self.data.as_mut().unwrap()
     }
 }
 
@@ -55,7 +55,7 @@ impl<T> Buffer<T> {
                 usage,
             );
         }
-        Buffer { data, handle }
+        Buffer { data: Some(data), handle }
     }
 
     pub fn pull_data(&mut self) {
@@ -64,7 +64,7 @@ impl<T> Buffer<T> {
                 self.handle,
                 0,
                 mem::size_of::<T>() as GLsizeiptr,
-                &mut self.data as *mut T as *mut GLvoid,
+                self.data.as_mut().unwrap() as *mut T as *mut GLvoid,
             );
         }
     }
@@ -73,6 +73,10 @@ impl<T> Buffer<T> {
         unsafe {
             gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index, self.handle);
         }
+    }
+
+    pub fn take(mut self) -> T {
+        self.data.take().unwrap()
     }
 }
 

@@ -4,6 +4,7 @@ use std::path::Path;
 
 use gl::types::*;
 use image::{DynamicImage, GenericImageView, ImageError};
+use crate::graphics::resource::Bind;
 
 #[derive(Debug)]
 pub enum TextureArrayError {
@@ -172,18 +173,20 @@ impl TextureArray {
         unsafe { gl::GenerateMipmap(gl::TEXTURE_2D_ARRAY); }
     }
 
-    pub fn bind(&self) {
-        unsafe { gl::BindTexture(gl::TEXTURE_2D_ARRAY, self.gl_id) }
-    }
-
-    pub fn unbind(&self) {
-        unsafe { gl::BindTexture(gl::TEXTURE_2D_ARRAY, 0) }
-    }
-
     pub fn lookup(&self, name: &str) -> Option<u32> {
         if let Some(index) = self.textures.get(&String::from(name)) {
             return Some(*index);
         }
         None
+    }
+}
+
+impl Bind for TextureArray {
+    fn bind(&self) {
+        unsafe { gl::BindTexture(gl::TEXTURE_2D_ARRAY, self.gl_id) }
+    }
+
+    fn unbind(&self) {
+        unsafe { gl::BindTexture(gl::TEXTURE_2D_ARRAY, 0) }
     }
 }
