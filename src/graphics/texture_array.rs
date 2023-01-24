@@ -3,7 +3,9 @@ use std::ffi::c_void;
 use std::path::Path;
 
 use gl::types::*;
-use image::{DynamicImage, GenericImageView, ImageError};
+use image::{GenericImageView, ImageError};
+
+use crate::gl_assert_no_error;
 use crate::graphics::resource::Bind;
 
 #[derive(Debug)]
@@ -45,6 +47,9 @@ impl TextureArrayBuilder {
     }
 
     pub fn add_rgba8(&mut self, name: &str, w: u32, h: u32, bytes: Vec<u8>) -> Result<&mut TextureArrayBuilder, TextureArrayError> {
+        let mut bytes = bytes;
+        TextureArrayBuilder::flip_image_v(&mut bytes, w, h, 4);
+
         self.register_texture(name)?;
         self.content.push(ImageContent::RGB8(w, h, bytes));
         Ok(self)
@@ -88,20 +93,34 @@ impl TextureArrayBuilder {
 
         texture.bind();
         for (i, content) in self.content.iter().enumerate() {
+            let iw;
+            let ih;
+            let data;
+
             match content {
                 ImageContent::File(path) => {
                     if i > 0 {
                         // the first image was already loaded to fetch the dimensions of the array
                         image = Some(image::open(&path)?.flipv());
                     }
+
                     let image = image.as_ref().unwrap();
-                    let data = image.to_rgba8().into_raw();
-                    texture.sub_image_3d(i as u32, image.width(), image.height(), &data);
+                    iw = image.width();
+                    ih = image.height();
+                    data = image.as_rgba8().unwrap().as_raw();
                 }
                 ImageContent::RGB8(w, h, bytes) => {
-                    texture.sub_image_3d(i as u32, *w, *h, bytes);
+                    iw = *w;
+                    ih = *h;
+                    data = bytes;
                 }
             }
+
+            assert!(iw == width && ih == height, "image does not match base dimensions: got: {}x{}, base: {}x{}", iw, ih, width, height);
+            assert_eq!(data.len(), (iw * ih * 4) as usize);
+
+            texture.sub_image_3d(i as u32, iw, ih, &data);
+            gl_assert_no_error!();
         }
         if self.mip_levels > 1 {
             texture.generate_mipmaps();
@@ -109,6 +128,29 @@ impl TextureArrayBuilder {
         texture.unbind();
 
         Ok(texture)
+    }
+
+    fn flip_image_v(data: &mut Vec<u8>, w: u32, h: u32, bytes_per_pixel: u8) {
+        assert_eq!(data.len(), (w * h * bytes_per_pixel as u32) as usize);
+
+        for y in 0..(h / 2) {
+            if y == h / 2 && (h % 2) != 0 {
+                // if h is uneven, the most center column of pixels does not have to be flipped
+                continue;
+            }
+
+            let y1 = (y * w * bytes_per_pixel as u32) as usize;
+            let y2 = ((h - 1 - y) * w * bytes_per_pixel as u32) as usize;
+
+            for x in 0..w {
+                let y1 = y1 + x as usize * bytes_per_pixel as usize;
+                let y2 = y2 + x as usize * bytes_per_pixel as usize;
+
+                for i in 0..(bytes_per_pixel as usize) {
+                    data.swap(y1 + i, y2 + i);
+                }
+            }
+        }
     }
 }
 

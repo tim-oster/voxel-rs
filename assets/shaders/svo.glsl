@@ -75,6 +75,10 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
 
     res.t = -1;
     res.value = 0;
+    res.face_id = 0;
+    res.pos = vec3(0);
+    res.uv = vec2(0);
+    res.color = vec4(0);
     res.inside_block = false;
 
     // shift input coordinate system so that the octree spans from [1;2]
@@ -289,9 +293,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
         if ((idx & step_mask) != 0) {
             // POP
             uint differing_bits = 0;
-            if ((step_mask & 1) != 0) differing_bits |= floatBitsToInt(pos.x) ^ floatBitsToInt(pos.x + scale_exp2);
-            if ((step_mask & 2) != 0) differing_bits |= floatBitsToInt(pos.y) ^ floatBitsToInt(pos.y + scale_exp2);
-            if ((step_mask & 4) != 0) differing_bits |= floatBitsToInt(pos.z) ^ floatBitsToInt(pos.z + scale_exp2);
+            if ((step_mask & 1) != 0) differing_bits |= floatBitsToUint(pos.x) ^ floatBitsToUint(pos.x + scale_exp2);
+            if ((step_mask & 2) != 0) differing_bits |= floatBitsToUint(pos.y) ^ floatBitsToUint(pos.y + scale_exp2);
+            if ((step_mask & 4) != 0) differing_bits |= floatBitsToUint(pos.z) ^ floatBitsToUint(pos.z + scale_exp2);
             scale = (floatBitsToInt(differing_bits) >> 23) - 127;
             scale_exp2 = intBitsToFloat((scale - MAX_STACK_DEPTH + 127) << 23);
 

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::CString;
-use std::fmt::{format, Write};
+use std::fmt::Write;
 use std::io::Error;
 use std::ptr;
 
@@ -10,18 +10,17 @@ use gl::types::*;
 use regex::Regex;
 
 use crate::graphics::resource::Bind;
-use crate::graphics::ShaderType::Compute;
 
 #[derive(Debug)]
 pub enum ShaderError {
-    Io(std::io::Error),
+    Io(Error),
     Compile(GlError),
     Link(GlError),
     Wrapped(Box<ShaderError>, String),
     Other(String),
 }
 
-impl From<std::io::Error> for ShaderError {
+impl From<Error> for ShaderError {
     fn from(err: Error) -> Self {
         ShaderError::Io(err)
     }

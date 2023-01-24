@@ -7,7 +7,7 @@ pub mod resource;
 
 mod shader;
 mod texture_array;
-pub mod types;
+pub mod util;
 mod svo;
 mod svo_shader;
 

@@ -17,12 +17,12 @@ pub const DYNAMIC_DRAW: BufferUsage = gl::DYNAMIC_DRAW;
 pub const DYNAMIC_COPY: BufferUsage = gl::DYNAMIC_COPY;
 
 pub struct Buffer<T> {
-    data: Option<T>,
+    data: Option<Vec<T>>,
     handle: GLuint,
 }
 
 impl<T> Deref for Buffer<T> {
-    type Target = T;
+    type Target = Vec<T>;
 
     fn deref(&self) -> &Self::Target {
         self.data.as_ref().unwrap()
@@ -44,14 +44,14 @@ impl<T> Drop for Buffer<T> {
 }
 
 impl<T> Buffer<T> {
-    pub fn new(data: T, usage: BufferUsage) -> Buffer<T> {
+    pub fn new(data: Vec<T>, usage: BufferUsage) -> Buffer<T> {
         let mut handle = 0;
         unsafe {
             gl::CreateBuffers(1, &mut handle);
             gl::NamedBufferData(
                 handle,
-                mem::size_of::<T>() as GLsizeiptr,
-                &data as *const T as *const GLvoid,
+                (mem::size_of::<T>() * data.len()) as GLsizeiptr,
+                &data[0] as *const T as *const GLvoid,
                 usage,
             );
         }
@@ -63,8 +63,8 @@ impl<T> Buffer<T> {
             gl::GetNamedBufferSubData(
                 self.handle,
                 0,
-                mem::size_of::<T>() as GLsizeiptr,
-                self.data.as_mut().unwrap() as *mut T as *mut GLvoid,
+                (mem::size_of::<T>() * self.data.as_ref().unwrap().len()) as GLsizeiptr,
+                self.data.as_mut().unwrap().get_mut(0).unwrap() as *mut T as *mut GLvoid,
             );
         }
     }
@@ -75,7 +75,7 @@ impl<T> Buffer<T> {
         }
     }
 
-    pub fn take(mut self) -> T {
+    pub fn take(mut self) -> Vec<T> {
         self.data.take().unwrap()
     }
 }

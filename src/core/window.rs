@@ -1,8 +1,9 @@
 use std::cell::RefCell;
-use std::sync::mpsc;
+use std::sync::{mpsc, Mutex};
 use std::time::{Duration, Instant};
 
 use glfw::Context;
+use once_cell::sync::Lazy;
 
 use crate::core::imgui as imgui_wrapper;
 use crate::core::Input;
@@ -16,16 +17,24 @@ pub struct Config {
 }
 
 pub struct GlContext {
-    context: glfw::Glfw,
     window: glfw::Window,
     events: mpsc::Receiver<(f64, glfw::WindowEvent)>,
 }
 
+// GLFW_CONTEXT is represented as a singleton because it can only be created once per process.
+// To allow multiple tests to initialise windows, for graphical testing, in parallel this is
+// the only viable option of sharing this state without adding a custom test execution framework
+// on top of rust's inbuilt one.
+static GLFW_CONTEXT: Lazy<Mutex<glfw::Glfw>> = Lazy::new(|| {
+    let mut context = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
+    context.window_hint(glfw::WindowHint::ContextVersion(4, 6));
+    context.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
+    Mutex::new(context)
+});
+
 impl GlContext {
     pub fn new(cfg: Config) -> GlContext {
-        let mut context = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
-        context.window_hint(glfw::WindowHint::ContextVersion(4, 6));
-        context.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
+        let mut context = GLFW_CONTEXT.lock().unwrap();
 
         if cfg.msaa_samples > 0 {
             context.window_hint(glfw::WindowHint::Samples(Some(cfg.msaa_samples)));
@@ -42,11 +51,7 @@ impl GlContext {
 
         gl::load_with(|symbol| window.get_proc_address(symbol) as *const _);
 
-        GlContext { context, window, events }
-    }
-
-    pub fn close(self) {
-        self.window.close();
+        GlContext { window, events }
     }
 }
 
@@ -169,7 +174,7 @@ impl Window {
             self.request_grab_cursor(grab);
         }
 
-        self.context.borrow_mut().context.poll_events();
+        GLFW_CONTEXT.lock().unwrap().poll_events();
 
         let delta_time = self.current_stats.last_frame.elapsed();
         self.current_stats.update_time_accumulation += delta_time;
