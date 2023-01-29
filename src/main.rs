@@ -17,7 +17,8 @@ use gl::types::*;
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
 use crate::chunk::{BlockId, Chunk};
-use crate::graphics::resource::{Bind, Resource};
+use crate::graphics::resource::Resource;
+use crate::graphics::svo::Material;
 use crate::graphics::util::{AlignedPoint3, AlignedVec3};
 use crate::systems::jobs::JobSystem;
 use crate::world::chunk;
@@ -266,18 +267,6 @@ fn main() {
     // BLOCK PICKING END
 
     // BLOCKS START
-
-    #[repr(C)]
-    struct Material {
-        specular_pow: f32,
-        specular_strength: f32,
-        tex_top: i32,
-        tex_side: i32,
-        tex_bottom: i32,
-        tex_top_normal: i32,
-        tex_side_normal: i32,
-        tex_bottom_normal: i32,
-    }
 
     let materials = vec![
         Material { // air

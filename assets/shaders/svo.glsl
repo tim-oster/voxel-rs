@@ -201,7 +201,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
                     ((ro.x + rd.x * ty_corner) - pos.x) / scale_exp2,
                     ((ro.z + rd.z * ty_corner) - pos.z) / scale_exp2
                     );
-                    if (sign(rd.y) < 0) uv.x = 1 - uv.x;
+                    if (sign(rd.y) > 0) uv.y = 1 - uv.y;
                 } else {
                     face_id = 4 + int((sign(-rd.z) + 1) / 2);
                     uv = vec2(

@@ -8,8 +8,8 @@ pub mod resource;
 mod shader;
 mod texture_array;
 pub mod util;
-mod svo;
-mod svo_shader;
+pub mod svo;
+mod svo_shader_tests;
 
 pub use shader::ShaderProgramBuilder;
 pub use shader::ShaderProgram;

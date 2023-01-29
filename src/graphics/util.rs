@@ -47,7 +47,19 @@ impl_deref!(AlignedPoint3, cgmath::Point3);
 
 #[repr(align(4))]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
-pub struct AlignedBool(pub bool);
+pub struct AlignedBool(pub u32);
+
+impl Into<bool> for AlignedBool {
+    fn into(self) -> bool {
+        self.0 != 0
+    }
+}
+
+impl From<bool> for AlignedBool {
+    fn from(value: bool) -> Self {
+        AlignedBool(value as u32)
+    }
+}
 
 #[macro_export]
 macro_rules! assert_float_eq {

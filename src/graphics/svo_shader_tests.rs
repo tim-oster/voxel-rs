@@ -18,9 +18,9 @@ mod tests {
     #[repr(C)]
     struct BufferIn {
         max_dst: f32,
+        cast_translucent: AlignedBool,
         pos: AlignedPoint3<f32>,
         dir: AlignedVec3<f32>,
-        cast_translucent: AlignedBool,
     }
 
     #[repr(C)]
@@ -168,11 +168,11 @@ mod tests {
     }
 
     struct TestSetup {
-        context: GlContext,
-        world_buffer: MappedBuffer<u32>,
+        _context: GlContext,
+        _world_buffer: MappedBuffer<u32>,
+        _material_buffer: Buffer<Material>,
+        _tex_array: Resource<TextureArray, TextureArrayError>,
         shader: Resource<ShaderProgram, ShaderError>,
-        material_buffer: Buffer<Material>,
-        tex_array: Resource<TextureArray, TextureArrayError>,
     }
 
     fn setup_test<F>(world_builder: F) -> TestSetup
@@ -198,17 +198,23 @@ mod tests {
         shader.set_texture("u_texture", 0, &tex_array);
         shader.unbind();
 
-        TestSetup { context, world_buffer, shader, material_buffer, tex_array }
+        TestSetup {
+            _context: context,
+            _world_buffer: world_buffer,
+            _material_buffer: material_buffer,
+            _tex_array: tex_array,
+            shader,
+        }
     }
 
     fn cast_ray(shader: &Resource<ShaderProgram, ShaderError>, pos: Point3<f32>, dir: Vector3<f32>, max_dst: f32, cast_translucent: bool) -> BufferOut {
-        let new_buffer_in = Buffer::new(vec![BufferIn {
+        let buffer_in = Buffer::new(vec![BufferIn {
             max_dst,
+            cast_translucent: AlignedBool::from(cast_translucent),
             pos: AlignedPoint3(pos),
             dir: AlignedVec3(dir.normalize()),
-            cast_translucent: AlignedBool(cast_translucent),
         }], buffer::STATIC_READ);
-        new_buffer_in.bind_as_storage_buffer(11);
+        buffer_in.bind_as_storage_buffer(11);
 
         let mut buffer_out = Buffer::new(vec![BufferOut {
             result: OctreeResult {
@@ -218,7 +224,7 @@ mod tests {
                 pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)),
                 uv: AlignedPoint2(Point2::new(0.0, 0.0)),
                 color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
-                inside_block: AlignedBool(false),
+                inside_block: AlignedBool::from(false),
             },
             stack_ptr: 0,
             stack: [StackFrame {
@@ -227,8 +233,8 @@ mod tests {
                 idx: 0,
                 parent_octant_idx: 0,
                 scale: 0,
-                is_child: AlignedBool(false),
-                is_leaf: AlignedBool(false),
+                is_child: AlignedBool::from(false),
+                is_leaf: AlignedBool::from(false),
             }; 100],
         }], buffer::STATIC_DRAW | buffer::STATIC_READ);
         buffer_out.bind_as_storage_buffer(12);
@@ -268,25 +274,25 @@ mod tests {
 
         assert_eq!(buffer_out.stack_ptr, 18);
         assert_eq!(&buffer_out.stack[..19], &[
-            StackFrame { t_min: 0.0, ptr: 0, idx: 1, parent_octant_idx: 0, scale: 22, is_child: AlignedBool(true), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 0.0, ptr: 113, idx: 1, parent_octant_idx: 0, scale: 21, is_child: AlignedBool(true), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 0.0, ptr: 5, idx: 1, parent_octant_idx: 0, scale: 20, is_child: AlignedBool(true), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 0.0, ptr: 17, idx: 1, parent_octant_idx: 0, scale: 19, is_child: AlignedBool(true), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 0.0, ptr: 29, idx: 1, parent_octant_idx: 0, scale: 18, is_child: AlignedBool(true), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 0.0, ptr: 41, idx: 1, parent_octant_idx: 0, scale: 17, is_child: AlignedBool(false), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 1.0, ptr: 41, idx: 0, parent_octant_idx: 0, scale: 17, is_child: AlignedBool(false), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 2.0, ptr: 29, idx: 0, parent_octant_idx: 0, scale: 18, is_child: AlignedBool(false), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 4.0, ptr: 17, idx: 0, parent_octant_idx: 0, scale: 19, is_child: AlignedBool(false), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 8.0, ptr: 5, idx: 0, parent_octant_idx: 0, scale: 20, is_child: AlignedBool(false), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 16.0, ptr: 113, idx: 0, parent_octant_idx: 0, scale: 21, is_child: AlignedBool(true), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 16.0, ptr: 5, idx: 1, parent_octant_idx: 1, scale: 20, is_child: AlignedBool(false), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 24.0, ptr: 5, idx: 0, parent_octant_idx: 1, scale: 20, is_child: AlignedBool(true), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 24.0, ptr: 65, idx: 1, parent_octant_idx: 1, scale: 19, is_child: AlignedBool(false), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 28.0, ptr: 65, idx: 0, parent_octant_idx: 1, scale: 19, is_child: AlignedBool(true), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 28.0, ptr: 77, idx: 1, parent_octant_idx: 1, scale: 18, is_child: AlignedBool(false), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 30.0, ptr: 77, idx: 0, parent_octant_idx: 1, scale: 18, is_child: AlignedBool(true), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 30.0, ptr: 89, idx: 1, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(false), is_leaf: AlignedBool(false) },
-            StackFrame { t_min: 31.0, ptr: 89, idx: 0, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(true), is_leaf: AlignedBool(true) },
+            StackFrame { t_min: 0.0, ptr: 0, idx: 1, parent_octant_idx: 0, scale: 22, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 0.0, ptr: 113, idx: 1, parent_octant_idx: 0, scale: 21, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 0.0, ptr: 5, idx: 1, parent_octant_idx: 0, scale: 20, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 0.0, ptr: 17, idx: 1, parent_octant_idx: 0, scale: 19, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 0.0, ptr: 29, idx: 1, parent_octant_idx: 0, scale: 18, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 0.0, ptr: 41, idx: 1, parent_octant_idx: 0, scale: 17, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 1.0, ptr: 41, idx: 0, parent_octant_idx: 0, scale: 17, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 2.0, ptr: 29, idx: 0, parent_octant_idx: 0, scale: 18, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 4.0, ptr: 17, idx: 0, parent_octant_idx: 0, scale: 19, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 8.0, ptr: 5, idx: 0, parent_octant_idx: 0, scale: 20, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 16.0, ptr: 113, idx: 0, parent_octant_idx: 0, scale: 21, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 16.0, ptr: 5, idx: 1, parent_octant_idx: 1, scale: 20, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 24.0, ptr: 5, idx: 0, parent_octant_idx: 1, scale: 20, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 24.0, ptr: 65, idx: 1, parent_octant_idx: 1, scale: 19, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 28.0, ptr: 65, idx: 0, parent_octant_idx: 1, scale: 19, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 28.0, ptr: 77, idx: 1, parent_octant_idx: 1, scale: 18, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 30.0, ptr: 77, idx: 0, parent_octant_idx: 1, scale: 18, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 30.0, ptr: 89, idx: 1, parent_octant_idx: 1, scale: 17, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
+            StackFrame { t_min: 31.0, ptr: 89, idx: 0, parent_octant_idx: 1, scale: 17, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(true) },
         ]);
         assert_eq!(buffer_out.result, OctreeResult {
             t: 31.0,
@@ -295,7 +301,7 @@ mod tests {
             pos: AlignedPoint3(Point3::new(31.000008, 0.5, 0.5)),
             uv: AlignedPoint2(Point2::new(0.5, 0.5)),
             color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-            inside_block: AlignedBool(false),
+            inside_block: AlignedBool::from(false),
         });
     }
 
@@ -330,7 +336,7 @@ mod tests {
                     pos: AlignedPoint3(Point3::new(30.000008, 0.5, 0.5)),
                     uv: AlignedPoint2(Point2::new(0.5, 0.5)),
                     color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-                    inside_block: AlignedBool(false),
+                    inside_block: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -344,7 +350,7 @@ mod tests {
                     pos: AlignedPoint3(Point3::new(30.999992, 0.5, 0.5)),
                     uv: AlignedPoint2(Point2::new(0.5, 0.5)),
                     color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-                    inside_block: AlignedBool(false),
+                    inside_block: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -358,7 +364,7 @@ mod tests {
                     pos: AlignedPoint3(Point3::new(0.5, 30.000008, 0.5)),
                     uv: AlignedPoint2(Point2::new(0.5, 0.5)),
                     color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-                    inside_block: AlignedBool(false),
+                    inside_block: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -372,7 +378,7 @@ mod tests {
                     pos: AlignedPoint3(Point3::new(0.5, 30.999992, 0.5)),
                     uv: AlignedPoint2(Point2::new(0.5, 0.5)),
                     color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-                    inside_block: AlignedBool(false),
+                    inside_block: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -386,7 +392,7 @@ mod tests {
                     pos: AlignedPoint3(Point3::new(0.5, 0.5, 30.000008)),
                     uv: AlignedPoint2(Point2::new(0.5, 0.5)),
                     color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-                    inside_block: AlignedBool(false),
+                    inside_block: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -400,7 +406,7 @@ mod tests {
                     pos: AlignedPoint3(Point3::new(0.5, 0.5, 30.999992)),
                     uv: AlignedPoint2(Point2::new(0.5, 0.5)),
                     color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-                    inside_block: AlignedBool(false),
+                    inside_block: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -412,9 +418,9 @@ mod tests {
                     value: 1,
                     face_id: 2,
                     pos: AlignedPoint3(Point3::new(30.099998, 30.000008, 30.099998)),
-                    uv: AlignedPoint2(Point2::new(0.099998474, 0.099998474)),
+                    uv: AlignedPoint2(Point2::new(0.099998474, 0.9000015)),
                     color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-                    inside_block: AlignedBool(false),
+                    inside_block: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -426,9 +432,9 @@ mod tests {
                     value: 1,
                     face_id: 3,
                     pos: AlignedPoint3(Point3::new(30.900002, 30.999992, 30.900002)),
-                    uv: AlignedPoint2(Point2::new(0.099998474, 0.9000015)),
+                    uv: AlignedPoint2(Point2::new(0.9000015, 0.9000015)),
                     color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-                    inside_block: AlignedBool(false),
+                    inside_block: AlignedBool::from(false),
                 },
             },
         ];
@@ -453,7 +459,7 @@ mod tests {
         let setup = setup_test(|chunk| chunk.set_block(0, 0, 0, 2));
 
         struct TestCase {
-            pos: Point2<f32>,
+            pos: Point3<f32>,
             dir: Vector3<f32>,
             expected_uv: Point2<f32>,
             expected_color: Vector4<f32>,
@@ -461,114 +467,173 @@ mod tests {
         let cases = vec![
             // pos z
             TestCase {
-                pos: Point2::new(0.1, 0.1),
+                pos: Point3::new(0.1, 0.1, -0.1),
                 dir: Vector3::new(0.0, 0.0, 1.0),
                 expected_uv: Point2::new(0.1, 0.1),
                 expected_color: Vector4::new(0.0, 0.0, 0.0, 1.0),
             },
             TestCase {
-                pos: Point2::new(0.1, 0.5),
+                pos: Point3::new(0.1, 0.5, -0.1),
                 dir: Vector3::new(0.0, 0.0, 1.0),
                 expected_uv: Point2::new(0.1, 0.5),
                 expected_color: Vector4::new(0.0, 0.4, 0.0, 1.0),
             },
             TestCase {
-                pos: Point2::new(0.5, 0.1),
+                pos: Point3::new(0.5, 0.1, -0.1),
                 dir: Vector3::new(0.0, 0.0, 1.0),
                 expected_uv: Point2::new(0.5, 0.1),
                 expected_color: Vector4::new(0.4, 0.0, 0.0, 1.0),
             },
             TestCase {
-                pos: Point2::new(0.5, 0.5),
+                pos: Point3::new(0.5, 0.5, -0.1),
                 dir: Vector3::new(0.0, 0.0, 1.0),
                 expected_uv: Point2::new(0.5, 0.5),
                 expected_color: Vector4::new(0.4, 0.4, 0.0, 1.0),
             },
             // neg z
-            // TODO complete for other sides and fix this one
             TestCase {
-                pos: Point2::new(0.1, 0.1),
+                pos: Point3::new(0.1, 0.1, 1.1),
                 dir: Vector3::new(0.0, 0.0, -1.0),
+                expected_uv: Point2::new(0.9, 0.1),
+                expected_color: Vector4::new(0.6, 0.0, 0.0, 1.0),
+            },
+            TestCase {
+                pos: Point3::new(0.1, 0.5, 1.1),
+                dir: Vector3::new(0.0, 0.0, -1.0),
+                expected_uv: Point2::new(0.9, 0.5),
+                expected_color: Vector4::new(0.6, 0.4, 0.0, 1.0),
+            },
+            // pos x
+            TestCase {
+                pos: Point3::new(-0.1, 0.1, 0.1),
+                dir: Vector3::new(1.0, 0.0, 0.0),
+                expected_uv: Point2::new(0.9, 0.1),
+                expected_color: Vector4::new(0.6, 0.0, 0.0, 1.0),
+            },
+            TestCase {
+                pos: Point3::new(-0.1, 0.5, 0.1),
+                dir: Vector3::new(1.0, 0.0, 0.0),
+                expected_uv: Point2::new(0.9, 0.5),
+                expected_color: Vector4::new(0.6, 0.4, 0.0, 1.0),
+            },
+            // neg x
+            TestCase {
+                pos: Point3::new(1.1, 0.1, 0.1),
+                dir: Vector3::new(-1.0, 0.0, 0.0),
                 expected_uv: Point2::new(0.1, 0.1),
                 expected_color: Vector4::new(0.0, 0.0, 0.0, 1.0),
             },
             TestCase {
-                pos: Point2::new(0.1, 0.5),
-                dir: Vector3::new(0.0, 0.0, -1.0),
+                pos: Point3::new(1.1, 0.5, 0.1),
+                dir: Vector3::new(-1.0, 0.0, 0.0),
+                expected_uv: Point2::new(0.1, 0.5),
+                expected_color: Vector4::new(0.0, 0.4, 0.0, 1.0),
+            },
+            // pos y
+            TestCase {
+                pos: Point3::new(0.1, -0.1, 0.1),
+                dir: Vector3::new(0.0, 1.0, 0.0),
+                expected_uv: Point2::new(0.1, 0.9),
+                expected_color: Vector4::new(0.0, 0.6, 0.0, 1.0),
+            },
+            TestCase {
+                pos: Point3::new(0.1, -0.1, 0.5),
+                dir: Vector3::new(0.0, 1.0, 0.0),
+                expected_uv: Point2::new(0.1, 0.5),
+                expected_color: Vector4::new(0.0, 0.4, 0.0, 1.0),
+            },
+            // neg y
+            TestCase {
+                pos: Point3::new(0.1, 1.1, 0.1),
+                dir: Vector3::new(0.0, -1.0, 0.0),
                 expected_uv: Point2::new(0.1, 0.1),
                 expected_color: Vector4::new(0.0, 0.0, 0.0, 1.0),
             },
             TestCase {
-                pos: Point2::new(0.5, 0.5),
-                dir: Vector3::new(0.0, 0.0, -1.0),
-                expected_uv: Point2::new(0.5, 0.5),
-                expected_color: Vector4::new(0.4, 0.4, 0.0, 1.0),
+                pos: Point3::new(0.1, 1.1, 0.5),
+                dir: Vector3::new(0.0, -1.0, 0.0),
+                expected_uv: Point2::new(0.1, 0.5),
+                expected_color: Vector4::new(0.0, 0.4, 0.0, 1.0),
             },
         ];
-        for case in cases {
-            let buffer_out = cast_ray(
-                &setup.shader,
-                Point3::new(case.pos.x, case.pos.y, -0.1),
-                case.dir,
-                32.0,
-                false,
-            );
-            assert_eq!(buffer_out.result, OctreeResult {
-                t: assert_float_eq!(buffer_out.result.t, 0.1),
-                value: 2,
-                face_id: 4,
-                pos: AlignedPoint3(Point3::new(
-                    assert_float_eq!(buffer_out.result.pos.x, case.pos.x),
-                    assert_float_eq!(buffer_out.result.pos.y, case.pos.y),
-                    assert_float_eq!(buffer_out.result.pos.z, 0.0),
-                )),
-                uv: AlignedPoint2(Point2::new(
-                    assert_float_eq!(buffer_out.result.uv.x, case.expected_uv.x),
-                    assert_float_eq!(buffer_out.result.uv.y, case.expected_uv.y),
-                )),
-                color: AlignedVec4(case.expected_color),
-                inside_block: AlignedBool(false),
-            }, "({:?}) for ({}, {})", case.dir, case.pos.x, case.pos.y);
+        for (i, case) in cases.iter().enumerate() {
+            let buffer_out = cast_ray(&setup.shader, case.pos, case.dir, 32.0, false);
+            let case_name = format!("#{} (pos={:?}, dir={:?})", i, case.pos, case.dir);
+            assert_eq!(buffer_out.result.uv.0, Point2::new(
+                assert_float_eq!(buffer_out.result.uv.x, case.expected_uv.x),
+                assert_float_eq!(buffer_out.result.uv.y, case.expected_uv.y),
+            ), "{}", case_name);
+            assert_eq!(buffer_out.result.color.0, case.expected_color, "{}", case_name);
         }
     }
 
-    // TODO finish after testing uv mapping
-    // #[test]
-    // fn casting_against_translucent_leafs() {
-    //     // TODO
-    //     // - test that alpha=0 is properly traced in all cases (inside same octant but also across different octants)
-    //     //      - are adjacent blocks skipped?
-    //     //      - is cast_translucent flag properly taken into account?
-    //
-    //     // TODO comment
-    //     let setup = setup_test(|chunk| {
-    //         chunk.set_block(0, 0, 0, 3);
-    //         chunk.set_block(0, 0, 1, 3);
-    //         chunk.set_block(5, 0, 0, 3);
-    //         chunk.set_block(5, 0, 1, 4);
-    //     });
-    //
-    //     let start = Point3::new(0.25, 0.5, -0.1);
-    //     let end = Point3::new(0.75, 0.5, 1.0);
-    //
-    //     // do not cast translucent
-    //     let buffer_out = cast_ray(
-    //         &setup.shader,
-    //         Point3::new(0.25, 0.5, -0.1),
-    //         (end-start).normalize(),
-    //         32.0,
-    //         false,
-    //     );
-    //     assert_eq!(buffer_out.result, OctreeResult {
-    //         t: -1.0,
-    //         value: 0,
-    //         face_id: 0,
-    //         pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)),
-    //         uv: AlignedPoint2(Point2::new(0.0, 0.0)),
-    //         color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
-    //         inside_block: AlignedBool(true),
-    //     }, "do not cast translucent");
-    // }
+    /// Tests if translucency is properly accounted for during ray casting. Assert that identical,
+    /// adjacent voxels are skipped and make sure that cast_translucent flag is respected.
+    #[test]
+    fn casting_against_translucent_leafs() {
+        // This setup has to small rows of adjacent blocks. The first row consists of the same
+        // blocks while the second one has two different kinds. Both kinds have textures that
+        // are transparent on the left half and opaque on the right half. This allows testing
+        // the algorithm's behaviour when casting diagonally through them.
+        let setup = setup_test(|chunk| {
+            chunk.set_block(0, 0, 0, 3);
+            chunk.set_block(0, 0, 1, 3);
+            chunk.set_block(5, 0, 0, 3);
+            chunk.set_block(5, 0, 1, 4);
+        });
+
+        let dir = Point3::new(0.75, 0.5, 1.0) - Point3::new(0.25, 0.5, -0.1);
+
+        // do not cast translucent
+        let buffer_out = cast_ray(&setup.shader, Point3::new(0.25, 0.5, -0.1), dir, 32.0, false);
+        assert_eq!(buffer_out.result, OctreeResult {
+            t: assert_float_eq!(buffer_out.result.t, 0.1, 0.01),
+            value: 3,
+            face_id: 4,
+            pos: AlignedPoint3(Point3::new(
+                assert_float_eq!(buffer_out.result.pos.x, 0.295, 0.01),
+                assert_float_eq!(buffer_out.result.pos.y, 0.5),
+                assert_float_eq!(buffer_out.result.pos.z, 0.0),
+            )),
+            uv: AlignedPoint2(Point2::new(
+                assert_float_eq!(buffer_out.result.uv.x, 0.295, 0.01),
+                assert_float_eq!(buffer_out.result.uv.y, 0.5),
+            )),
+            color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
+            inside_block: AlignedBool::from(false),
+        }, "do not cast translucent");
+
+        // cast translucent with adjacent identical
+        let buffer_out = cast_ray(&setup.shader, Point3::new(0.25, 0.5, -0.1), dir, 32.0, true);
+        assert_eq!(buffer_out.result, OctreeResult {
+            t: -1.0,
+            value: 0,
+            face_id: 0,
+            pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)),
+            uv: AlignedPoint2(Point2::new(0.0, 0.0)),
+            color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
+            inside_block: AlignedBool::from(false),
+        }, "cast translucent with adjacent identical");
+
+        // cast translucent with adjacent different
+        let buffer_out = cast_ray(&setup.shader, Point3::new(5.25, 0.5, -0.1), dir, 32.0, true);
+        assert_eq!(buffer_out.result, OctreeResult {
+            t: assert_float_eq!(buffer_out.result.t, 1.2, 0.01),
+            value: 4,
+            face_id: 4,
+            pos: AlignedPoint3(Point3::new(
+                assert_float_eq!(buffer_out.result.pos.x, 5.75, 0.01),
+                assert_float_eq!(buffer_out.result.pos.y, 0.5),
+                assert_float_eq!(buffer_out.result.pos.z, 1.0),
+            )),
+            uv: AlignedPoint2(Point2::new(
+                assert_float_eq!(buffer_out.result.uv.x, 0.75, 0.01),
+                assert_float_eq!(buffer_out.result.uv.y, 0.5),
+            )),
+            color: AlignedVec4(Vector4::new(0.0, 1.0, 0.0, 1.0)),
+            inside_block: AlignedBool::from(false),
+        }, "cast translucent with adjacent different");
+    }
 
     /// Tests if the algorithm correctly detects starting from within a voxel and that it does not
     /// intersect with that voxel.
@@ -591,7 +656,7 @@ mod tests {
             pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)),
             uv: AlignedPoint2(Point2::new(0.0, 0.0)),
             color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
-            inside_block: AlignedBool(true),
+            inside_block: AlignedBool::from(true),
         }, "inside block");
 
         // outside block
@@ -613,7 +678,7 @@ mod tests {
             )),
             uv: AlignedPoint2(Point2::new(0.5, 0.5)),
             color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
-            inside_block: AlignedBool(false),
+            inside_block: AlignedBool::from(false),
         }, "outside block");
     }
 }

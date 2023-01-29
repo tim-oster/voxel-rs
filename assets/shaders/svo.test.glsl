@@ -5,9 +5,9 @@ layout (local_size_x = 1) in;
 
 layout (std430, binding = 11) readonly buffer buffer_in {
     float in_max_dst;
+    bool in_cast_translucent;
     vec3 in_pos;
     vec3 in_dir;
-    bool in_cast_translucent;
 };
 
 struct Result {
