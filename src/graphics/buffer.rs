@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::{mem, ptr};
 use std::ops::{Deref, DerefMut};
 

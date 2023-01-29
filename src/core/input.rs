@@ -16,6 +16,7 @@ pub struct Input {
     last_button_state: HashSet<glfw::MouseButton>,
 }
 
+#[allow(dead_code)]
 impl Input {
     pub fn new() -> Input {
         Input {

@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use cgmath::{Matrix4, Vector3, Point3, InnerSpace, SquareMatrix};
 
 pub struct Camera {
