@@ -18,6 +18,8 @@ use gl::types::*;
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
 use crate::chunk::{BlockId, Chunk};
+use crate::graphics::buffer::MappedBuffer;
+use crate::graphics::fence::Fence;
 use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::resource::Resource;
 use crate::graphics::svo::Material;
@@ -33,30 +35,6 @@ mod core;
 mod graphics;
 mod systems;
 mod world;
-
-fn wait_fence(fence: Option<GLsync>) {
-    if fence.is_none() {
-        return;
-    }
-    let lock = fence.unwrap();
-    unsafe {
-        loop {
-            let result = gl::ClientWaitSync(lock, gl::SYNC_FLUSH_COMMANDS_BIT, 1);
-            if result == gl::ALREADY_SIGNALED || result == gl::CONDITION_SATISFIED {
-                return;
-            }
-        }
-    }
-}
-
-fn create_replace_fence(last_fence: Option<GLsync>) -> Option<GLsync> {
-    unsafe {
-        if last_fence.is_some() {
-            gl::DeleteSync(last_fence.unwrap());
-        }
-        Some(gl::FenceSync(gl::SYNC_GPU_COMMANDS_COMPLETE, 0))
-    }
-}
 
 #[repr(C)]
 struct PickerTask {
@@ -168,28 +146,8 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
     let mut use_mouse_input = true;
 
-    let mut world_ssbo = 0;
-    let world_buffer;
-    let world_buffer_size = 1000 * 1024 * 1024; // 1000 MB
-
-    unsafe {
-        gl::CreateBuffers(1, &mut world_ssbo);
-
-        gl::NamedBufferStorage(
-            world_ssbo,
-            world_buffer_size,
-            ptr::null(),
-            gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
-        );
-        world_buffer = gl::MapNamedBufferRange(
-            world_ssbo,
-            0,
-            world_buffer_size,
-            gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
-        ) as *mut u32;
-
-        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
-    }
+    let world_buffer = MappedBuffer::<u32>::new( 1000 * 1024 * 1024); // 1000 MB
+    world_buffer.bind_as_storage_buffer(0);
 
     // WORLD LOADING START
 
@@ -228,9 +186,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     // WORLD LOADING END
 
     unsafe {
-        // gl::Enable(gl::DEPTH_TEST);
-        // gl::DepthFunc(gl::LESS);
-
         gl::Enable(gl::CULL_FACE);
         gl::CullFace(gl::BACK);
         gl::FrontFace(gl::CCW);
@@ -252,7 +207,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     }
     let picker_data;
 
-    let mut picker_fence = None;
+    let mut picker_fence = Fence::new();
     let mut picker_ssbo = 0;
     unsafe {
         gl::CreateBuffers(1, &mut picker_ssbo);
@@ -404,7 +359,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     let svo = Arc::new(Mutex::new(svo));
     let mut svo_size = 0f32;
     let mut svo_depth = 0;
-    let mut svo_fence = None;
+    let mut svo_fence = Fence::new();
 
     let mut did_cam_repos = false;
 
@@ -662,7 +617,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
                     // wait for last draw call to finish so that updates and draws do not race and produce temporary "holes" in the world
                     // TODO does this issue still occur if new memory blobs are written first and after that related pointers are updated?
-                    wait_fence(svo_fence);
+                    svo_fence.wait();
                     svo.write_changes_to(world_buffer.offset(1));
 
                     svo_size = svo.size_in_bytes() as f32 / 1024f32 / 1024f32;
@@ -694,8 +649,8 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
             // memory barrier + sync fence necessary to ensure that persistently mapped buffer changes
             // are loaded from the server
             gl::MemoryBarrier(gl::CLIENT_MAPPED_BUFFER_BARRIER_BIT);
-            picker_fence = create_replace_fence(picker_fence);
-            wait_fence(picker_fence);
+            picker_fence.place();
+            picker_fence.wait();
 
             picker_shader.unbind();
 
@@ -1144,7 +1099,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
                 gl::BindVertexArray(0);
 
-                svo_fence = create_replace_fence(svo_fence);
+                svo_fence.place();
 
                 gl_check_error!();
             }

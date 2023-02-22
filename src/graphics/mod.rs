@@ -3,6 +3,7 @@ pub mod buffer;
 mod camera;
 pub use camera::Camera;
 
+pub mod fence;
 pub mod framebuffer;
 pub mod resource;
 
