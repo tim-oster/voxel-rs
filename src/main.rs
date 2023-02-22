@@ -9,6 +9,7 @@ use std::ffi::c_void;
 use std::ops::Add;
 use std::os::raw::c_int;
 use std::sync::{Arc, mpsc, Mutex};
+use std::time::{Duration, Instant};
 
 use cgmath;
 use cgmath::{Point2, Point3, Vector2, Vector3};
@@ -17,6 +18,12 @@ use gl::types::*;
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
 use crate::chunk::{BlockId, Chunk};
+use crate::graphics::buffer::MappedBuffer;
+use crate::graphics::fence::Fence;
+use crate::graphics::framebuffer::Framebuffer;
+use crate::graphics::resource::Resource;
+use crate::graphics::svo::Material;
+use crate::graphics::util::{AlignedPoint3, AlignedVec3};
 use crate::systems::jobs::JobSystem;
 use crate::world::chunk;
 use crate::world::generator::{Noise, SplinePoint};
@@ -28,63 +35,6 @@ mod core;
 mod graphics;
 mod systems;
 mod world;
-
-unsafe fn gl_check_error_(file: &str, line: u32) -> u32 {
-    let mut error_code = gl::GetError();
-    while error_code != gl::NO_ERROR {
-        let error = match error_code {
-            gl::INVALID_ENUM => "INVALID_ENUM",
-            gl::INVALID_VALUE => "INVALID_VALUE",
-            gl::INVALID_OPERATION => "INVALID_OPERATION",
-            gl::STACK_OVERFLOW => "STACK_OVERFLOW",
-            gl::STACK_UNDERFLOW => "STACK_UNDERFLOW",
-            gl::OUT_OF_MEMORY => "OUT_OF_MEMORY",
-            gl::INVALID_FRAMEBUFFER_OPERATION => "INVALID_FRAMEBUFFER_OPERATION",
-            _ => "unknown GL error code",
-        };
-
-        println!("{} | {} ({})", error, file, line);
-
-        error_code = gl::GetError();
-    }
-    error_code
-}
-
-macro_rules! gl_check_error {
-    () => {
-        gl_check_error_(file!(), line!())
-    };
-}
-
-fn wait_fence(fence: Option<GLsync>) {
-    if fence.is_none() {
-        return;
-    }
-    let lock = fence.unwrap();
-    unsafe {
-        loop {
-            let result = gl::ClientWaitSync(lock, gl::SYNC_FLUSH_COMMANDS_BIT, 1);
-            if result == gl::ALREADY_SIGNALED || result == gl::CONDITION_SATISFIED {
-                return;
-            }
-        }
-    }
-}
-
-fn create_replace_fence(last_fence: Option<GLsync>) -> Option<GLsync> {
-    unsafe {
-        if last_fence.is_some() {
-            gl::DeleteSync(last_fence.unwrap());
-        }
-        Some(gl::FenceSync(gl::SYNC_GPU_COMMANDS_COMPLETE, 0))
-    }
-}
-
-#[repr(align(16))]
-struct AlignedVec3<T>(cgmath::Vector3<T>);
-
-#[repr(align(16))]
-struct AlignedPoint3<T>(cgmath::Point3<T>);
 
 #[repr(C)]
 struct PickerTask {
@@ -102,48 +52,83 @@ struct PickerResult {
 }
 
 fn main() {
+    run(false);
+}
+
+#[cfg(test)]
+mod test {
+    use image::GenericImageView;
+
+    // source: https://rosettacode.org/wiki/Percentage_difference_between_images#Rust
+    fn diff_rgba3(rgba1: image::Rgba<u8>, rgba2: image::Rgba<u8>) -> i32 {
+        (rgba1[0] as i32 - rgba2[0] as i32).abs()
+            + (rgba1[1] as i32 - rgba2[1] as i32).abs()
+            + (rgba1[2] as i32 - rgba2[2] as i32).abs()
+    }
+
+    #[test]
+    fn was_something_broken_during_refactoring() {
+        // keep window in scope to not drop opengl context prematurely
+        let (fb, _window) = super::run(true);
+
+        let pixels = fb.read_pixels();
+        let actual = image::RgbaImage::from_raw(fb.width() as u32, fb.height() as u32, pixels).unwrap();
+        let actual = image::DynamicImage::ImageRgba8(actual).flipv();
+        actual.save_with_format("./test_actual.png", image::ImageFormat::Png).unwrap();
+
+        let expected = image::open("./test_expected.png").unwrap();
+
+        let mut accum = 0;
+        let zipper = actual.pixels().zip(expected.pixels());
+        for (pixel1, pixel2) in zipper {
+            accum += diff_rgba3(pixel1.2, pixel2.2);
+        }
+        let diff_percent = accum as f64 / (255.0 * 3.0 * (actual.width() * actual.height()) as f64);
+        assert!(diff_percent < 0.001);
+    }
+}
+
+fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     let msaa_samples = 0;
-    let mut window = core::Window::new(1024, 768, "voxel engine", msaa_samples);
+    let mut window = core::Window::new(core::Config {
+        width: 1024,
+        height: 768,
+        title: "voxel engine",
+        msaa_samples,
+        headless: false,
+    });
     window.request_grab_cursor(false);
 
-    let mut world_shader = graphics::Resource::new(
-        || graphics::ShaderProgramBuilder::new()
-            .load_shader(graphics::ShaderType::Vertex, "assets/shaders/shader.vert")?
-            .load_shader(graphics::ShaderType::Fragment, "assets/shaders/shader.frag")?
-            .build()
+    let mut world_shader = Resource::new(
+        || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
     ).unwrap();
 
-    let mut picker_shader = graphics::Resource::new(
-        || graphics::ShaderProgramBuilder::new()
-            .load_shader(graphics::ShaderType::Compute, "assets/shaders/picker.glsl")?
-            .build()
+    let mut picker_shader = Resource::new(
+        || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/picker.glsl")?.build()
     ).unwrap();
 
-    let mut ui_shader = graphics::Resource::new(
-        || graphics::ShaderProgramBuilder::new()
-            .load_shader(graphics::ShaderType::Vertex, "assets/shaders/ui.vert")?
-            .load_shader(graphics::ShaderType::Fragment, "assets/shaders/ui.frag")?
-            .build()
+    let mut crosshair_shader = Resource::new(
+        || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/crosshair.glsl")?.build()
     ).unwrap();
 
-    let tex_array = graphics::Resource::new(
+    let tex_array = Resource::new(
         || graphics::TextureArrayBuilder::new(4)
-            .add_texture("dirt", "assets/textures/dirt.png")?
-            .add_texture("dirt_normal", "assets/textures/dirt_n.png")?
-            .add_texture("grass_side", "assets/textures/grass_side.png")?
-            .add_texture("grass_side_normal", "assets/textures/grass_side_n.png")?
-            .add_texture("grass_top", "assets/textures/grass_top.png")?
-            .add_texture("grass_top_normal", "assets/textures/grass_top_n.png")?
-            .add_texture("stone", "assets/textures/stone.png")?
-            .add_texture("stone_normal", "assets/textures/stone_n.png")?
-            .add_texture("stone_bricks", "assets/textures/stone_bricks.png")?
-            .add_texture("stone_bricks_normal", "assets/textures/stone_bricks_n.png")?
-            .add_texture("glass", "assets/textures/glass.png")?
+            .add_file("dirt", "assets/textures/dirt.png")?
+            .add_file("dirt_normal", "assets/textures/dirt_n.png")?
+            .add_file("grass_side", "assets/textures/grass_side.png")?
+            .add_file("grass_side_normal", "assets/textures/grass_side_n.png")?
+            .add_file("grass_top", "assets/textures/grass_top.png")?
+            .add_file("grass_top_normal", "assets/textures/grass_top_n.png")?
+            .add_file("stone", "assets/textures/stone.png")?
+            .add_file("stone_normal", "assets/textures/stone_n.png")?
+            .add_file("stone_bricks", "assets/textures/stone_bricks.png")?
+            .add_file("stone_bricks_normal", "assets/textures/stone_bricks_n.png")?
+            .add_file("glass", "assets/textures/glass.png")?
             .build()
     ).unwrap();
 
     let render_distance = 15;
-    let mut absolute_position = Point3::new(16.0, 80.0, 16.0);
+    let mut absolute_position = Point3::new(-24.0, 80.0, 174.0); // TODO: 16.0, 80.0, 16.0
 
     let (vao, indices_count) = build_vao();
 
@@ -152,7 +137,7 @@ fn main() {
 
     let mut cam_speed = 1f32;
     let cam_rot_speed = 0.005f32;
-    let mut cam_rot = cgmath::Vector3::new(0.0, -90f32.to_radians(), 0.0);
+    let mut cam_rot = Vector3::new(0.0, -90f32.to_radians(), 0.0);
     let mut fly_mode = true;
     let mut slow_mode = false;
 
@@ -161,28 +146,8 @@ fn main() {
 
     let mut use_mouse_input = true;
 
-    let mut world_ssbo = 0;
-    let world_buffer;
-    let world_buffer_size = 1000 * 1024 * 1024; // 1000 MB
-
-    unsafe {
-        gl::CreateBuffers(1, &mut world_ssbo);
-
-        gl::NamedBufferStorage(
-            world_ssbo,
-            world_buffer_size,
-            ptr::null(),
-            gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
-        );
-        world_buffer = gl::MapNamedBufferRange(
-            world_ssbo,
-            0,
-            world_buffer_size,
-            gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
-        ) as *mut u32;
-
-        gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, 0, world_ssbo);
-    }
+    let world_buffer = MappedBuffer::<u32>::new( 1000 * 1024 * 1024); // 1000 MB
+    world_buffer.bind_as_storage_buffer(0);
 
     // WORLD LOADING START
 
@@ -221,9 +186,6 @@ fn main() {
     // WORLD LOADING END
 
     unsafe {
-        // gl::Enable(gl::DEPTH_TEST);
-        // gl::DepthFunc(gl::LESS);
-
         gl::Enable(gl::CULL_FACE);
         gl::CullFace(gl::BACK);
         gl::FrontFace(gl::CCW);
@@ -245,7 +207,7 @@ fn main() {
     }
     let picker_data;
 
-    let mut picker_fence = None;
+    let mut picker_fence = Fence::new();
     let mut picker_ssbo = 0;
     unsafe {
         gl::CreateBuffers(1, &mut picker_ssbo);
@@ -299,18 +261,6 @@ fn main() {
     // BLOCK PICKING END
 
     // BLOCKS START
-
-    #[repr(C)]
-    struct Material {
-        specular_pow: f32,
-        specular_strength: f32,
-        tex_top: i32,
-        tex_side: i32,
-        tex_bottom: i32,
-        tex_top_normal: i32,
-        tex_side_normal: i32,
-        tex_bottom_normal: i32,
-    }
 
     let materials = vec![
         Material { // air
@@ -409,7 +359,7 @@ fn main() {
     let svo = Arc::new(Mutex::new(svo));
     let mut svo_size = 0f32;
     let mut svo_depth = 0;
-    let mut svo_fence = None;
+    let mut svo_fence = Fence::new();
 
     let mut did_cam_repos = false;
 
@@ -418,7 +368,11 @@ fn main() {
     let mut is_jumping = false;
     let mut was_grounded = false;
 
-    window.request_grab_cursor(true);
+    let (w, h) = window.get_size();
+    let fb = Framebuffer::new(w, h);
+    let start_time = Instant::now();
+
+    window.request_grab_cursor(!testing_mode);
     while !window.should_close() {
         let mut block_pos = None;
         {
@@ -662,7 +616,8 @@ fn main() {
                     world_buffer.write(max_depth_exp.to_bits());
 
                     // wait for last draw call to finish so that updates and draws do not race and produce temporary "holes" in the world
-                    wait_fence(svo_fence);
+                    // TODO does this issue still occur if new memory blobs are written first and after that related pointers are updated?
+                    svo_fence.wait();
                     svo.write_changes_to(world_buffer.offset(1));
 
                     svo_size = svo.size_in_bytes() as f32 / 1024f32 / 1024f32;
@@ -694,19 +649,25 @@ fn main() {
             // memory barrier + sync fence necessary to ensure that persistently mapped buffer changes
             // are loaded from the server
             gl::MemoryBarrier(gl::CLIENT_MAPPED_BUFFER_BARRIER_BIT);
-            picker_fence = create_replace_fence(picker_fence);
-            wait_fence(picker_fence);
+            picker_fence.place();
+            picker_fence.wait();
 
             picker_shader.unbind();
 
             aabb_result = aabb.parse_results(&(*picker_data).results[1..]);
         }
 
-        // debug UI
         window.update(|frame| {
             Window::new("Debug")
                 .size([300.0, 100.0], Condition::FirstUseEver)
                 .build(&frame.ui, || {
+                    if testing_mode {
+                        frame.ui.text_colored([1.0, 0.0, 0.0, 1.0], format!(
+                            "TESTING MODE: {}",
+                            jobs.len(),
+                        ));
+                    }
+
                     frame.ui.text(format!(
                         "fps: {}, frame: {:.2}ms, update: {:.2}ms",
                         frame.stats.frames_per_second,
@@ -910,188 +871,192 @@ fn main() {
                 speed
             };
 
-            let mut horizontal_speed = Vector3::new(0.0, 0.0, 0.0);
-            if frame.input.is_key_pressed(&glfw::Key::W) {
-                let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-                let speed = dir * cam_speed * frame.stats.delta_time;
-                horizontal_speed += speed;
-            }
-            if frame.input.is_key_pressed(&glfw::Key::S) {
-                let dir = -camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-                let speed = dir * cam_speed * frame.stats.delta_time;
-                horizontal_speed += speed;
-            }
-            if frame.input.is_key_pressed(&glfw::Key::A) {
-                let speed = -camera.right() * cam_speed * frame.stats.delta_time;
-                horizontal_speed += speed;
-            }
-            if frame.input.is_key_pressed(&glfw::Key::D) {
-                let speed = camera.right() * cam_speed * frame.stats.delta_time;
-                horizontal_speed += speed;
-            }
+            if !testing_mode {
+                let mut horizontal_speed = Vector3::new(0.0, 0.0, 0.0);
+                if frame.input.is_key_pressed(&glfw::Key::W) {
+                    let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
+                    let speed = dir * cam_speed * frame.stats.delta_time;
+                    horizontal_speed += speed;
+                }
+                if frame.input.is_key_pressed(&glfw::Key::S) {
+                    let dir = -camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
+                    let speed = dir * cam_speed * frame.stats.delta_time;
+                    horizontal_speed += speed;
+                }
+                if frame.input.is_key_pressed(&glfw::Key::A) {
+                    let speed = -camera.right() * cam_speed * frame.stats.delta_time;
+                    horizontal_speed += speed;
+                }
+                if frame.input.is_key_pressed(&glfw::Key::D) {
+                    let speed = camera.right() * cam_speed * frame.stats.delta_time;
+                    horizontal_speed += speed;
+                }
 
-            // clamp horizontal speed
-            if !fly_mode {
-                horizontal_speed = apply_horizontal_physics(horizontal_speed);
-            }
-            let speed = horizontal_speed.magnitude();
-            let max_speed = cam_speed * frame.stats.delta_time;
-            if speed > max_speed {
-                horizontal_speed = horizontal_speed.normalize() * max_speed;
-            }
+                // clamp horizontal speed
+                if !fly_mode {
+                    horizontal_speed = apply_horizontal_physics(horizontal_speed);
+                }
+                let speed = horizontal_speed.magnitude();
+                let max_speed = cam_speed * frame.stats.delta_time;
+                if speed > max_speed {
+                    horizontal_speed = horizontal_speed.normalize() * max_speed;
+                }
 
-            let mut vertical_speed = Vector3::new(0.0, 0.0, 0.0);
-            if !fly_mode {
-                const MAX_FALL_VELOCITY: f32 = 2.0;
-                const ACCELERATION: f32 = 0.008;
+                let mut vertical_speed = Vector3::new(0.0, 0.0, 0.0);
+                if !fly_mode {
+                    const MAX_FALL_VELOCITY: f32 = 2.0;
+                    const ACCELERATION: f32 = 0.008;
 
-                let is_grounded = aabb_result.y_neg < 0.02 && aabb_result.y_neg != -1.0;
-                if is_grounded {
+                    let is_grounded = aabb_result.y_neg < 0.02 && aabb_result.y_neg != -1.0;
+                    if is_grounded {
+                        vertical_velocity = 0.0;
+                        cam_speed = 0.15;
+                        is_jumping = false;
+                        was_grounded = true;
+                        pre_jump_velocity = Vector3::new(0.0, 0.0, 0.0);
+
+                        if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
+                            cam_speed = 0.22;
+                        }
+                        if frame.input.is_key_pressed(&glfw::Key::Space) {
+                            vertical_velocity = 0.2;
+                            is_jumping = true;
+                            pre_jump_velocity = horizontal_speed;
+                        }
+                    } else {
+                        cam_speed = 0.1;
+                        vertical_velocity -= ACCELERATION;
+                        vertical_velocity = vertical_velocity.clamp(-MAX_FALL_VELOCITY, MAX_FALL_VELOCITY);
+
+                        horizontal_speed += pre_jump_velocity;
+                    }
+
+                    vertical_speed.y = vertical_velocity * frame.stats.delta_time;
+                } else {
                     vertical_velocity = 0.0;
-                    cam_speed = 0.15;
                     is_jumping = false;
-                    was_grounded = true;
+                    was_grounded = false;
                     pre_jump_velocity = Vector3::new(0.0, 0.0, 0.0);
 
-                    if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
-                        cam_speed = 0.22;
-                    }
                     if frame.input.is_key_pressed(&glfw::Key::Space) {
-                        vertical_velocity = 0.2;
-                        is_jumping = true;
-                        pre_jump_velocity = horizontal_speed;
+                        let speed = cam_speed * frame.stats.delta_time;
+                        let speed = Vector3::new(0.0, speed, 0.0);
+                        vertical_speed += speed;
                     }
-                } else {
-                    cam_speed = 0.1;
-                    vertical_velocity -= ACCELERATION;
-                    vertical_velocity = vertical_velocity.clamp(-MAX_FALL_VELOCITY, MAX_FALL_VELOCITY);
-
-                    horizontal_speed += pre_jump_velocity;
-                }
-
-                vertical_speed.y = vertical_velocity * frame.stats.delta_time;
-            } else {
-                vertical_velocity = 0.0;
-                is_jumping = false;
-                was_grounded = false;
-                pre_jump_velocity = Vector3::new(0.0, 0.0, 0.0);
-
-                if frame.input.is_key_pressed(&glfw::Key::Space) {
-                    let speed = cam_speed * frame.stats.delta_time;
-                    let speed = Vector3::new(0.0, speed, 0.0);
-                    vertical_speed += speed;
-                }
-                if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
-                    let speed = cam_speed * frame.stats.delta_time;
-                    let speed = Vector3::new(0.0, -speed, 0.0);
-                    vertical_speed += speed;
-                }
-            }
-            if !fly_mode {
-                vertical_speed = apply_vertical_physics(vertical_speed);
-            }
-
-            absolute_position += horizontal_speed;
-            absolute_position += vertical_speed;
-
-            if frame.input.was_key_pressed(&glfw::Key::F) {
-                fly_mode = !fly_mode;
-                cam_speed = if fly_mode { 1.0 } else { 0.15 };
-            }
-            if frame.input.was_key_pressed(&glfw::Key::G) {
-                slow_mode = !slow_mode;
-                cam_speed *= if slow_mode { 0.1 } else { 1.0 / 0.1 };
-            }
-            if frame.input.was_key_pressed(&glfw::Key::E) {
-                light_dir = camera.forward;
-            }
-            if frame.input.was_key_pressed(&glfw::Key::R) {
-                for shader in vec![
-                    &mut world_shader,
-                    &mut picker_shader,
-                    &mut ui_shader,
-                ] {
-                    if let Err(err) = shader.reload() {
-                        println!("error loading shader: {:?}", err);
-                    } else {
-                        println!("reload shader");
+                    if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
+                        let speed = cam_speed * frame.stats.delta_time;
+                        let speed = Vector3::new(0.0, -speed, 0.0);
+                        vertical_speed += speed;
                     }
                 }
-            }
-            if frame.input.was_key_pressed(&glfw::Key::T) {
-                use_mouse_input = !use_mouse_input;
-                frame.request_grab_cursor(use_mouse_input);
-            }
-            for i in 1..materials.len() {
-                let key = glfw::Key::Num1 as c_int + (i - 1) as c_int;
-                let key = &key as *const c_int as *const glfw::Key;
-                let key = unsafe { &*key };
-
-                if frame.input.was_key_pressed(key) {
-                    selected_block = i as u32;
+                if !fly_mode {
+                    vertical_speed = apply_vertical_physics(vertical_speed);
                 }
-            }
 
-            if use_mouse_input {
-                let delta = frame.input.get_mouse_delta();
-                if delta.x.abs() > 0.01 {
-                    cam_rot.y += delta.x * cam_rot_speed * frame.stats.delta_time;
+                absolute_position += horizontal_speed;
+                absolute_position += vertical_speed;
+
+                if frame.input.was_key_pressed(&glfw::Key::F) {
+                    fly_mode = !fly_mode;
+                    cam_speed = if fly_mode { 1.0 } else { 0.15 };
                 }
-                if delta.y.abs() > 0.01 {
-                    cam_rot.x -= delta.y * cam_rot_speed * frame.stats.delta_time;
-
-                    let limit = PI / 2.0 - 0.01;
-                    cam_rot.x = cam_rot.x.clamp(-limit, limit);
+                if frame.input.was_key_pressed(&glfw::Key::G) {
+                    slow_mode = !slow_mode;
+                    cam_speed *= if slow_mode { 0.1 } else { 1.0 / 0.1 };
                 }
-                camera.set_forward_from_euler(cam_rot);
-            }
-
-            // removing blocks
-            if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
-                if let Some(block_pos) = block_pos {
-                    let x = block_pos.x as i32;
-                    let y = block_pos.y as i32;
-                    let z = block_pos.z as i32;
-                    world.set_block(x, y, z, chunk::NO_BLOCK);
+                if frame.input.was_key_pressed(&glfw::Key::E) {
+                    light_dir = camera.forward;
                 }
-            }
-
-            // block picking
-            if frame.input.is_button_pressed_once(&glfw::MouseButton::Button3) {
-                if let Some(block_pos) = block_pos {
-                    let x = block_pos.x as i32;
-                    let y = block_pos.y as i32;
-                    let z = block_pos.z as i32;
-                    selected_block = world.get_block(x, y, z);
+                if frame.input.was_key_pressed(&glfw::Key::R) {
+                    for shader in vec![
+                        &mut world_shader,
+                        &mut picker_shader,
+                        &mut crosshair_shader,
+                    ] {
+                        if let Err(err) = shader.reload() {
+                            println!("error loading shader: {:?}", err);
+                        } else {
+                            println!("reload shader");
+                        }
+                    }
                 }
-            }
+                if frame.input.was_key_pressed(&glfw::Key::T) {
+                    use_mouse_input = !use_mouse_input;
+                    frame.request_grab_cursor(use_mouse_input);
+                }
+                for i in 1..materials.len() {
+                    let key = glfw::Key::Num1 as c_int + (i - 1) as c_int;
+                    let key = &key as *const c_int as *const glfw::Key;
+                    let key = unsafe { &*key };
 
-            // adding blocks
-            if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
-                let block_normal = unsafe { (*picker_data).results[PICKER_IDX_BLOCK].normal.0 };
-                if let Some(block_pos) = block_pos {
-                    let block_pos = block_pos.add(block_normal);
-                    let x = block_pos.x as i32 as f32;
-                    let y = block_pos.y as i32 as f32;
-                    let z = block_pos.z as i32 as f32;
+                    if frame.input.was_key_pressed(key) {
+                        selected_block = i as u32;
+                    }
+                }
 
-                    let player_min_x = absolute_position.x + aabb.offset.x;
-                    let player_min_y = absolute_position.y + aabb.offset.y - 0.1; // add offset to prevent physics glitches
-                    let player_min_z = absolute_position.z + aabb.offset.z;
-                    let player_max_x = absolute_position.x + aabb.extents.x;
-                    let player_max_y = absolute_position.y + aabb.extents.y;
-                    let player_max_z = absolute_position.z + aabb.extents.z;
+                if use_mouse_input {
+                    let delta = frame.input.get_mouse_delta();
+                    if delta.x.abs() > 0.01 {
+                        cam_rot.y += delta.x * cam_rot_speed * frame.stats.delta_time;
+                    }
+                    if delta.y.abs() > 0.01 {
+                        cam_rot.x -= delta.y * cam_rot_speed * frame.stats.delta_time;
 
-                    if (player_max_x < x || player_min_x > x + 1.0) ||
-                        (player_max_y < y || player_min_y > y + 1.0) ||
-                        (player_max_z < z || player_min_z > z + 1.0) ||
-                        fly_mode {
-                        world.set_block(x as i32, y as i32, z as i32, selected_block);
+                        let limit = PI / 2.0 - 0.01;
+                        cam_rot.x = cam_rot.x.clamp(-limit, limit);
+                    }
+                    camera.set_forward_from_euler(cam_rot);
+                }
+
+                // removing blocks
+                if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
+                    if let Some(block_pos) = block_pos {
+                        let x = block_pos.x as i32;
+                        let y = block_pos.y as i32;
+                        let z = block_pos.z as i32;
+                        world.set_block(x, y, z, chunk::NO_BLOCK);
+                    }
+                }
+
+                // block picking
+                if frame.input.is_button_pressed_once(&glfw::MouseButton::Button3) {
+                    if let Some(block_pos) = block_pos {
+                        let x = block_pos.x as i32;
+                        let y = block_pos.y as i32;
+                        let z = block_pos.z as i32;
+                        selected_block = world.get_block(x, y, z);
+                    }
+                }
+
+                // adding blocks
+                if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
+                    let block_normal = unsafe { (*picker_data).results[PICKER_IDX_BLOCK].normal.0 };
+                    if let Some(block_pos) = block_pos {
+                        let block_pos = block_pos.add(block_normal);
+                        let x = block_pos.x as i32 as f32;
+                        let y = block_pos.y as i32 as f32;
+                        let z = block_pos.z as i32 as f32;
+
+                        let player_min_x = absolute_position.x + aabb.offset.x;
+                        let player_min_y = absolute_position.y + aabb.offset.y - 0.1; // add offset to prevent physics glitches
+                        let player_min_z = absolute_position.z + aabb.offset.z;
+                        let player_max_x = absolute_position.x + aabb.extents.x;
+                        let player_max_y = absolute_position.y + aabb.extents.y;
+                        let player_max_z = absolute_position.z + aabb.extents.z;
+
+                        if (player_max_x < x || player_min_x > x + 1.0) ||
+                            (player_max_y < y || player_min_y > y + 1.0) ||
+                            (player_max_z < z || player_min_z > z + 1.0) ||
+                            fly_mode {
+                            world.set_block(x as i32, y as i32, z as i32, selected_block);
+                        }
                     }
                 }
             }
 
             unsafe {
+                if testing_mode { fb.bind(); }
+
                 gl::ClearColor(0.0, 0.0, 0.0, 1.0);
                 gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
@@ -1110,43 +1075,54 @@ fn main() {
                 world_shader.set_f32("u_aspect", frame.get_aspect());
                 // shader.set_i32("u_max_depth", svo.max_depth);
                 world_shader.set_f32vec3("u_highlight_pos", &(*picker_data).results[PICKER_IDX_BLOCK].pos.0.to_vec());
-
-                gl::ActiveTexture(gl::TEXTURE0);
-                tex_array.bind();
-                world_shader.set_i32("u_texture", 0);
+                world_shader.set_texture("u_texture", 0, &tex_array);
 
                 gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
                 world_shader.unbind();
 
+                if testing_mode {
+                    fb.unbind();
+
+                    gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+                    gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+                }
+
                 // render ui
-                ui_shader.bind();
-                ui_shader.set_f32mat4("u_view", &ui_view);
-                ui_shader.set_f32vec2("u_dimensions", &Vector2::new(frame.size.0 as f32, frame.size.1 as f32));
+                crosshair_shader.bind();
+                crosshair_shader.set_f32mat4("u_view", &ui_view);
+                crosshair_shader.set_f32vec2("u_dimensions", &Vector2::new(frame.size.0 as f32, frame.size.1 as f32));
                 gl::Enable(gl::BLEND);
                 gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
                 gl::DrawElements(gl::TRIANGLES, indices_count, gl::UNSIGNED_INT, ptr::null());
                 gl::Disable(gl::BLEND);
-                ui_shader.unbind();
+                crosshair_shader.unbind();
 
                 gl::BindVertexArray(0);
 
-                svo_fence = create_replace_fence(svo_fence);
+                svo_fence.place();
 
                 gl_check_error!();
+            }
+
+            if testing_mode && start_time.elapsed() > Duration::from_secs(1) && jobs.len() == 0 {
+                frame.request_close();
+                return;
             }
         });
     }
 
     jobs.stop();
+
+    (fb, window)
 }
 
 fn build_vao() -> (GLuint, i32) {
     unsafe {
         #[repr(C)]
         struct Vertex {
-            position: cgmath::Point3<f32>,
-            uv: cgmath::Point2<f32>,
-            normal: cgmath::Vector3<f32>,
+            position: Point3<f32>,
+            uv: Point2<f32>,
+            normal: Vector3<f32>,
         }
 
         let vertices = vec![

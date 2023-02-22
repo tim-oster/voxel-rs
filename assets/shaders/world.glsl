@@ -1,3 +1,19 @@
+#shader_type vertex
+#version 460
+
+layout (location = 0) in vec3 position;
+layout (location = 1) in vec2 uv;
+
+out vec2 v_uv;
+
+void main() {
+    v_uv = uv;
+    gl_Position = vec4(position, 1.0);
+}
+
+// ------------------------------------------------------------
+
+#shader_type fragment
 #version 460
 
 #include "svo.glsl"
@@ -43,7 +59,7 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
     vec3 tangent = FACE_TANGENTS[res.face_id];
     vec3 bitangent = FACE_BITANGENTS[res.face_id];
     if (tex_normal_id != -1) {
-        vec3 tex = texture(u_texture, vec3(res.uv, float(tex_normal_id))).xzy; // blue = up -> y axis
+        vec3 tex = texture(u_texture, vec3(res.uv, float(tex_normal_id))).xzy;// blue = up -> y axis
         // NOTE: since automatic mipmap generation is used, the resulting textures do not look that nicely. To
         // prevent this from being noticable, texture lookups at the base mip level are forced for close distances.
         if (res.t < 20) tex = textureLod(u_texture, vec3(res.uv, float(tex_normal_id)), smoothstep(15, 20, res.t)).xzy;

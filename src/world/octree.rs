@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::cmp::max;
 
 use cgmath::num_traits::Pow;

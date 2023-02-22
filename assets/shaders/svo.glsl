@@ -63,6 +63,10 @@ layout (std430, binding = 2) readonly buffer material_registry {
 
 uniform sampler2DArray u_texture;// TODO rename or as param
 
+#if !defined(OCTREE_RAYTRACE_DEBUG_FN)
+#define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf) ;
+#endif
+
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
 void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, out octree_result res) {
@@ -71,6 +75,10 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
 
     res.t = -1;
     res.value = 0;
+    res.face_id = 0;
+    res.pos = vec3(0);
+    res.uv = vec2(0);
+    res.color = vec4(0);
     res.inside_block = false;
 
     // shift input coordinate system so that the octree spans from [1;2]
@@ -152,6 +160,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
         bool is_child = (descriptor & (bit << 8)) != 0;
         bool is_leaf = (descriptor & bit) != 0;
 
+        OCTREE_RAYTRACE_DEBUG_FN(t_min/octree_scale, ptr, idx, parent_octant_idx, scale, is_child, is_leaf);
+
         if (is_child && t_min <= t_max) {
             if (is_leaf && t_min == 0) {
                 res.inside_block = true;
@@ -191,7 +201,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
                     ((ro.x + rd.x * ty_corner) - pos.x) / scale_exp2,
                     ((ro.z + rd.z * ty_corner) - pos.z) / scale_exp2
                     );
-                    if (sign(rd.y) < 0) uv.x = 1 - uv.x;
+                    if (sign(rd.y) > 0) uv.y = 1 - uv.y;
                 } else {
                     face_id = 4 + int((sign(-rd.z) + 1) / 2);
                     uv = vec2(
@@ -283,9 +293,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
         if ((idx & step_mask) != 0) {
             // POP
             uint differing_bits = 0;
-            if ((step_mask & 1) != 0) differing_bits |= floatBitsToInt(pos.x) ^ floatBitsToInt(pos.x + scale_exp2);
-            if ((step_mask & 2) != 0) differing_bits |= floatBitsToInt(pos.y) ^ floatBitsToInt(pos.y + scale_exp2);
-            if ((step_mask & 4) != 0) differing_bits |= floatBitsToInt(pos.z) ^ floatBitsToInt(pos.z + scale_exp2);
+            if ((step_mask & 1) != 0) differing_bits |= floatBitsToUint(pos.x) ^ floatBitsToUint(pos.x + scale_exp2);
+            if ((step_mask & 2) != 0) differing_bits |= floatBitsToUint(pos.y) ^ floatBitsToUint(pos.y + scale_exp2);
+            if ((step_mask & 4) != 0) differing_bits |= floatBitsToUint(pos.z) ^ floatBitsToUint(pos.z + scale_exp2);
             scale = (floatBitsToInt(differing_bits) >> 23) - 127;
             scale_exp2 = intBitsToFloat((scale - MAX_STACK_DEPTH + 127) << 23);
 

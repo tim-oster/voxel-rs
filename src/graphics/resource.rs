@@ -5,6 +5,7 @@ pub struct Resource<T, E> {
     content: T,
 }
 
+// TODO any way to not have the error type as part of the resource type?
 impl<T, E> Resource<T, E> {
     pub fn new<F>(constructor: F) -> Result<Self, E>
         where F: Fn() -> Result<T, E> + 'static {
@@ -33,4 +34,19 @@ impl<T, E> Deref for Resource<T, E> {
     fn deref(&self) -> &Self::Target {
         &self.content
     }
+}
+
+impl<T, E> Bind for Resource<T, E> where T: Bind {
+    fn bind(&self) {
+        self.content.bind();
+    }
+
+    fn unbind(&self) {
+        self.content.unbind();
+    }
+}
+
+pub trait Bind {
+    fn bind(&self);
+    fn unbind(&self);
 }

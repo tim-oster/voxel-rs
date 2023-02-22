@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::collections::{HashMap, HashSet};
 use std::ptr;
 use std::sync::{Arc, RwLock};
@@ -206,7 +208,7 @@ impl<T: SvoSerializable> Svo<T> {
 }
 
 impl SvoSerializable for SerializedChunk {
-    fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult {
+    fn serialize(&self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
         if self.buffer.is_some() {
             // TODO is this fast enough?
             // TODO how to free memory after swap
