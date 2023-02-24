@@ -84,7 +84,7 @@ impl JobSystem {
                 if job.is_none() {
                     if last_exec.elapsed().as_millis() > 100 {
                         sleeping_threads.push(std::thread::current().id());
-                        std::thread::park();
+                        thread::park();
                         last_exec = Instant::now();
                     }
                     continue;

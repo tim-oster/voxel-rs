@@ -5,7 +5,7 @@ use crate::chunk::ChunkStorage;
 use crate::world::allocator::Allocator;
 use crate::world::chunk;
 
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
 pub struct ChunkPos {
     pub x: i32,
     pub y: i32,

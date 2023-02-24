@@ -12,6 +12,7 @@ pub type ChunkStorage = Octree<BlockId>;
 
 pub struct Chunk {
     pub pos: ChunkPos,
+    pub lod: u8,
 
     allocator: Arc<Allocator<ChunkStorage>>,
     // TODO any other way?
@@ -20,7 +21,7 @@ pub struct Chunk {
 
 impl Chunk {
     pub fn new(pos: ChunkPos, allocator: Arc<Allocator<ChunkStorage>>) -> Chunk {
-        Chunk { pos, allocator, storage: None }
+        Chunk { pos, lod: 0, allocator, storage: None }
     }
 
     pub fn get_block(&self, x: u32, y: u32, z: u32) -> BlockId {
