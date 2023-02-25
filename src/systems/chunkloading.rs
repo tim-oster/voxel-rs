@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use cgmath::Point3;
 
-use crate::world::world::ChunkPos;
+use crate::world::chunk::ChunkPos;
 
 pub struct ChunkLoader {
     radius: u32,
@@ -33,6 +33,8 @@ impl ChunkLoader {
         }
     }
 
+    /// Returns a list of chunk events that occurred due to changes to the target position.
+    /// Might be empty if the position did not change.
     pub fn update(&mut self, pos: Point3<f32>) -> Vec<ChunkEvent> {
         let mut events = Vec::new();
 
@@ -96,6 +98,10 @@ impl ChunkLoader {
             _ => 2,
         }
     }
+
+    pub fn is_loaded(&self, pos: &ChunkPos) -> bool {
+        self.loaded_chunks.contains_key(pos)
+    }
 }
 
 #[cfg(test)]
@@ -105,7 +111,7 @@ mod tests {
     use cgmath::Point3;
 
     use crate::systems::chunkloading::{ChunkEvent, ChunkLoader};
-    use crate::world::world::ChunkPos;
+    use crate::world::chunk::ChunkPos;
 
     /// Asserts that chunks inside the specified radius are properly loaded with an accurate LOD
     /// and also unloaded.

@@ -4,44 +4,14 @@ use std::sync::Arc;
 use crate::chunk::ChunkStorage;
 use crate::world::allocator::Allocator;
 use crate::world::chunk;
-
-#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
-pub struct ChunkPos {
-    pub x: i32,
-    pub y: i32,
-    pub z: i32,
-}
-
-impl ChunkPos {
-    pub fn new(x: i32, y: i32, z: i32) -> ChunkPos {
-        ChunkPos { x, y, z }
-    }
-
-    pub fn from_block_pos(x: i32, y: i32, z: i32) -> ChunkPos {
-        ChunkPos { x: x >> 5, y: y >> 5, z: z >> 5 }
-    }
-
-    pub fn dst_sq(&self, other: &ChunkPos) -> f32 {
-        let dx = (other.x - self.x) as f32;
-        let dy = (other.y - self.y) as f32;
-        let dz = (other.z - self.z) as f32;
-        dx * dx + dy * dy + dz * dz
-    }
-
-    pub fn dst_2d_sq(&self, other: &ChunkPos) -> f32 {
-        let dx = (other.x - self.x) as f32;
-        let dz = (other.z - self.z) as f32;
-        dx * dx + dz * dz
-    }
-}
+use crate::world::chunk::{Chunk, ChunkPos};
 
 pub struct World {
     // TODO do not make public later
-    pub chunks: HashMap<ChunkPos, chunk::Chunk>,
+    pub chunks: HashMap<ChunkPos, Chunk>,
     changed_chunks_set: HashSet<ChunkPos>,
     changed_chunks: VecDeque<ChunkPos>,
-    // TODO do not make public later
-    pub allocator: Arc<Allocator<ChunkStorage>>,
+    allocator: Arc<Allocator<ChunkStorage>>,
 }
 
 impl World {
@@ -58,7 +28,7 @@ impl World {
         }
     }
 
-    pub fn set_chunk(&mut self, chunk: chunk::Chunk) {
+    pub fn set_chunk(&mut self, chunk: Chunk) {
         let pos = chunk.pos;
         self.chunks.insert(pos, chunk);
 
@@ -89,7 +59,7 @@ impl World {
         let pos = ChunkPos::from_block_pos(x, y, z);
         let mut chunk = self.chunks.get_mut(&pos);
         if chunk.is_none() {
-            self.chunks.insert(pos, chunk::Chunk::new(pos, self.allocator.clone()));
+            self.chunks.insert(pos, Chunk::new(pos, self.allocator.clone()));
             chunk = self.chunks.get_mut(&pos);
         }
         chunk.unwrap().set_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32, block);
@@ -105,13 +75,17 @@ impl World {
         self.changed_chunks_set.clear();
         changed
     }
+
+    pub fn get_allocator(&self) -> &Allocator<ChunkStorage> {
+        &self.allocator
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::{HashSet, VecDeque};
 
-    use crate::world::world::ChunkPos;
+    use crate::systems::world::{ChunkPos};
 
     #[test]
     fn chunk_pos_from_block_pos() {
@@ -139,7 +113,7 @@ mod tests {
 
         world.set_block(1, 33, 65, 99);
 
-        let chunk = world.chunks.get(&super::ChunkPos { x: 0, y: 1, z: 2 }).unwrap();
+        let chunk = world.chunks.get(&ChunkPos { x: 0, y: 1, z: 2 }).unwrap();
         assert_eq!(chunk.get_block(1, 1, 1), 99);
 
         let block = world.get_block(1, 33, 65);

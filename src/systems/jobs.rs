@@ -17,9 +17,11 @@ pub struct JobSystem {
 }
 
 struct Job {
+    cancelled: Arc<AtomicBool>,
     exec: Box<dyn FnOnce() + Send>,
 }
 
+#[allow(dead_code)]
 impl JobSystem {
     pub fn new(worker_count: usize) -> JobSystem {
         let mut system = JobSystem {
@@ -47,11 +49,14 @@ impl JobSystem {
         }
     }
 
-    pub fn push(&self, prioritize: bool, exec: Box<dyn FnOnce() + Send>) {
+    pub fn push(&self, prioritize: bool, exec: Box<dyn FnOnce() + Send>) -> JobHandle {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let job = Job { cancelled: Arc::clone(&cancelled), exec };
+
         if prioritize {
-            self.prio_queue.push(Job { exec });
+            self.prio_queue.push(job);
         } else {
-            self.queue.push(Job { exec });
+            self.queue.push(job);
         }
 
         if let Some(thread) = self.sleeping_threads.pop() {
@@ -59,6 +64,8 @@ impl JobSystem {
                 handle.thread().unpark();
             }
         }
+
+        JobHandle { cancelled }
     }
 
     pub fn clear(&self) {
@@ -83,16 +90,47 @@ impl JobSystem {
                 let job = prio_queue.pop().or_else(|| queue.pop());
                 if job.is_none() {
                     if last_exec.elapsed().as_millis() > 100 {
-                        sleeping_threads.push(std::thread::current().id());
+                        sleeping_threads.push(thread::current().id());
                         thread::park();
                         last_exec = Instant::now();
                     }
                     continue;
                 }
                 last_exec = Instant::now();
-                (job.unwrap().exec)();
+
+                let job = job.unwrap();
+                if !job.cancelled.load(Ordering::Relaxed) {
+                    (job.exec)();
+                }
             }
         })
     }
+
+    pub fn new_handle(&self) -> JobSystemHandle {
+        JobSystemHandle {
+            job_system: self,
+        }
+    }
 }
 
+pub struct JobSystemHandle<'js> {
+    job_system: &'js JobSystem,
+}
+
+impl<'js> JobSystemHandle<'js> {
+    pub fn push(&self, prioritize: bool, exec: Box<dyn FnOnce() + Send>) -> JobHandle {
+        self.job_system.push(prioritize, exec)
+    }
+}
+
+pub struct JobHandle {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl JobHandle {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
+// TODO write tests

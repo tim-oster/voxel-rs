@@ -2,7 +2,7 @@ extern crate gl;
 #[macro_use]
 extern crate memoffset;
 
-use std::{cmp, mem, ptr};
+use std::{mem, ptr};
 use std::collections::{HashMap, HashSet};
 use std::f32::consts::PI;
 use std::ffi::c_void;
@@ -17,21 +17,21 @@ use cgmath::{ElementWise, EuclideanSpace, InnerSpace};
 use gl::types::*;
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
-use crate::chunk::{BlockId, Chunk};
+use crate::chunk::BlockId;
 use crate::graphics::buffer::MappedBuffer;
 use crate::graphics::fence::Fence;
 use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::resource::Resource;
 use crate::graphics::svo::Material;
 use crate::graphics::util::{AlignedPoint3, AlignedVec3};
-use crate::systems::chunkloading;
+use crate::systems::{chunkloading, storage, worldgen};
 use crate::systems::chunkloading::ChunkEvent;
 use crate::systems::jobs::JobSystem;
 use crate::world::chunk;
+use crate::world::chunk::ChunkPos;
 use crate::world::generator::{Noise, SplinePoint};
 use crate::world::octree::{OctantId, Octree, Position};
 use crate::world::svo::{SerializedChunk, Svo};
-use crate::world::world::ChunkPos;
 
 mod core;
 mod graphics;
@@ -87,6 +87,7 @@ mod test {
         }
         let diff_percent = accum as f64 / (255.0 * 3.0 * (actual.width() * actual.height()) as f64);
         assert!(diff_percent < 0.001);
+        println!("difference: {:.2}", diff_percent);
     }
 }
 
@@ -100,6 +101,42 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
         headless: false,
     });
     window.request_grab_cursor(false);
+
+    // NEW CONFIG START
+
+    let jobs = JobSystem::new(num_cpus::get() - 1);
+
+    let render_distance = 15;
+    let mut chunk_loader = chunkloading::ChunkLoader::new(render_distance as u32, 0, 8);
+    let mut storage = storage::Storage::new();
+
+    let mut world_cfg = world::generator::Config {
+        sea_level: 70,
+        continentalness: Noise {
+            frequency: 0.001,
+            octaves: 3,
+            spline_points: vec![
+                SplinePoint { x: -1.0, y: 20.0 },
+                SplinePoint { x: 0.4, y: 50.0 },
+                SplinePoint { x: 0.6, y: 70.0 },
+                SplinePoint { x: 0.8, y: 120.0 },
+                SplinePoint { x: 0.9, y: 190.0 },
+                SplinePoint { x: 1.0, y: 200.0 },
+            ],
+        },
+        erosion: Noise {
+            frequency: 0.01,
+            octaves: 4,
+            spline_points: vec![
+                SplinePoint { x: -1.0, y: -10.0 },
+                SplinePoint { x: 1.0, y: 4.0 },
+            ],
+        },
+    };
+    let mut world_generator = worldgen::Generator::new(jobs.new_handle(), 1, world_cfg.clone());
+    let mut world = systems::world::World::new();
+
+    // NEW CONFIG END
 
     let mut world_shader = Resource::new(
         || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
@@ -129,7 +166,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
             .build()
     ).unwrap();
 
-    let render_distance = 15;
     let mut absolute_position = Point3::new(-24.0, 80.0, 174.0); // TODO: 16.0, 80.0, 16.0
 
     let (vao, indices_count) = build_vao();
@@ -153,36 +189,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
     // WORLD LOADING START
 
-    let mut world_cfg = world::generator::Config {
-        sea_level: 70,
-        continentalness: Noise {
-            frequency: 0.001,
-            octaves: 3,
-            spline_points: vec![
-                SplinePoint { x: -1.0, y: 20.0 },
-                SplinePoint { x: 0.4, y: 50.0 },
-                SplinePoint { x: 0.6, y: 70.0 },
-                SplinePoint { x: 0.8, y: 120.0 },
-                SplinePoint { x: 0.9, y: 190.0 },
-                SplinePoint { x: 1.0, y: 200.0 },
-            ],
-        },
-        erosion: Noise {
-            frequency: 0.01,
-            octaves: 4,
-            spline_points: vec![
-                SplinePoint { x: -1.0, y: -10.0 },
-                SplinePoint { x: 1.0, y: 4.0 },
-            ],
-        },
-        peaks_and_valleys: Noise {
-            frequency: 0.02,
-            octaves: 2,
-            spline_points: vec![],
-        },
-    };
-
-    let mut world = world::world::World::new();
     let svo = Svo::<SerializedChunk>::new();
 
     // WORLD LOADING END
@@ -345,9 +351,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
     // WORKER SYSTEM START
 
-    let jobs = JobSystem::new(num_cpus::get() - 1);
-    let mut currently_generating_chunks = HashSet::new();
-    let (worker_generated_chunks_tx, worker_generated_chunks_rx) = mpsc::channel::<Chunk>();
     let (worker_serialized_chunks_tx, worker_serialized_chunks_rx) = mpsc::channel::<SerializedChunk>();
 
     let (w, h) = window.get_size();
@@ -373,8 +376,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     let fb = Framebuffer::new(w, h);
     let start_time = Instant::now();
 
-    let mut chunk_loader = chunkloading::ChunkLoader::new(render_distance as u32, 0, 8);
-
     window.request_grab_cursor(!testing_mode);
     while !window.should_close() {
         let mut block_pos = None;
@@ -391,10 +392,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
             }
         }
 
-        struct PosLod {
-            pos: ChunkPos,
-            lod: u8,
-        }
         let mut force_rerender = Vec::new();
         {
             let pos = absolute_position;
@@ -408,20 +405,50 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
             camera.position.x = render_distance as f32 * 32.0 + delta.x;
             camera.position.z = render_distance as f32 * 32.0 + delta.z;
 
-            for _ in 0..40 {
-                let result = worker_generated_chunks_rx.try_recv();
-                if result.is_err() {
-                    break;
+            let mut generate_count = 0;
+            let chunk_events = chunk_loader.update(absolute_position);
+            for event in &chunk_events {
+                match event {
+                    ChunkEvent::Load { pos, lod } => {
+                        let result = storage.load(pos);
+                        if result.is_ok() {
+                            let mut chunk = result.ok().unwrap();
+                            chunk.lod = *lod;
+                            world.set_chunk(chunk);
+                            continue;
+                        }
+
+                        let err = result.err().unwrap();
+                        match err {
+                            storage::LoadError::NotFound => {
+                                let mut chunk = storage.new_chunk(*pos);
+                                // TODO how to order before enqueuing? should world be loaded in correct order instead?
+                                //     chunk_pos_to_generate.sort_by(|a, b| {
+                                //         let da = a.pos.dst_sq(&current_chunk_pos);
+                                //         let db = b.pos.dst_sq(&current_chunk_pos);
+                                //         da.partial_cmp(&db).unwrap_or(cmp::Ordering::Equal)
+                                //     });
+                                chunk.lod = *lod;
+                                world_generator.enqueue_chunk(chunk);
+                                generate_count += 1;
+                            }
+                        }
+                    }
+                    ChunkEvent::Unload { pos } => {
+                        world_generator.dequeue_chunk(pos);
+                    }
+                    _ => ()
                 }
-                let chunk = result.unwrap();
-                currently_generating_chunks.remove(&chunk.pos);
-                if world.chunks.contains_key(&chunk.pos) {
-                    continue;
+            }
+            if !chunk_events.is_empty() {
+                println!("generate {} new chunks", generate_count);
+            }
+            for chunk in world_generator.get_generated_chunks(40) {
+                if chunk_loader.is_loaded(&chunk.pos) {
+                    world.set_chunk(chunk);
                 }
-                world.set_chunk(chunk);
             }
 
-            let chunk_events = chunk_loader.update(absolute_position);
             if !chunk_events.is_empty() {
                 did_cam_repos = true;
 
@@ -455,7 +482,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                                     if sc.lod != *lod {
                                         let chunk = world.chunks.get_mut(&sc.pos).unwrap();
                                         chunk.lod = *lod;
-                                        force_rerender.push(PosLod { pos: *pos, lod: *lod });
+                                        force_rerender.push(*pos);
                                     }
                                 }
                             }
@@ -469,44 +496,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                         svo_octant_ids.retain(|_, v| *v != id);
                     }
                 }
-
-                let world_gen = Arc::new(world::generator::Generator::new(1, world_cfg.clone(), world.allocator.clone()));
-
-                let mut chunk_pos_to_generate = Vec::new();
-                for event in &chunk_events {
-                    match event {
-                        ChunkEvent::Load { pos, lod } => {
-                            if !world.chunks.contains_key(&pos) {
-                                if currently_generating_chunks.contains(pos) {
-                                    continue;
-                                }
-                                currently_generating_chunks.insert(*pos);
-                                chunk_pos_to_generate.push(PosLod { pos: *pos, lod: *lod });
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-
-                let count = chunk_pos_to_generate.len();
-                if count > 0 {
-                    chunk_pos_to_generate.sort_by(|a, b| {
-                        let da = a.pos.dst_sq(&current_chunk_pos);
-                        let db = b.pos.dst_sq(&current_chunk_pos);
-                        da.partial_cmp(&db).unwrap_or(cmp::Ordering::Equal)
-                    });
-                    for pos in chunk_pos_to_generate {
-                        let world_gen = world_gen.clone();
-                        let tx = worker_generated_chunks_tx.clone();
-                        jobs.push(false, Box::new(move || {
-                            let mut chunk = world_gen.generate(pos.pos);
-                            chunk.lod = pos.lod;
-                            tx.send(chunk).unwrap();
-                        }));
-                    }
-                }
-
-                println!("generate {} new chunks", count);
 
                 let mut delete_list = Vec::new();
                 for event in &chunk_events {
@@ -533,32 +522,31 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
             let changed = world.get_changed_chunks();
             for pos in changed {
-                let chunk = world.chunks.get(&pos).unwrap();
-                force_rerender.push(PosLod { pos, lod: chunk.lod });
+                force_rerender.push(pos);
             }
 
             if !force_rerender.is_empty() {
                 // update new chunks
                 for pos in &force_rerender {
-                    let offset_x = pos.pos.x - current_chunk_pos.x;
-                    let offset_z = pos.pos.z - current_chunk_pos.z;
+                    let offset_x = pos.x - current_chunk_pos.x;
+                    let offset_z = pos.z - current_chunk_pos.z;
 
                     if offset_x * offset_x + offset_z * offset_z > render_distance * render_distance {
-                        world.remove_chunk(&pos.pos);
-                        svo_octant_ids.remove(&pos.pos);
+                        world.remove_chunk(&pos);
+                        svo_octant_ids.remove(&pos);
                         continue;
                     }
 
-                    let svo_pos = Position((render_distance + offset_x) as u32, pos.pos.y as u32, (render_distance + offset_z) as u32);
+                    let svo_pos = Position((render_distance + offset_x) as u32, pos.y as u32, (render_distance + offset_z) as u32);
 
-                    if let Some(chunk) = world.chunks.get(&pos.pos) {
+                    if let Some(chunk) = world.chunks.get(&pos) {
                         let storage = chunk.get_storage();
                         if storage.is_none() {
                             continue;
                         }
                         let storage = storage.unwrap();
 
-                        let pos = pos.pos;
+                        let pos = *pos;
                         let lod = chunk.lod;
                         let tx = worker_serialized_chunks_tx.clone();
                         jobs.push(true, Box::new(move || {
@@ -567,7 +555,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                         }));
                     } else {
                         svo.lock().unwrap().set(svo_pos, None);
-                        svo_octant_ids.remove(&pos.pos);
+                        svo_octant_ids.remove(&pos);
                         did_update_svo = true;
                     }
                 }
@@ -698,7 +686,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
                     frame.ui.text(format!(
                         "chunk allocs: {}, total: {}",
-                        world.allocator.used_count(), world.allocator.allocated_count(),
+                        world.get_allocator().used_count(), world.get_allocator().allocated_count(),
                     ));
                 });
 
@@ -707,18 +695,19 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                 .build(&frame.ui, || {
                     frame.ui.input_int("sea level", &mut world_cfg.sea_level).build();
 
-                    if frame.ui.button("generate") {
-                        jobs.clear();
-
-                        // last_chunk_pos = ChunkPos::new(-9999, 0, 0);
-                        svo_octant_ids.clear();
-                        currently_generating_chunks.clear();
-                        did_cam_repos = false;
-
-                        world = world::world::World::new();
-                        svo.lock().unwrap().clear();
-                        fly_mode = true;
-                    }
+                    // TODO rewrite
+                    // if frame.ui.button("generate") {
+                    //     jobs.borrow().clear();
+                    //
+                    //     // last_chunk_pos = ChunkPos::new(-9999, 0, 0);
+                    //     svo_octant_ids.clear();
+                    //     currently_generating_chunks.clear();
+                    //     did_cam_repos = false;
+                    //
+                    //     world = systems::world::World::new();
+                    //     svo.lock().unwrap().clear();
+                    //     fly_mode = true;
+                    // }
 
                     frame.ui.new_line();
 
@@ -785,7 +774,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     };
                     display_noise("continentalness", &mut world_cfg.continentalness);
                     display_noise("erosion", &mut world_cfg.erosion);
-                    display_noise("peaks & valleys", &mut world_cfg.peaks_and_valleys);
                 });
 
             if frame.was_resized {

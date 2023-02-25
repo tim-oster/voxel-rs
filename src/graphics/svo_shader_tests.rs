@@ -4,7 +4,7 @@ mod tests {
 
     use cgmath::{InnerSpace, Point2, Point3, Vector3, Vector4};
 
-    use crate::{AlignedPoint3, AlignedVec3, assert_float_eq, Chunk, ChunkPos, graphics, Position, SerializedChunk, Svo};
+    use crate::{AlignedPoint3, AlignedVec3, assert_float_eq, ChunkPos, graphics, Position, SerializedChunk, Svo};
     use crate::chunk::ChunkStorage;
     use crate::core::{Config, GlContext};
     use crate::graphics::{buffer, ShaderProgram, TextureArray, TextureArrayError};
@@ -14,6 +14,7 @@ mod tests {
     use crate::graphics::svo::Material;
     use crate::graphics::util::{AlignedBool, AlignedPoint2, AlignedVec4};
     use crate::world::allocator::Allocator;
+    use crate::world::chunk::Chunk;
 
     #[repr(C)]
     struct BufferIn {
