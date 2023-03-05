@@ -1,8 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::sync::Arc;
 
-use crate::chunk::ChunkStorage;
-use crate::world::allocator::Allocator;
 use crate::world::chunk;
 use crate::world::chunk::{Chunk, ChunkPos};
 
@@ -11,40 +8,33 @@ pub struct World {
     pub chunks: HashMap<ChunkPos, Chunk>,
     changed_chunks_set: HashSet<ChunkPos>,
     changed_chunks: VecDeque<ChunkPos>,
-    allocator: Arc<Allocator<ChunkStorage>>,
 }
 
 impl World {
     pub fn new() -> World {
-        let allocator = Allocator::new(
-            Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
-            Some(Box::new(|storage| storage.reset())),
-        );
         World {
             chunks: HashMap::new(),
             changed_chunks_set: HashSet::new(),
             changed_chunks: VecDeque::new(),
-            allocator: Arc::new(allocator),
+        }
+    }
+
+    fn mark_chunk_as_changed(&mut self, pos: &ChunkPos) {
+        if !self.changed_chunks_set.contains(&pos) {
+            self.changed_chunks_set.insert(*pos);
+            self.changed_chunks.push_back(*pos);
         }
     }
 
     pub fn set_chunk(&mut self, chunk: Chunk) {
         let pos = chunk.pos;
         self.chunks.insert(pos, chunk);
-
-        if !self.changed_chunks_set.contains(&pos) {
-            self.changed_chunks_set.insert(pos);
-            self.changed_chunks.push_back(pos);
-        }
+        self.mark_chunk_as_changed(&pos);
     }
 
     pub fn remove_chunk(&mut self, pos: &ChunkPos) {
         self.chunks.remove(pos);
-
-        if !self.changed_chunks_set.contains(pos) {
-            self.changed_chunks_set.insert(*pos);
-            self.changed_chunks.push_back(*pos);
-        }
+        self.mark_chunk_as_changed(&pos);
     }
 
     pub fn get_block(&self, x: i32, y: i32, z: i32) -> chunk::BlockId {
@@ -57,17 +47,9 @@ impl World {
 
     pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: chunk::BlockId) {
         let pos = ChunkPos::from_block_pos(x, y, z);
-        let mut chunk = self.chunks.get_mut(&pos);
-        if chunk.is_none() {
-            self.chunks.insert(pos, Chunk::new(pos, self.allocator.clone()));
-            chunk = self.chunks.get_mut(&pos);
-        }
-        chunk.unwrap().set_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32, block);
-
-        if !self.changed_chunks_set.contains(&pos) {
-            self.changed_chunks_set.insert(pos);
-            self.changed_chunks.push_back(pos);
-        }
+        let chunk = self.chunks.get_mut(&pos).unwrap();
+        chunk.set_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32, block);
+        self.mark_chunk_as_changed(&pos);
     }
 
     pub fn get_changed_chunks(&mut self) -> HashSet<ChunkPos> {
@@ -75,17 +57,13 @@ impl World {
         self.changed_chunks_set.clear();
         changed
     }
-
-    pub fn get_allocator(&self) -> &Allocator<ChunkStorage> {
-        &self.allocator
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::{HashSet, VecDeque};
 
-    use crate::systems::world::{ChunkPos};
+    use crate::systems::world::ChunkPos;
 
     #[test]
     fn chunk_pos_from_block_pos() {

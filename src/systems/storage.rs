@@ -21,6 +21,11 @@ pub enum StoreError {}
 // TODO should storage system reference count chunks and automatically free & store them once they are
 //      unused? or should other components return their chunks back to the storage layer instead?
 
+pub struct MemoryStats {
+    pub in_use: usize,
+    pub allocated: usize,
+}
+
 impl Storage {
     pub fn new() -> Storage {
         let allocator = Allocator::new(
@@ -40,5 +45,12 @@ impl Storage {
 
     pub fn new_chunk(&mut self, pos: ChunkPos) -> Chunk {
         Chunk::new(pos, Arc::clone(&self.allocator))
+    }
+
+    pub fn get_memory_stats(&self) -> MemoryStats {
+        MemoryStats {
+            in_use: self.allocator.used_count(),
+            allocated: self.allocator.allocated_count(),
+        }
     }
 }

@@ -678,9 +678,10 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                         jobs.len(),
                     ));
 
+                    let mem_stats = storage.get_memory_stats();
                     frame.ui.text(format!(
                         "chunk allocs: {}, total: {}",
-                        world.get_allocator().used_count(), world.get_allocator().allocated_count(),
+                        mem_stats.in_use, mem_stats.allocated,
                     ));
                 });
 
