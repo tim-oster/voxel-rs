@@ -422,12 +422,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                         match err {
                             storage::LoadError::NotFound => {
                                 let mut chunk = storage.new_chunk(*pos);
-                                // TODO how to order before enqueuing? should world be loaded in correct order instead?
-                                //     chunk_pos_to_generate.sort_by(|a, b| {
-                                //         let da = a.pos.dst_sq(&current_chunk_pos);
-                                //         let db = b.pos.dst_sq(&current_chunk_pos);
-                                //         da.partial_cmp(&db).unwrap_or(cmp::Ordering::Equal)
-                                //     });
                                 chunk.lod = *lod;
                                 world_generator.enqueue_chunk(chunk);
                                 generate_count += 1;

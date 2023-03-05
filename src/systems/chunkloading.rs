@@ -1,3 +1,4 @@
+use std::cmp;
 use std::collections::HashMap;
 
 use cgmath::Point3;
@@ -18,6 +19,16 @@ pub enum ChunkEvent {
     Load { pos: ChunkPos, lod: u8 },
     Unload { pos: ChunkPos },
     LodChange { pos: ChunkPos, lod: u8 },
+}
+
+impl ChunkEvent {
+    fn get_pos(&self) -> &ChunkPos {
+        match self {
+            ChunkEvent::Load { pos, .. } => pos,
+            ChunkEvent::Unload { pos, .. } => pos,
+            ChunkEvent::LodChange { pos, .. } => pos,
+        }
+    }
 }
 
 impl ChunkLoader {
@@ -44,6 +55,8 @@ impl ChunkLoader {
             return events;
         }
 
+        // checks chunks in radius around current position and create events to load new chunks
+        // or update LODs of loaded ones
         let r = self.radius as i32;
         for dx in -r..=r {
             for dz in -r..=r {
@@ -73,6 +86,7 @@ impl ChunkLoader {
             }
         }
 
+        // create delete events for chunks outside the loading radius
         let mut delete_list = Vec::new();
         for pos in self.loaded_chunks.keys() {
             let dx = (pos.x - current_pos.x).abs();
@@ -86,6 +100,13 @@ impl ChunkLoader {
         for pos in delete_list {
             self.loaded_chunks.remove(&pos);
         }
+
+        // sort events by the targeted chunk's distance to the current position
+        events.sort_by(|a, b| {
+            let da = a.get_pos().dst_sq(&current_pos);
+            let db = b.get_pos().dst_sq(&current_pos);
+            da.partial_cmp(&db).unwrap_or(cmp::Ordering::Equal)
+        });
 
         events
     }
