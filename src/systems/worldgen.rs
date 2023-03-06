@@ -58,13 +58,12 @@ impl<'js> Generator<'js> {
 
         let mut chunks = Vec::new();
         for _ in 0..limit {
-            let result = self.rx.try_recv();
-            if result.is_err() {
+            if let Ok(chunk) = self.rx.try_recv() {
+                self.chunk_jobs.remove(&chunk.pos);
+                chunks.push(chunk);
+            } else {
                 break;
             }
-            let chunk = result.unwrap();
-            self.chunk_jobs.remove(&chunk.pos);
-            chunks.push(chunk);
         }
         chunks
     }

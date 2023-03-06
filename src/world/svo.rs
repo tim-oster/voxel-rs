@@ -83,10 +83,12 @@ impl<T: SvoSerializable> Svo<T> {
     /// replace sets the leaf octant at the given position and returns the previously present leaf
     /// octant id.
     pub fn replace(&mut self, pos: Position, leaf: OctantId) -> Option<OctantId> {
+        // TODO should this be marked in change_set?
         self.octree.replace_leaf(pos, leaf)
     }
 
     pub fn remove_octant(&mut self, octant_id: OctantId) {
+        // TODO should this be marked in change_set?
         self.octree.delete_octant(octant_id);
     }
 
@@ -350,9 +352,8 @@ mod svo_tests {
     use std::collections::HashMap;
 
     use crate::chunk::BlockId;
-    use crate::Svo;
     use crate::world::octree::{Octree, Position};
-    use crate::world::svo::{OctantInfo, Range, SerializationResult, SvoBuffer};
+    use crate::world::svo::{OctantInfo, Range, SerializationResult, Svo, SvoBuffer};
 
     #[test]
     fn svo_serialize() {

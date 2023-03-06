@@ -4,8 +4,7 @@ use crate::world::chunk;
 use crate::world::chunk::{Chunk, ChunkPos};
 
 pub struct World {
-    // TODO do not make public later
-    pub chunks: HashMap<ChunkPos, Chunk>,
+    chunks: HashMap<ChunkPos, Chunk>,
     changed_chunks_set: HashSet<ChunkPos>,
     changed_chunks: VecDeque<ChunkPos>,
 }
@@ -35,6 +34,15 @@ impl World {
     pub fn remove_chunk(&mut self, pos: &ChunkPos) {
         self.chunks.remove(pos);
         self.mark_chunk_as_changed(&pos);
+    }
+
+    pub fn get_chunk(&self, pos: &ChunkPos) -> Option<&Chunk> {
+        self.chunks.get(pos)
+    }
+
+    pub fn get_chunk_mut(&mut self, pos: &ChunkPos) -> Option<&mut Chunk> {
+        self.mark_chunk_as_changed(pos);
+        self.chunks.get_mut(pos)
     }
 
     pub fn get_block(&self, x: i32, y: i32, z: i32) -> chunk::BlockId {

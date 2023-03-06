@@ -41,6 +41,7 @@ impl ChunkPos {
 }
 
 pub struct Chunk {
+    // TODO should this be exposed? it must be read-only
     pub pos: ChunkPos,
     pub lod: u8,
 

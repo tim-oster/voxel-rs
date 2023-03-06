@@ -4,3 +4,4 @@ pub mod jobs;
 pub mod storage;
 pub mod world;
 pub mod worldgen;
+pub mod worldsvo;
