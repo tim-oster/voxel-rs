@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 
+use crate::graphics;
 use crate::systems::jobs::{JobHandle, JobSystemHandle};
 use crate::world::chunk::{Chunk, ChunkPos};
 use crate::world::octree::{OctantId, Position};
@@ -69,7 +70,7 @@ impl<'js> Manager<'js> {
         }
     }
 
-    pub fn update(&mut self, world_center: &ChunkPos) -> Option<&mut Svo<SerializedChunk>> {
+    pub fn update(&mut self, world_center: &ChunkPos, svo: &mut graphics::svo::Svo) {
         if let Some(last_center) = self.world_center {
             if last_center != *world_center {
                 self.shift_chunks(&last_center, world_center);
@@ -97,13 +98,12 @@ impl<'js> Manager<'js> {
         }
 
         if !self.has_changed {
-            return None;
+            return;
         }
 
         self.has_changed = false;
         self.svo.serialize();
-
-        Some(&mut self.svo)
+        svo.update(&mut self.svo); // TODO this reference should not be mutable
     }
 
     fn world_to_svo_pos(chunk_pos: &ChunkPos, world_center: &ChunkPos, render_distance: u32) -> Position {

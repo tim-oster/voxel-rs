@@ -5,6 +5,8 @@ use std::ops::{Deref, DerefMut};
 
 use gl::types::{GLsizeiptr, GLuint, GLvoid};
 
+use crate::graphics::consts::shader_buffer_indices;
+
 // doc: https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBufferData.xhtml
 type BufferUsage = u32;
 
@@ -71,9 +73,9 @@ impl<T> Buffer<T> {
         }
     }
 
-    pub fn bind_as_storage_buffer(&self, index: u32) {
+    pub fn bind_as_storage_buffer(&self, index: shader_buffer_indices::Index) {
         unsafe {
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index, self.handle);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index.get(), self.handle);
         }
     }
 
@@ -84,6 +86,7 @@ impl<T> Buffer<T> {
 
 pub struct MappedBuffer<T> {
     handle: GLuint,
+    size: usize,
     mapped_ptr: *mut T,
 }
 
@@ -130,12 +133,20 @@ impl<T> MappedBuffer<T> {
                 gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
             ) as *mut T;
         }
-        MappedBuffer { handle, mapped_ptr }
+        MappedBuffer { handle, size, mapped_ptr }
     }
 
-    pub fn bind_as_storage_buffer(&self, index: u32) {
+    pub fn bind_as_storage_buffer(&self, index: shader_buffer_indices::Index) {
         unsafe {
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index, self.handle);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index.get(), self.handle);
         }
+    }
+
+    pub fn as_slice_mut(&self) -> &mut [T] {
+        unsafe { std::slice::from_raw_parts_mut(self.mapped_ptr, self.size) }
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { std::slice::from_raw_parts(self.mapped_ptr, self.size) }
     }
 }

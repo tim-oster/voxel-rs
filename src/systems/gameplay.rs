@@ -6,4 +6,6 @@ pub mod blocks {
     pub const GRASS: BlockId = 1;
     pub const DIRT: BlockId = 2;
     pub const STONE: BlockId = 3;
+    pub const STONE_BRICKS: BlockId = 4;
+    pub const GLASS: BlockId = 5;
 }

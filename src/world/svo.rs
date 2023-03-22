@@ -182,6 +182,7 @@ impl<T: SvoSerializable> Svo<T> {
     }
 
     // TODO write test
+    // TODO make this immutable and add a cache reset method instead?
     pub unsafe fn write_changes_to(&mut self, dst: *mut u32) -> Vec<Range> {
         if self.root_octant_info.is_none() {
             return Vec::new();

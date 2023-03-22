@@ -4,15 +4,16 @@ mod tests {
 
     use cgmath::{InnerSpace, Point2, Point3, Vector3, Vector4};
 
-    use crate::{AlignedPoint3, AlignedVec3, assert_float_eq, ChunkPos, graphics, Position};
+    use crate::{assert_float_eq, ChunkPos, graphics, Position};
     use crate::chunk::ChunkStorage;
     use crate::core::{Config, GlContext};
     use crate::graphics::{buffer, ShaderProgram, TextureArray, TextureArrayError};
     use crate::graphics::buffer::{Buffer, MappedBuffer};
+    use crate::graphics::consts::shader_buffer_indices;
     use crate::graphics::resource::Resource;
     use crate::graphics::shader::ShaderError;
-    use crate::graphics::svo::Material;
-    use crate::graphics::util::{AlignedBool, AlignedPoint2, AlignedVec4};
+    use crate::graphics::svo::MaterialInstance;
+    use crate::graphics::macros::{AlignedBool, AlignedPoint2, AlignedPoint3, AlignedVec3, AlignedVec4};
     use crate::world::allocator::Allocator;
     use crate::world::chunk::Chunk;
     use crate::world::svo::{SerializedChunk, Svo};
@@ -82,7 +83,7 @@ mod tests {
         world_buffer
     }
 
-    fn create_test_materials() -> (Buffer<Material>, Resource<TextureArray, TextureArrayError>) {
+    fn create_test_materials() -> (Buffer<MaterialInstance>, Resource<TextureArray, TextureArrayError>) {
         let tex_array = Resource::new(
             || graphics::TextureArrayBuilder::new(1)
                 .add_rgba8("full", 4, 4, vec![
@@ -114,7 +115,7 @@ mod tests {
         ).unwrap();
 
         let material_buffer = Buffer::new(vec![
-            Material { // empty
+            MaterialInstance { // empty
                 specular_pow: 0.0,
                 specular_strength: 0.0,
                 tex_top: -1,
@@ -124,7 +125,7 @@ mod tests {
                 tex_side_normal: -1,
                 tex_bottom_normal: -1,
             },
-            Material { // full
+            MaterialInstance { // full
                 specular_pow: 0.0,
                 specular_strength: 0.0,
                 tex_top: tex_array.lookup("full").unwrap() as i32,
@@ -134,7 +135,7 @@ mod tests {
                 tex_side_normal: -1,
                 tex_bottom_normal: -1,
             },
-            Material { // coords
+            MaterialInstance { // coords
                 specular_pow: 0.0,
                 specular_strength: 0.0,
                 tex_top: tex_array.lookup("coords").unwrap() as i32,
@@ -144,7 +145,7 @@ mod tests {
                 tex_side_normal: -1,
                 tex_bottom_normal: -1,
             },
-            Material { // transparent_1
+            MaterialInstance { // transparent_1
                 specular_pow: 0.0,
                 specular_strength: 0.0,
                 tex_top: tex_array.lookup("transparent_1").unwrap() as i32,
@@ -154,7 +155,7 @@ mod tests {
                 tex_side_normal: -1,
                 tex_bottom_normal: -1,
             },
-            Material { // transparent_2
+            MaterialInstance { // transparent_2
                 specular_pow: 0.0,
                 specular_strength: 0.0,
                 tex_top: tex_array.lookup("transparent_2").unwrap() as i32,
@@ -172,7 +173,7 @@ mod tests {
     struct TestSetup {
         _context: GlContext,
         _world_buffer: MappedBuffer<u32>,
-        _material_buffer: Buffer<Material>,
+        _material_buffer: Buffer<MaterialInstance>,
         _tex_array: Resource<TextureArray, TextureArrayError>,
         shader: Resource<ShaderProgram, ShaderError>,
     }
@@ -188,14 +189,14 @@ mod tests {
         });
 
         let world_buffer = create_test_world(world_builder);
-        world_buffer.bind_as_storage_buffer(0);
+        world_buffer.bind_as_storage_buffer(shader_buffer_indices::WORLD);
 
         let shader = Resource::new(
             || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/svo.test.glsl")?.build()
         ).unwrap();
 
         let (material_buffer, tex_array) = create_test_materials();
-        material_buffer.bind_as_storage_buffer(2);
+        material_buffer.bind_as_storage_buffer(shader_buffer_indices::MATERIALS);
         shader.bind();
         shader.set_texture("u_texture", 0, &tex_array);
         shader.unbind();
@@ -216,7 +217,7 @@ mod tests {
             pos: AlignedPoint3(pos),
             dir: AlignedVec3(dir.normalize()),
         }], buffer::STATIC_READ);
-        buffer_in.bind_as_storage_buffer(11);
+        buffer_in.bind_as_storage_buffer(shader_buffer_indices::DEBUG_IN);
 
         let mut buffer_out = Buffer::new(vec![BufferOut {
             result: OctreeResult {
@@ -239,7 +240,7 @@ mod tests {
                 is_leaf: AlignedBool::from(false),
             }; 100],
         }], buffer::STATIC_DRAW | buffer::STATIC_READ);
-        buffer_out.bind_as_storage_buffer(12);
+        buffer_out.bind_as_storage_buffer(shader_buffer_indices::DEBUG_OUT);
 
         unsafe {
             shader.bind();

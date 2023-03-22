@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::ptr;
 
 use gl::types::{GLint, GLuint, GLvoid};

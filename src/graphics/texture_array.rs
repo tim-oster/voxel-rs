@@ -42,9 +42,9 @@ impl TextureArrayBuilder {
         }
     }
 
-    pub fn add_file(&mut self, name: &str, path: &str) -> Result<&mut TextureArrayBuilder, TextureArrayError> {
-        self.register_texture(name)?;
-        self.content.push(ImageContent::File(String::from(path)));
+    pub fn add_file(&mut self, name: &String, path: &String) -> Result<&mut TextureArrayBuilder, TextureArrayError> {
+        self.register_texture(name.clone())?;
+        self.content.push(ImageContent::File(path.clone()));
         Ok(self)
     }
 
@@ -52,13 +52,12 @@ impl TextureArrayBuilder {
         let mut bytes = bytes;
         TextureArrayBuilder::flip_image_v(&mut bytes, w, h, 4);
 
-        self.register_texture(name)?;
+        self.register_texture(String::from(name))?;
         self.content.push(ImageContent::RGB8(w, h, bytes));
         Ok(self)
     }
 
-    fn register_texture(&mut self, name: &str) -> Result<(), TextureArrayError> {
-        let name = String::from(name);
+    fn register_texture(&mut self, name: String) -> Result<(), TextureArrayError> {
         if self.textures.get(&name).is_some() {
             return Err(TextureArrayError::Other(format!("name '{}' is already registered", name)));
         }
