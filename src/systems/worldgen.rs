@@ -38,7 +38,7 @@ impl<'js> Generator<'js> {
 
         let handle = self.jobs.push(false, Box::new(move || {
             gen.generate_chunk(&mut chunk);
-            tx.send(chunk).unwrap();
+            tx.send(chunk).unwrap(); // TODO this panics sometimes
         }));
         self.chunk_jobs.insert(pos, handle);
     }

@@ -12,6 +12,7 @@ use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::shader::ShaderError;
 use crate::graphics::svo_picker::{PickerBatch, PickerResult, PickerTask};
+use crate::systems::worldsvo::CoordSpace;
 use crate::world::chunk::BlockId;
 use crate::world::svo::SerializedChunk;
 
@@ -142,6 +143,7 @@ pub struct Svo {
     picker_fence: RefCell<Fence>,
 
     stats: Stats,
+    coord_space: Option<CoordSpace>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -188,6 +190,7 @@ impl Svo {
             picker_out_buffer,
             picker_fence: RefCell::new(Fence::new()),
             stats: Stats { size_bytes: 0.0, depth: 0 },
+            coord_space: None,
         }
     }
 
@@ -254,7 +257,9 @@ impl Svo {
         }
     }
 
-    pub fn update(&mut self, svo: &mut world::svo::Svo<SerializedChunk>) {
+    pub fn update(&mut self, svo: &mut world::svo::Svo<SerializedChunk>, coord_space: CoordSpace) {
+        self.coord_space = Some(coord_space);
+
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             self.world_buffer.write(max_depth_exp.to_bits());
@@ -283,7 +288,7 @@ pub struct RenderParams {
     pub view_mat: Matrix4<f32>,
     pub fov_y_rad: f32,
     pub aspect_ratio: f32,
-    pub selected_block_svo_space: Option<Point3<f32>>,
+    pub selected_block: Option<Point3<f32>>,
 }
 
 impl Svo {
@@ -298,8 +303,12 @@ impl Svo {
         self.world_shader.set_f32("u_aspect", params.aspect_ratio);
         self.world_shader.set_texture("u_texture", 0, &self.tex_array);
 
+        // TODO use NaN instead?
         let mut selected_block = Vector3::new(999.0, 999.0, 999.0);
-        if let Some(pos) = params.selected_block_svo_space {
+        if let Some(mut pos) = params.selected_block {
+            if let Some(cs) = self.coord_space {
+                pos = cs.cnv_into_space(pos);
+            }
             selected_block = pos.to_vec();
         }
         self.world_shader.set_f32vec3("u_highlight_pos", &selected_block);
@@ -311,14 +320,18 @@ impl Svo {
 }
 
 impl Svo {
+    // TODO how to panic if too much data is submitted into batch?
     pub fn raycast(&self, batch: PickerBatch) {
         self.picker_shader.bind();
 
         let in_data = self.picker_in_buffer.as_slice_mut();
-        batch.serialize_tasks(in_data);
+        batch.serialize_tasks(in_data, self.coord_space);
 
         unsafe {
             gl::MemoryBarrier(gl::BUFFER_UPDATE_BARRIER_BIT);
+            // TODO count how many active tasks are in the batch
+            // TODO upsize buffer to support for more tasks?
+            // TODO use actual count of tasks to avoid unnecessary work if buffer was not reset to zero?
             gl::DispatchCompute(50, 1, 1);
 
             // memory barrier + sync fence necessary to ensure that persistently mapped buffer changes
@@ -332,7 +345,7 @@ impl Svo {
         self.picker_shader.unbind();
 
         let out_data = self.picker_out_buffer.as_slice();
-        batch.deserialize_results(out_data);
+        batch.deserialize_results(out_data, self.coord_space);
     }
 }
 

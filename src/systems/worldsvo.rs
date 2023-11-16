@@ -2,9 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 
+use cgmath::Point3;
+
 use crate::graphics;
 use crate::systems::jobs::{JobHandle, JobSystemHandle};
-use crate::world::chunk::{Chunk, ChunkPos};
+use crate::world::chunk::{BlockPos, Chunk, ChunkPos};
 use crate::world::octree::{OctantId, Position};
 use crate::world::svo::{SerializedChunk, Svo};
 
@@ -18,8 +20,7 @@ pub struct Manager<'js> {
     svo: Svo<SerializedChunk>,
     octant_ids: HashMap<ChunkPos, OctantId>,
     has_changed: bool,
-    world_center: Option<ChunkPos>,
-    render_distance: u32,
+    coord_space: CoordSpace,
 }
 
 impl<'js> Manager<'js> {
@@ -34,8 +35,10 @@ impl<'js> Manager<'js> {
             svo: Svo::new(),
             octant_ids: HashMap::new(),
             has_changed: false,
-            world_center: None,
-            render_distance,
+            coord_space: CoordSpace {
+                center: ChunkPos::new(0, 0, 0),
+                dst: render_distance,
+            },
         }
     }
 
@@ -71,19 +74,18 @@ impl<'js> Manager<'js> {
     }
 
     pub fn update(&mut self, world_center: &ChunkPos, svo: &mut graphics::svo::Svo) {
-        if let Some(last_center) = self.world_center {
-            if last_center != *world_center {
-                self.shift_chunks(&last_center, world_center);
-            }
+        if self.coord_space.center != *world_center {
+            let last_center = self.coord_space.center;
+            self.shift_chunks(&last_center, world_center);
         }
-        self.world_center = Some(*world_center);
+        self.coord_space.center = *world_center;
 
         for _ in 0..50 {
             if let Ok(chunk) = self.rx.try_recv() {
                 let chunk_pos = chunk.pos;
                 self.chunk_jobs.remove(&chunk_pos);
 
-                let svo_pos = Manager::world_to_svo_pos(&chunk_pos, &world_center, self.render_distance);
+                let svo_pos = Manager::world_to_svo_pos(&chunk_pos, &world_center, self.coord_space.dst);
                 if self.is_out_of_bounds(&svo_pos) {
                     continue;
                 }
@@ -103,9 +105,10 @@ impl<'js> Manager<'js> {
 
         self.has_changed = false;
         self.svo.serialize();
-        svo.update(&mut self.svo); // TODO this reference should not be mutable
+        svo.update(&mut self.svo, self.coord_space); // TODO this reference should not be mutable
     }
 
+    // TODO this should use the coord space instead
     fn world_to_svo_pos(chunk_pos: &ChunkPos, world_center: &ChunkPos, render_distance: u32) -> Position {
         let offset_x = chunk_pos.x - world_center.x;
         let offset_z = chunk_pos.z - world_center.z;
@@ -117,14 +120,14 @@ impl<'js> Manager<'js> {
     }
 
     fn is_out_of_bounds(&self, pos: &Position) -> bool {
-        let dcx = pos.0 as i32 - self.render_distance as i32;
-        let dcz = pos.2 as i32 - self.render_distance as i32;
-        let r = self.render_distance as i32;
+        let r = self.coord_space.dst as i32;
+        let dcx = pos.0 as i32 - r;
+        let dcz = pos.2 as i32 - r;
         dcx * dcx + dcz * dcz > r * r
     }
 
     fn shift_chunks(&mut self, last_center: &ChunkPos, new_center: &ChunkPos) {
-        let r = self.render_distance as i32;
+        let r = self.coord_space.dst as i32;
         let mut octant_delete_set = HashSet::new();
 
         for dx in -r..=r {
@@ -147,7 +150,7 @@ impl<'js> Manager<'js> {
                     let octant_id = *octant_id.unwrap();
                     octant_delete_set.remove(&octant_id);
 
-                    let new_svo_pos = Manager::world_to_svo_pos(&chunk_pos, new_center, self.render_distance);
+                    let new_svo_pos = Manager::world_to_svo_pos(&chunk_pos, new_center, self.coord_space.dst);
                     if self.is_out_of_bounds(&new_svo_pos) {
                         octant_delete_set.insert(octant_id);
                         continue;
@@ -171,4 +174,76 @@ impl<'js> Manager<'js> {
     }
 }
 
-// TODO write tests
+#[derive(Copy, Clone)]
+pub struct CoordSpace {
+    center: ChunkPos,
+    dst: u32,
+}
+
+pub type CoordSpacePos = Point3<f32>;
+
+impl CoordSpace {
+    pub fn cnv_into_space(&self, pos: Point3<f32>) -> CoordSpacePos {
+        let mut block_pos = BlockPos::from(pos);
+        let delta = block_pos.chunk - self.center;
+
+        let rd = self.dst as i32;
+        block_pos.chunk.x = rd + delta.x;
+        block_pos.chunk.z = rd + delta.z;
+
+        block_pos.to_point()
+    }
+
+    pub fn cnv_out_of_space(&self, pos: CoordSpacePos) -> Point3<f32> {
+        let mut block_pos = BlockPos::from(pos);
+
+        let rd = self.dst as i32;
+        // TODO y=rd is ignored here
+        let delta = block_pos.chunk - ChunkPos::new(rd, 0, rd);
+
+        block_pos.chunk.x = self.center.x + delta.x;
+        block_pos.chunk.z = self.center.z + delta.z;
+
+        block_pos.to_point()
+    }
+}
+
+// TODO write more tests
+
+#[cfg(test)]
+mod test {
+    use cgmath::Point3;
+
+    use crate::systems::worldsvo::CoordSpace;
+    use crate::world::chunk::ChunkPos;
+
+    #[test]
+    fn coord_space_positive() {
+        let cs = CoordSpace {
+            center: ChunkPos::new(4, 5, 12),
+            dst: 2,
+        };
+
+        let world_pos = Point3::new(32.0 * 5.0 + 16.25, 32.0 * 2.0 + 4.2, 32.0 * 10.0 + 20.5);
+        let svo_pos = cs.cnv_into_space(world_pos);
+        assert_eq!(svo_pos, Point3::new(32.0 * 3.0 + 16.25, 32.0 * 2.0 + 4.2, 32.0 * 0.0 + 20.5));
+
+        let cnv_back = cs.cnv_out_of_space(svo_pos);
+        assert_eq!(cnv_back, world_pos);
+    }
+
+    #[test]
+    fn coord_space_negative() {
+        let cs = CoordSpace {
+            center: ChunkPos::new(-1, -1, -1),
+            dst: 2,
+        };
+
+        let world_pos = Point3::new(-16.25, 4.2, -20.5);
+        let svo_pos = cs.cnv_into_space(world_pos);
+        assert_eq!(svo_pos, Point3::new(32.0 * 2.0 + 15.75, 4.2, 32.0 * 2.0 + 11.5));
+
+        let cnv_back = cs.cnv_out_of_space(svo_pos);
+        assert_eq!(cnv_back, world_pos);
+    }
+}

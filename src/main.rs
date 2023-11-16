@@ -8,7 +8,7 @@ use std::os::raw::c_int;
 use std::time::{Duration, Instant};
 
 use cgmath;
-use cgmath::{EuclideanSpace, Point3, Vector2, Vector3};
+use cgmath::{EuclideanSpace, Point3, Vector2, Vector3, Zero};
 use cgmath::{ElementWise, InnerSpace};
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
@@ -18,11 +18,12 @@ use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::svo;
 use crate::graphics::svo::{ContentRegistry, Material, RenderParams};
-use crate::graphics::svo_picker::{AABB, PickerBatch};
+use crate::graphics::svo_picker::{PickerBatch};
 use crate::systems::{chunkloading, storage, worldgen, worldsvo};
 use crate::systems::chunkloading::ChunkEvent;
 use crate::systems::gameplay::blocks;
 use crate::systems::jobs::JobSystem;
+use crate::systems::physics::{AABBDef, Entity, Physics};
 use crate::world::chunk;
 use crate::world::chunk::ChunkPos;
 use crate::world::generator::{Noise, SplinePoint};
@@ -140,23 +141,26 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     let mut world_svo = svo::Svo::new(registry);
     let mut world_svo_mgr = worldsvo::Manager::new(jobs.new_handle(), render_distance as u32);
 
+    let physics = Physics::new();
+    let mut player_entity = Entity::new(
+        Point3::new(-24.0, 80.0, 174.0),
+        AABBDef::new(-Vector3::new(0.4, 1.7, 0.4), Vector3::new(0.8, 1.8, 0.8)),
+    );
+    player_entity.caps.flying = true;
+
     // NEW CONFIG END
 
     let mut crosshair_shader = Resource::new(
         || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/crosshair.glsl")?.build()
     ).unwrap();
 
-    let mut absolute_position = Point3::new(-24.0, 80.0, 174.0); // TODO: 16.0, 80.0, 16.0
-
     let screen_quad = ScreenQuad::new();
 
     let mut camera = graphics::Camera::new(72.0, window.get_aspect(), 0.01, 1024.0);
-    camera.position = absolute_position;
 
     let mut cam_speed = 1f32;
     let cam_rot_speed = 0.005f32;
     let mut cam_rot = Vector3::new(0.0, -90f32.to_radians(), 0.0);
-    let mut fly_mode = true;
     let mut slow_mode = false;
 
     let ambient_intensity = 0.3f32;
@@ -181,8 +185,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
     let mut selected_block: BlockId = 1;
 
-    let mut vertical_velocity = 0.0f32;
-    let mut pre_jump_velocity = Vector3::new(0.0, 0.0, 0.0);
     let mut is_jumping = false;
     let mut was_grounded = false;
 
@@ -193,11 +195,10 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     window.request_grab_cursor(!testing_mode);
     while !window.should_close() {
         {
-            let pos = absolute_position;
+            let pos = player_entity.position;
             let mut current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
-            current_chunk_pos.y = 0;
 
-            let chunk_world_pos = Point3::new(current_chunk_pos.x as f32, current_chunk_pos.y as f32, current_chunk_pos.z as f32) * 32.0;
+            let chunk_world_pos = Point3::new(current_chunk_pos.x as f32, 0.0, current_chunk_pos.z as f32) * 32.0;
             let delta = pos - chunk_world_pos;
 
             camera.position.y = pos.y;
@@ -205,7 +206,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
             camera.position.z = render_distance as f32 * 32.0 + delta.z;
 
             let mut generate_count = 0;
-            let chunk_events = chunk_loader.update(absolute_position);
+            let chunk_events = chunk_loader.update(player_entity.position);
             for event in &chunk_events {
                 match event {
                     ChunkEvent::Load { pos, lod } => {
@@ -258,32 +259,13 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
         }
 
         // picker logic
-        let aabb = AABB::new(camera.position, -Vector3::new(0.4, 1.7, 0.4), Vector3::new(0.8, 1.8, 0.8));
-
         let mut batch = PickerBatch::new();
-        let block_result = batch.ray(camera.position, camera.forward, 30.0);
-        let aabb_result = batch.aabb(&aabb);
+        let block_result = batch.ray(player_entity.position, camera.forward, 30.0);
         world_svo.raycast(batch);
 
         let block_result = block_result.get();
-        let aabb_result = aabb_result.get();
 
         window.update(|frame| {
-            let mut selected_block_world = None;
-            let mut selected_block_svo = None;
-
-            if block_result.dst != -1.0 {
-                let rel_chunk_pos = ChunkPos::from_block_pos(block_result.pos.x as i32, block_result.pos.y as i32, block_result.pos.z as i32);
-                let rel_block_pos = Point3::new((block_result.pos.x as i32 & 31) as f32, (block_result.pos.y as i32 & 31) as f32, (block_result.pos.z as i32 & 31) as f32);
-
-                let delta = Point3::new(rel_chunk_pos.x - render_distance, 0, rel_chunk_pos.z - render_distance);
-                let abs_chunk_pos = ChunkPos::from_block_pos(absolute_position.x as i32, 0, absolute_position.z as i32);
-                let abs_chunk_pos = Point3::new((abs_chunk_pos.x + delta.x) as f32, rel_chunk_pos.y as f32, (abs_chunk_pos.z + delta.z) as f32);
-
-                selected_block_world = Some((abs_chunk_pos * 32.0) + rel_block_pos.to_vec());
-                selected_block_svo = Some(block_result.pos.0);
-            }
-
             Window::new("Debug")
                 .size([300.0, 100.0], Condition::FirstUseEver)
                 .build(&frame.ui, || {
@@ -302,7 +284,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     ));
                     frame.ui.text(format!(
                         "abs pos: ({:.3},{:.3},{:.3})",
-                        absolute_position.x, absolute_position.y, absolute_position.z,
+                        player_entity.position.x, player_entity.position.y, player_entity.position.z,
                     ));
                     frame.ui.text(format!(
                         "cam pos: ({:.3},{:.3},{:.3})",
@@ -313,16 +295,30 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                         camera.forward.x, camera.forward.y, camera.forward.z,
                     ));
 
-                    let block_pos = selected_block_world.unwrap_or(Point3::new(0.0, 0.0, 0.0));
+                    let mut pos = Point3::new(0.0, 0.0, 0.0);
+                    let mut norm = Vector3::new(0.0, 0.0, 0.0);
+
+                    if block_result.did_hit() {
+                        pos = block_result.pos.0;
+                        norm = block_result.normal.0;
+                    }
                     frame.ui.text(format!(
                         "block pos: ({:.2},{:.2},{:.2})",
-                        block_pos.x, block_pos.y, block_pos.z,
+                        pos.x, pos.y, pos.z,
                     ));
-
-                    let block_normal = block_result.normal;
                     frame.ui.text(format!(
                         "block normal: ({},{},{})",
-                        block_normal.x as i32, block_normal.y as i32, block_normal.z as i32,
+                        norm.x as i32, norm.y as i32, norm.z as i32,
+                    ));
+
+                    let chunk_pos = ChunkPos::from_block_pos(
+                        player_entity.position.x as i32,
+                        player_entity.position.y as i32,
+                        player_entity.position.z as i32,
+                    );
+                    frame.ui.text(format!(
+                        "chunk pos: ({},{},{})",
+                        chunk_pos.x, chunk_pos.y, chunk_pos.z,
                     ));
 
                     let svo_stats = world_svo.get_stats();
@@ -338,7 +334,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
                     let mem_stats = storage.get_memory_stats();
                     frame.ui.text(format!(
-                        "chunk allocs: {}, total: {}",
+                        "chunk allocs used: {}, total: {}",
                         mem_stats.in_use, mem_stats.allocated,
                     ));
                 });
@@ -348,7 +344,6 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                 .build(&frame.ui, || {
                     frame.ui.input_int("sea level", &mut world_cfg.sea_level).build();
 
-                    // TODO rewrite
                     // if frame.ui.button("generate") {
                     //     jobs.borrow().clear();
                     //
@@ -439,154 +434,65 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                 frame.request_close();
             }
 
-            const PHYSICS_EPSILON: f32 = 0.005;
-            let apply_horizontal_physics = |speed: Vector3<f32>| -> Vector3<f32> {
-                let x_dot = speed.dot(Vector3::new(1.0, 0.0, 0.0));
-                let z_dot = speed.dot(Vector3::new(0.0, 0.0, 1.0));
-                let x_dst = if x_dot > 0.0 { aabb_result.x_pos } else { aabb_result.x_neg };
-                let z_dst = if z_dot > 0.0 { aabb_result.z_pos } else { aabb_result.z_neg };
-
-                let mut speed = speed;
-
-                if x_dst == 0.0 {
-                    if x_dot > 0.0 {
-                        let actual = aabb.pos.x + aabb.offset.x + aabb.extents.x;
-                        let expected = actual.floor() - 2.0 * PHYSICS_EPSILON;
-                        speed.x = expected - actual;
-                    } else {
-                        let actual = aabb.pos.x + aabb.offset.x;
-                        let expected = actual.ceil() + 2.0 * PHYSICS_EPSILON;
-                        speed.x = expected - actual;
-                    }
-                } else if x_dst != -1.0 && speed.x.abs() > (x_dst - PHYSICS_EPSILON) {
-                    speed.x = (x_dst - 2.0 * PHYSICS_EPSILON) * speed.x.signum();
-                }
-
-                if z_dst == 0.0 {
-                    if z_dot > 0.0 {
-                        let actual = aabb.pos.z + aabb.offset.z + aabb.extents.z;
-                        let expected = actual.floor() - 2.0 * PHYSICS_EPSILON;
-                        speed.x = expected - actual;
-                    } else {
-                        let actual = aabb.pos.z + aabb.offset.z;
-                        let expected = actual.ceil() + 2.0 * PHYSICS_EPSILON;
-                        speed.z = expected - actual;
-                    }
-                } else if z_dst != -1.0 && speed.z.abs() > (z_dst - PHYSICS_EPSILON) {
-                    speed.z = (z_dst - 2.0 * PHYSICS_EPSILON) * speed.z.signum();
-                }
-
-                speed
-            };
-            let apply_vertical_physics = |speed: Vector3<f32>| -> Vector3<f32> {
-                let y_dot = speed.dot(Vector3::new(0.0, 1.0, 0.0));
-                let y_dst = if y_dot > 0.0 { aabb_result.y_pos } else { aabb_result.y_neg };
-
-                let mut speed = speed;
-                if y_dst == 0.0 {
-                    if y_dot > 0.0 {
-                        let actual = aabb.pos.y + aabb.offset.y + aabb.extents.y;
-                        let expected = actual.floor() - 2.0 * PHYSICS_EPSILON;
-                        speed.y = expected - actual;
-                    } else {
-                        let actual = aabb.pos.y + aabb.offset.y;
-                        let expected = actual.ceil() + 2.0 * PHYSICS_EPSILON;
-                        speed.y = expected - actual;
-                    }
-                } else if y_dst != -1.0 && speed.y.abs() > (y_dst - PHYSICS_EPSILON) {
-                    speed.y = (y_dst - 2.0 * PHYSICS_EPSILON) * speed.y.signum();
-                }
-                speed
-            };
-
             if !testing_mode {
-                let mut horizontal_speed = Vector3::new(0.0, 0.0, 0.0);
+                let mut impulse = Vector3::new(0.0, 0.0, 0.0);
+
                 if frame.input.is_key_pressed(&glfw::Key::W) {
                     let dir = camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-                    let speed = dir * cam_speed * frame.stats.delta_time;
-                    horizontal_speed += speed;
+                    let speed = dir * cam_speed;
+                    impulse += speed;
                 }
                 if frame.input.is_key_pressed(&glfw::Key::S) {
                     let dir = -camera.forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-                    let speed = dir * cam_speed * frame.stats.delta_time;
-                    horizontal_speed += speed;
+                    let speed = dir * cam_speed;
+                    impulse += speed;
                 }
                 if frame.input.is_key_pressed(&glfw::Key::A) {
-                    let speed = -camera.right() * cam_speed * frame.stats.delta_time;
-                    horizontal_speed += speed;
+                    let speed = -camera.right() * cam_speed;
+                    impulse += speed;
                 }
                 if frame.input.is_key_pressed(&glfw::Key::D) {
-                    let speed = camera.right() * cam_speed * frame.stats.delta_time;
-                    horizontal_speed += speed;
+                    let speed = camera.right() * cam_speed;
+                    impulse += speed;
                 }
 
-                // clamp horizontal speed
-                if !fly_mode {
-                    horizontal_speed = apply_horizontal_physics(horizontal_speed);
-                }
-                let speed = horizontal_speed.magnitude();
-                let max_speed = cam_speed * frame.stats.delta_time;
-                if speed > max_speed {
-                    horizontal_speed = horizontal_speed.normalize() * max_speed;
-                }
+                if !player_entity.caps.flying {
+                    let is_grounded = player_entity.get_state().is_grounded;
 
-                let mut vertical_speed = Vector3::new(0.0, 0.0, 0.0);
-                if !fly_mode {
-                    const MAX_FALL_VELOCITY: f32 = 2.0;
-                    const ACCELERATION: f32 = 0.008;
-
-                    let is_grounded = aabb_result.y_neg < 0.02 && aabb_result.y_neg != -1.0;
-                    if is_grounded {
-                        vertical_velocity = 0.0;
-                        cam_speed = 0.15;
+                    if frame.input.is_key_pressed(&glfw::Key::Space) && was_grounded {
+                        if !is_jumping {
+                            is_jumping = true;
+                            impulse.y += 0.24;
+                        }
+                    } else if is_grounded {
                         is_jumping = false;
-                        was_grounded = true;
-                        pre_jump_velocity = Vector3::new(0.0, 0.0, 0.0);
+                        cam_speed = 0.15;
 
                         if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
                             cam_speed = 0.22;
                         }
-                        if frame.input.is_key_pressed(&glfw::Key::Space) {
-                            vertical_velocity = 0.2;
-                            is_jumping = true;
-                            pre_jump_velocity = horizontal_speed;
-                        }
-                    } else {
-                        cam_speed = 0.1;
-                        vertical_velocity -= ACCELERATION;
-                        vertical_velocity = vertical_velocity.clamp(-MAX_FALL_VELOCITY, MAX_FALL_VELOCITY);
-
-                        horizontal_speed += pre_jump_velocity;
                     }
 
-                    vertical_speed.y = vertical_velocity * frame.stats.delta_time;
+                    was_grounded = is_grounded;
                 } else {
-                    vertical_velocity = 0.0;
                     is_jumping = false;
                     was_grounded = false;
-                    pre_jump_velocity = Vector3::new(0.0, 0.0, 0.0);
 
                     if frame.input.is_key_pressed(&glfw::Key::Space) {
-                        let speed = cam_speed * frame.stats.delta_time;
-                        let speed = Vector3::new(0.0, speed, 0.0);
-                        vertical_speed += speed;
+                        let speed = cam_speed;
+                        impulse.y += speed;
                     }
                     if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
-                        let speed = cam_speed * frame.stats.delta_time;
-                        let speed = Vector3::new(0.0, -speed, 0.0);
-                        vertical_speed += speed;
+                        let speed = cam_speed;
+                        impulse.y -= speed;
                     }
                 }
-                if !fly_mode {
-                    vertical_speed = apply_vertical_physics(vertical_speed);
-                }
 
-                absolute_position += horizontal_speed;
-                absolute_position += vertical_speed;
+                player_entity.velocity += impulse;
 
                 if frame.input.was_key_pressed(&glfw::Key::F) {
-                    fly_mode = !fly_mode;
-                    cam_speed = if fly_mode { 1.0 } else { 0.15 };
+                    player_entity.caps.flying = !player_entity.caps.flying;
+                    cam_speed = if player_entity.caps.flying { 1.0 } else { 0.15 };
                 }
                 if frame.input.was_key_pressed(&glfw::Key::G) {
                     slow_mode = !slow_mode;
@@ -608,7 +514,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                 }
 
                 let hot_bar = vec![blocks::GRASS, blocks::DIRT, blocks::STONE, blocks::STONE_BRICKS, blocks::GLASS];
-                for i in 1..hot_bar.len() {
+                for i in 1..=hot_bar.len() {
                     let key = glfw::Key::Num1 as c_int + (i - 1) as c_int;
                     let key = &key as *const c_int as *const glfw::Key;
                     let key = unsafe { &*key };
@@ -634,48 +540,51 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
                 // removing blocks
                 if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
-                    if let Some(block_pos) = selected_block_world {
-                        let x = block_pos.x as i32;
-                        let y = block_pos.y as i32;
-                        let z = block_pos.z as i32;
+                    if block_result.did_hit() {
+                        let x = block_result.pos.x.floor() as i32;
+                        let y = block_result.pos.y.floor() as i32;
+                        let z = block_result.pos.z.floor() as i32;
                         world.set_block(x, y, z, chunk::NO_BLOCK);
                     }
                 }
 
                 // block picking
                 if frame.input.is_button_pressed_once(&glfw::MouseButton::Button3) {
-                    if let Some(block_pos) = selected_block_world {
-                        let x = block_pos.x as i32;
-                        let y = block_pos.y as i32;
-                        let z = block_pos.z as i32;
+                    if block_result.did_hit() {
+                        let x = block_result.pos.x.floor() as i32;
+                        let y = block_result.pos.y.floor() as i32;
+                        let z = block_result.pos.z.floor() as i32;
                         selected_block = world.get_block(x, y, z);
                     }
                 }
 
                 // adding blocks
                 if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
-                    if let Some(block_pos) = selected_block_world {
+                    if block_result.did_hit() {
                         let block_normal = block_result.normal;
-                        let block_pos = block_pos.add(block_normal.0);
-                        let x = block_pos.x as i32 as f32;
-                        let y = block_pos.y as i32 as f32;
-                        let z = block_pos.z as i32 as f32;
+                        let block_pos = block_result.pos.add(block_normal.0);
+                        let x = block_pos.x.floor() as i32 as f32;
+                        let y = block_pos.y.floor() as i32 as f32;
+                        let z = block_pos.z.floor() as i32 as f32;
 
-                        let player_min_x = absolute_position.x + aabb.offset.x;
-                        let player_min_y = absolute_position.y + aabb.offset.y - 0.1; // add offset to prevent physics glitches
-                        let player_min_z = absolute_position.z + aabb.offset.z;
-                        let player_max_x = absolute_position.x + aabb.extents.x;
-                        let player_max_y = absolute_position.y + aabb.extents.y;
-                        let player_max_z = absolute_position.z + aabb.extents.z;
+                        let aabb = &player_entity.aabb_def;
+                        let player_min_x = player_entity.position.x + aabb.offset.x;
+                        let player_min_y = player_entity.position.y + aabb.offset.y - 0.1; // add offset to prevent physics glitches
+                        let player_min_z = player_entity.position.z + aabb.offset.z;
+                        let player_max_x = player_entity.position.x + aabb.extents.x;
+                        let player_max_y = player_entity.position.y + aabb.extents.y;
+                        let player_max_z = player_entity.position.z + aabb.extents.z;
 
                         if (player_max_x < x || player_min_x > x + 1.0) ||
                             (player_max_y < y || player_min_y > y + 1.0) ||
                             (player_max_z < z || player_min_z > z + 1.0) ||
-                            fly_mode {
+                            player_entity.caps.flying {
                             world.set_block(x as i32, y as i32, z as i32, selected_block);
                         }
                     }
                 }
+
+                physics.step(frame.stats.delta_time, &world_svo, vec![&mut player_entity]);
             }
 
             unsafe {
@@ -684,6 +593,11 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                 gl::ClearColor(0.0, 0.0, 0.0, 1.0);
                 gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
 
+                let mut selected_block = None;
+                if block_result.did_hit() {
+                    selected_block = Some(block_result.pos.0);
+                }
+
                 world_svo.render(RenderParams {
                     ambient_intensity,
                     light_dir,
@@ -691,7 +605,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     view_mat: camera.get_camera_to_world_matrix(),
                     fov_y_rad: 70.0f32.to_radians(),
                     aspect_ratio: frame.get_aspect(),
-                    selected_block_svo_space: selected_block_svo,
+                    selected_block,
                 });
 
                 if testing_mode {

@@ -5,8 +5,9 @@ use std::rc::Rc;
 use cgmath::{InnerSpace, Point3, Vector3};
 
 use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
+use crate::systems::worldsvo::CoordSpace;
 
-// TODO rename picker to something with raycasting?
+// TODO rename picker to something else
 
 pub struct PickerBatch {
     rays: Vec<RayTask>,
@@ -43,32 +44,50 @@ impl PickerBatch {
         result
     }
 
-    pub(crate) fn serialize_tasks(&self, tasks: &mut [PickerTask]) {
+    pub(crate) fn serialize_tasks(&self, tasks: &mut [PickerTask], cs: Option<CoordSpace>) {
         let mut offset = 0;
 
         for task in &self.rays {
+            let mut pos = task.pos;
+            if let Some(cs) = cs {
+                pos = cs.cnv_into_space(pos);
+            }
             tasks[offset] = PickerTask {
                 max_dst: task.max_dst,
-                pos: AlignedPoint3(task.pos),
+                pos: AlignedPoint3(pos),
                 dir: AlignedVec3(task.dir),
             };
             offset += 1;
         }
 
         for task in &self.aabbs {
-            for task in task.aabb.generate_picker_tasks() {
+            for mut task in task.aabb.generate_picker_tasks() {
+                if let Some(cs) = cs {
+                    task.pos = AlignedPoint3(cs.cnv_into_space(task.pos.0));
+                }
                 tasks[offset] = task;
                 offset += 1;
             }
         }
     }
 
-    pub(crate) fn deserialize_results(&self, results: &[PickerResult]) {
+    pub(crate) fn deserialize_results(&self, results: &[PickerResult], cs: Option<CoordSpace>) {
         let mut offset = 0;
 
         for task in &self.rays {
             *task.result.borrow_mut() = results[offset];
             offset += 1;
+
+            if let Some(cs) = cs {
+                let mut result = task.result.borrow_mut();
+                // TODO find a better way to handle -1 values
+
+                let original = result.pos.0;
+                result.pos = AlignedPoint3(cs.cnv_out_of_space(result.pos.0));
+                if original.x == -1.0 { result.pos.x = -1.0 };
+                if original.y == -1.0 { result.pos.y = -1.0 };
+                if original.z == -1.0 { result.pos.z = -1.0 };
+            }
         }
 
         for task in &self.aabbs {
@@ -109,7 +128,7 @@ pub(crate) struct PickerTask {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct PickerResult {
     pub dst: f32,
     pub inside_block: bool,
@@ -128,6 +147,12 @@ impl Default for PickerResult {
     }
 }
 
+impl PickerResult {
+    pub fn did_hit(&self) -> bool {
+        self.dst != -1.0
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct AABB {
     pub pos: Point3<f32>,
@@ -137,23 +162,15 @@ pub struct AABB {
 
 #[derive(Clone, Copy)]
 pub struct AABBResult {
-    pub x_pos: f32,
-    pub x_neg: f32,
-    pub y_pos: f32,
-    pub y_neg: f32,
-    pub z_pos: f32,
-    pub z_neg: f32,
+    pub neg: Point3<f32>,
+    pub pos: Point3<f32>,
 }
 
 impl Default for AABBResult {
     fn default() -> Self {
         AABBResult {
-            x_pos: -1.0,
-            x_neg: -1.0,
-            y_pos: -1.0,
-            y_neg: -1.0,
-            z_pos: -1.0,
-            z_neg: -1.0,
+            neg: Point3::new(-1.0, -1.0, -1.0),
+            pos: Point3::new(-1.0, -1.0, -1.0),
         }
     }
 }
@@ -211,18 +228,11 @@ impl AABB {
             self.extents.z.ceil() as i32,
         ];
 
-        let mut result = AABBResult {
-            x_pos: -1.0,
-            x_neg: -1.0,
-            y_pos: -1.0,
-            y_neg: -1.0,
-            z_pos: -1.0,
-            z_neg: -1.0,
-        };
+        let mut result = AABBResult::default();
         let mut references = vec![
-            &mut result.x_pos, &mut result.x_neg,
-            &mut result.y_pos, &mut result.y_neg,
-            &mut result.z_pos, &mut result.z_neg,
+            &mut result.pos.x, &mut result.neg.x,
+            &mut result.pos.y, &mut result.neg.y,
+            &mut result.pos.z, &mut result.neg.z,
         ];
 
         let mut res_index: usize = 0;
@@ -253,3 +263,5 @@ impl AABB {
         (result, res_index)
     }
 }
+
+// TODO write tests
