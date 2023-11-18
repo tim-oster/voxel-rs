@@ -96,7 +96,7 @@ impl Window {
                 frame_time_accumulation: Duration::new(0, 0),
                 update_time_accumulation: Duration::new(0, 0),
 
-                delta_time: 1.0,
+                delta_time: 0.0,
                 frames_per_second: 0,
                 avg_frame_time_per_second: 0.0,
                 avg_update_time_per_second: 0.0,
@@ -109,7 +109,7 @@ impl Window {
     pub fn update<F: FnOnce(&mut Frame)>(&mut self, f: F) {
         let delta_time = self.current_stats.last_frame.elapsed();
         self.current_stats.frame_time_accumulation += delta_time;
-        self.current_stats.delta_time = delta_time.as_secs_f32() / (1.0 / 60.0);
+        self.current_stats.delta_time = delta_time.as_secs_f32();
         self.current_stats.last_frame = Instant::now();
 
         self.current_stats.frame_count += 1;

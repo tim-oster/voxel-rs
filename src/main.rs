@@ -158,10 +158,14 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
     let mut camera = graphics::Camera::new(72.0, window.get_aspect(), 0.01, 1024.0);
 
-    let mut cam_speed = 1f32;
-    let cam_rot_speed = 0.005f32;
+    const FLY_SPEED: f32 = 60.0;
+    const NORMAL_SPEED: f32 = 9.0;
+    const SPRINT_FACTOR: f32 = 1.5;
+    const JUMP_SPEED: f32 = 20.0;
+
+    let mut cam_speed = FLY_SPEED;
+    let cam_rot_speed = 0.2f32;
     let mut cam_rot = Vector3::new(0.0, -90f32.to_radians(), 0.0);
-    let mut slow_mode = false;
 
     let ambient_intensity = 0.3f32;
     let mut light_dir = Vector3::new(-1.0, -1.0, -1.0).normalize();
@@ -276,11 +280,10 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     }
 
                     frame.ui.text(format!(
-                        "fps: {}, frame: {:.2}ms, update: {:.2}ms, delta: {:.2}",
+                        "fps: {}, frame: {:.2}ms, update: {:.2}ms",
                         frame.stats.frames_per_second,
                         frame.stats.avg_frame_time_per_second * 1000.0,
                         frame.stats.avg_update_time_per_second * 1000.0,
-                        frame.stats.delta_time,
                     ));
                     frame.ui.text(format!(
                         "abs pos: ({:.3},{:.3},{:.3})",
@@ -462,14 +465,15 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     if frame.input.is_key_pressed(&glfw::Key::Space) && was_grounded {
                         if !is_jumping {
                             is_jumping = true;
-                            impulse.y += 0.35;
+                            impulse.y += JUMP_SPEED;
                         }
                     } else if is_grounded {
                         is_jumping = false;
-                        cam_speed = 0.15;
 
                         if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
-                            cam_speed = 0.22;
+                            cam_speed = NORMAL_SPEED * SPRINT_FACTOR;
+                        } else {
+                            cam_speed = NORMAL_SPEED;
                         }
                     }
 
@@ -492,11 +496,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
                 if frame.input.was_key_pressed(&glfw::Key::F) {
                     player_entity.caps.flying = !player_entity.caps.flying;
-                    cam_speed = if player_entity.caps.flying { 1.0 } else { 0.15 };
-                }
-                if frame.input.was_key_pressed(&glfw::Key::G) {
-                    slow_mode = !slow_mode;
-                    cam_speed *= if slow_mode { 0.1 } else { 1.0 / 0.1 };
+                    cam_speed = if player_entity.caps.flying { FLY_SPEED } else { NORMAL_SPEED };
                 }
                 if frame.input.was_key_pressed(&glfw::Key::E) {
                     light_dir = camera.forward;
