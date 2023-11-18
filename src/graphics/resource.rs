@@ -5,13 +5,13 @@ pub struct Resource<T, E> {
     content: T,
 }
 
-pub trait Constructor<T, E>:  Fn() -> Result<T, E> + 'static {}
+pub trait Constructor<T, E>: Fn() -> Result<T, E> + 'static {}
 
-impl<X, T, E> Constructor<T, E> for X where X: Fn() -> Result<T, E> + 'static {}
+impl<X, T, E> Constructor<T, E> for X
+    where X: Fn() -> Result<T, E> + 'static {}
 
-// TODO any way to not have the error type as part of the resource type?
 impl<T, E> Resource<T, E> {
-    pub fn new<F>(constructor: F) -> Result<Self, E> where F: Constructor<T, E> {
+    pub fn new<F: Constructor<T, E>>(constructor: F) -> Result<Self, E> {
         match constructor() {
             Ok(content) => Ok(Resource {
                 constructor: Box::new(constructor),
