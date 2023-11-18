@@ -144,7 +144,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     let physics = Physics::new();
     let mut player_entity = Entity::new(
         Point3::new(-24.0, 80.0, 174.0),
-        AABBDef::new(-Vector3::new(0.4, 1.7, 0.4), Vector3::new(0.8, 1.8, 0.8)),
+        AABBDef::new(Vector3::new(-0.4, -1.7, -0.4), Vector3::new(0.8, 1.8, 0.8)),
     );
     player_entity.caps.flying = true;
 
@@ -571,9 +571,9 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                         let player_min_x = player_entity.position.x + aabb.offset.x;
                         let player_min_y = player_entity.position.y + aabb.offset.y - 0.1; // add offset to prevent physics glitches
                         let player_min_z = player_entity.position.z + aabb.offset.z;
-                        let player_max_x = player_entity.position.x + aabb.extents.x;
-                        let player_max_y = player_entity.position.y + aabb.extents.y;
-                        let player_max_z = player_entity.position.z + aabb.extents.z;
+                        let player_max_x = player_entity.position.x + aabb.offset.x + aabb.extents.x;
+                        let player_max_y = player_entity.position.y + aabb.offset.y + aabb.extents.y;
+                        let player_max_z = player_entity.position.z + aabb.offset.z + aabb.extents.z;
 
                         if (player_max_x < x || player_min_x > x + 1.0) ||
                             (player_max_y < y || player_min_y > y + 1.0) ||
