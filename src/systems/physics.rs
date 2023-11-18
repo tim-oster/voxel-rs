@@ -1,5 +1,4 @@
-use std::ops::DerefMut;
-use cgmath::{InnerSpace, Point3, Vector3};
+use cgmath::{Point3, Vector3};
 #[cfg(test)]
 use mockall::automock;
 
@@ -97,7 +96,7 @@ impl Physics {
 
         for i in 0..entities.len() {
             let data = &results[i];
-            Physics::update_entity(entities[i], &data.aabb, &data.aabb_result, delta_time);
+            Physics::update_entity(entities[i], &data.aabb_result, delta_time);
         }
     }
 
@@ -122,7 +121,7 @@ impl Physics {
         results
     }
 
-    fn update_entity(entity: &mut Entity, aabb: &AABB, result: &AABBResult, delta_time: f32) {
+    fn update_entity(entity: &mut Entity, result: &AABBResult, delta_time: f32) {
         let mut v = entity.velocity * delta_time;
 
         if !entity.caps.flying {
@@ -132,10 +131,10 @@ impl Physics {
             }
 
             if !entity.caps.wall_clip {
-                // TODO merge into one method of find axis agnostic implementation
-                v = Physics::apply_horizontal_physics(v, &aabb, &result);
+                v.x = Physics::apply_axial_physics(v.x, result.pos.x, result.neg.x);
+                v.z = Physics::apply_axial_physics(v.z, result.pos.z, result.neg.z);
             }
-            v = Physics::apply_vertical_physics(v, &aabb, &result);
+            v.y = Physics::apply_axial_physics(v.y, result.pos.y, result.neg.y);
         }
 
         entity.position += v;
@@ -150,72 +149,13 @@ impl Physics {
         entity.velocity = v / delta_time;
     }
 
-    fn apply_horizontal_physics(speed: Vector3<f32>, aabb: &AABB, res: &AABBResult) -> Vector3<f32> {
-        const TWO_EPSILON: f32 = EPSILON * 2.0;
-
-        let x_dot = speed.dot(Vector3::new(1.0, 0.0, 0.0));
-        let z_dot = speed.dot(Vector3::new(0.0, 0.0, 1.0));
-        let x_dst = if x_dot > 0.0 { res.pos.x } else { res.neg.x };
-        let z_dst = if z_dot > 0.0 { res.pos.z } else { res.neg.z };
-
-        let mut speed = speed;
-
-        if x_dst != -1.0 {
-            if x_dst == 0.0 { // TODO
-                if x_dot > 0.0 {
-                    let actual = aabb.pos.x + aabb.offset.x + aabb.extents.x;
-                    let expected = actual.floor() - TWO_EPSILON;
-                    speed.x = expected - actual;
-                } else {
-                    let actual = aabb.pos.x + aabb.offset.x;
-                    let expected = actual.ceil() + TWO_EPSILON;
-                    speed.x = expected - actual;
-                }
-            } else if speed.x.abs() > (x_dst - TWO_EPSILON) {
-                speed.x = (x_dst - TWO_EPSILON) * speed.x.signum();
-            }
+    fn apply_axial_physics(speed: f32, dst_pos: f32, dst_neg: f32) -> f32 {
+        let dst = if speed > 0.0 { dst_pos } else { dst_neg };
+        if dst == -1.0 {
+            return speed;
         }
-
-        if z_dst != -1.0 {
-            if z_dst == 0.0 {//TODO
-                if z_dot > 0.0 {
-                    let actual = aabb.pos.z + aabb.offset.z + aabb.extents.z;
-                    let expected = actual.floor() - TWO_EPSILON;
-                    speed.x = expected - actual;
-                } else {
-                    let actual = aabb.pos.z + aabb.offset.z;
-                    let expected = actual.ceil() + TWO_EPSILON;
-                    speed.z = expected - actual;
-                }
-            } else if speed.z.abs() > (z_dst - TWO_EPSILON) {
-                speed.z = (z_dst - TWO_EPSILON) * speed.z.signum();
-            }
-        }
-
-        speed
-    }
-
-    fn apply_vertical_physics(speed: Vector3<f32>, aabb: &AABB, res: &AABBResult) -> Vector3<f32> {
-        const TWO_EPSILON: f32 = EPSILON * 2.0;
-
-        let y_dot = speed.dot(Vector3::new(0.0, 1.0, 0.0));
-        let y_dst = if y_dot > 0.0 { res.pos.y } else { res.neg.y };
-
-        let mut speed = speed;
-        if y_dst != -1.0 {
-            if y_dst == 0.0 { // TODO
-                if y_dot > 0.0 {
-                    let actual = aabb.pos.y + aabb.offset.y + aabb.extents.y;
-                    let expected = actual.floor() - TWO_EPSILON;
-                    speed.y = expected - actual;
-                } else {
-                    let actual = aabb.pos.y + aabb.offset.y;
-                    let expected = actual.ceil() + TWO_EPSILON;
-                    speed.y = expected - actual;
-                }
-            } else if speed.y.abs() > (y_dst - TWO_EPSILON) {
-                speed.y = (y_dst - TWO_EPSILON) * speed.y.signum();
-            }
+        if speed.abs() >= (dst - EPSILON) {
+            return (dst - 2.0 * EPSILON) * speed.signum();
         }
         speed
     }
@@ -442,6 +382,4 @@ mod test {
             assert_eq!(expected, &entities[i], "entity case '{}'", &test_cases[i].name);
         }
     }
-
-    // TODO after tests have been written, try refactoring physics methods
 }
