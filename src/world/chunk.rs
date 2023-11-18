@@ -1,8 +1,7 @@
 use std::ops::Sub;
 use std::sync::{Arc, RwLock};
 
-use cgmath::{Point3, Vector3};
-use cgmath::num_traits::{Inv, NumCast, ToPrimitive};
+use cgmath::Point3;
 
 use crate::world::allocator::{Allocated, Allocator};
 use crate::world::octree::{Octree, Position};
@@ -63,7 +62,8 @@ impl Sub for ChunkPos {
 #[cfg(test)]
 mod chunk_pos_test {
     use cgmath::Point3;
-    use crate::world::chunk::{ChunkPos};
+
+    use crate::world::chunk::ChunkPos;
 
     #[test]
     fn from_block_pos() {

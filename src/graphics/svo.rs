@@ -315,6 +315,8 @@ impl Svo {
 
         self.screen_quad.render();
         self.world_shader.unbind();
+
+        // place a fence to allow for waiting on the current frame to be rendered
         self.render_fence.borrow_mut().place();
     }
 }
@@ -335,7 +337,7 @@ impl Svo {
             gl::DispatchCompute(50, 1, 1);
 
             // memory barrier + sync fence necessary to ensure that persistently mapped buffer changes
-            // are loaded from the server
+            // are loaded from the server (https://www.khronos.org/opengl/wiki/Buffer_Object#Persistent_mapping)
             gl::MemoryBarrier(gl::CLIENT_MAPPED_BUFFER_BARRIER_BIT);
         }
 

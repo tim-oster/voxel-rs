@@ -22,7 +22,7 @@ pub struct GlContext {
 }
 
 // GLFW_CONTEXT is represented as a singleton because it can only be created once per process.
-// To allow multiple tests to initialise windows, for graphical testing, in parallel this is
+// To allow multiple tests to initialise windows, for graphical testing in parallel, this is
 // the only viable option of sharing this state without adding a custom test execution framework
 // on top of rust's inbuilt one.
 static GLFW_CONTEXT: Lazy<Mutex<glfw::Glfw>> = Lazy::new(|| {
