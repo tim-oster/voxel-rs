@@ -1,17 +1,27 @@
-use std::cell::{Ref, RefCell};
-use std::ops::Deref;
-use std::rc::Rc;
-
 use cgmath::{InnerSpace, Point3, Vector3};
 
 use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
 use crate::systems::worldsvo::CoordSpace;
 
 // TODO rename picker to something else
+// TODO be consistent with ray and picker naming
 
+#[derive(Debug, PartialEq)]
 pub struct PickerBatch {
     rays: Vec<RayTask>,
     aabbs: Vec<AABBTask>,
+}
+
+#[derive(Debug, PartialEq)]
+struct RayTask {
+    pos: Point3<f32>,
+    dir: Vector3<f32>,
+    max_dst: f32,
+}
+
+#[derive(Debug, PartialEq)]
+struct AABBTask {
+    pub aabb: AABB,
 }
 
 impl PickerBatch {
@@ -22,26 +32,12 @@ impl PickerBatch {
         }
     }
 
-    pub fn ray(&mut self, pos: Point3<f32>, dir: Vector3<f32>, max_dst: f32) -> RayResult<PickerResult> {
-        let result = RayResult { value: Rc::new(RefCell::new(Default::default())) };
-        let task = RayTask {
-            pos,
-            dir,
-            max_dst,
-            result: Rc::clone(&result.value),
-        };
-        self.rays.push(task);
-        result
+    pub fn ray(&mut self, pos: Point3<f32>, dir: Vector3<f32>, max_dst: f32) {
+        self.rays.push(RayTask { pos, dir, max_dst });
     }
 
-    pub fn aabb(&mut self, aabb: &AABB) -> RayResult<AABBResult> {
-        let result = RayResult { value: Rc::new(RefCell::new(Default::default())) };
-        let task = AABBTask {
-            aabb: *aabb,
-            result: Rc::clone(&result.value),
-        };
-        self.aabbs.push(task);
-        result
+    pub fn aabb(&mut self, aabb: AABB) {
+        self.aabbs.push(AABBTask { aabb });
     }
 
     pub(crate) fn serialize_tasks(&self, tasks: &mut [PickerTask], cs: Option<CoordSpace>) {
@@ -71,53 +67,38 @@ impl PickerBatch {
         }
     }
 
-    pub(crate) fn deserialize_results(&self, results: &[PickerResult], cs: Option<CoordSpace>) {
+    pub(crate) fn deserialize_results(&self, results: &[PickerResult], cs: Option<CoordSpace>) -> PickerBatchResult {
         let mut offset = 0;
+        let mut batch_result = PickerBatchResult { rays: Vec::new(), aabbs: Vec::new() };
 
-        for task in &self.rays {
-            *task.result.borrow_mut() = results[offset];
+        for _ in &self.rays {
+            let mut result = results[offset];
             offset += 1;
 
             if let Some(cs) = cs {
-                let mut result = task.result.borrow_mut();
-                // TODO find a better way to handle -1 values
-
                 let original = result.pos.0;
                 result.pos = AlignedPoint3(cs.cnv_out_of_space(result.pos.0));
                 if original.x == -1.0 { result.pos.x = -1.0 };
                 if original.y == -1.0 { result.pos.y = -1.0 };
                 if original.z == -1.0 { result.pos.z = -1.0 };
             }
+
+            batch_result.rays.push(result);
         }
 
         for task in &self.aabbs {
             let (result, consumed) = task.aabb.parse_results(&results[offset..]);
-            *task.result.borrow_mut() = result;
+            batch_result.aabbs.push(result);
             offset += consumed;
         }
+
+        batch_result
     }
 }
 
-struct RayTask {
-    pos: Point3<f32>,
-    dir: Vector3<f32>,
-    max_dst: f32,
-    result: Rc<RefCell<PickerResult>>,
-}
-
-struct AABBTask {
-    aabb: AABB,
-    result: Rc<RefCell<AABBResult>>,
-}
-
-pub struct RayResult<T> {
-    value: Rc<RefCell<T>>,
-}
-
-impl<T> RayResult<T> {
-    pub fn get(&self) -> Ref<T> {
-        Ref::map(self.value.deref().borrow(), |x| x)
-    }
+pub struct PickerBatchResult {
+    pub rays: Vec<PickerResult>,
+    pub aabbs: Vec<AABBResult>,
 }
 
 #[repr(C)]
@@ -128,7 +109,7 @@ pub(crate) struct PickerTask {
 }
 
 #[repr(C)]
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PickerResult {
     pub dst: f32,
     pub inside_block: bool,
@@ -153,24 +134,24 @@ impl PickerResult {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AABB {
     pub pos: Point3<f32>,
     pub offset: Vector3<f32>,
     pub extents: Vector3<f32>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AABBResult {
-    pub neg: Point3<f32>,
-    pub pos: Point3<f32>,
+    pub neg: Vector3<f32>,
+    pub pos: Vector3<f32>,
 }
 
 impl Default for AABBResult {
     fn default() -> Self {
         AABBResult {
-            neg: Point3::new(-1.0, -1.0, -1.0),
-            pos: Point3::new(-1.0, -1.0, -1.0),
+            neg: Vector3::new(-1.0, -1.0, -1.0),
+            pos: Vector3::new(-1.0, -1.0, -1.0),
         }
     }
 }

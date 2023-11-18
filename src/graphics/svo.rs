@@ -11,7 +11,7 @@ use crate::graphics::fence::Fence;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::shader::ShaderError;
-use crate::graphics::svo_picker::{PickerBatch, PickerResult, PickerTask};
+use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, PickerResult, PickerTask};
 use crate::systems::worldsvo::CoordSpace;
 use crate::world::chunk::BlockId;
 use crate::world::svo::SerializedChunk;
@@ -321,7 +321,7 @@ impl Svo {
 
 impl Svo {
     // TODO how to panic if too much data is submitted into batch?
-    pub fn raycast(&self, batch: PickerBatch) {
+    pub fn raycast(&self, batch: PickerBatch) -> PickerBatchResult {
         self.picker_shader.bind();
 
         let in_data = self.picker_in_buffer.as_slice_mut();
@@ -345,7 +345,7 @@ impl Svo {
         self.picker_shader.unbind();
 
         let out_data = self.picker_out_buffer.as_slice();
-        batch.deserialize_results(out_data, self.coord_space);
+        batch.deserialize_results(out_data, self.coord_space)
     }
 }
 

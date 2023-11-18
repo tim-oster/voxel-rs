@@ -8,7 +8,7 @@ use std::os::raw::c_int;
 use std::time::{Duration, Instant};
 
 use cgmath;
-use cgmath::{EuclideanSpace, Point3, Vector2, Vector3, Zero};
+use cgmath::{Point3, Vector2, Vector3};
 use cgmath::{ElementWise, InnerSpace};
 use imgui::{Condition, Id, TreeNodeFlags, Window};
 
@@ -18,7 +18,7 @@ use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::svo;
 use crate::graphics::svo::{ContentRegistry, Material, RenderParams};
-use crate::graphics::svo_picker::{PickerBatch};
+use crate::graphics::svo_picker::PickerBatch;
 use crate::systems::{chunkloading, storage, worldgen, worldsvo};
 use crate::systems::chunkloading::ChunkEvent;
 use crate::systems::gameplay::blocks;
@@ -196,7 +196,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     while !window.should_close() {
         {
             let pos = player_entity.position;
-            let mut current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
+            let current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
 
             let chunk_world_pos = Point3::new(current_chunk_pos.x as f32, 0.0, current_chunk_pos.z as f32) * 32.0;
             let delta = pos - chunk_world_pos;
@@ -260,10 +260,9 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
         // picker logic
         let mut batch = PickerBatch::new();
-        let block_result = batch.ray(player_entity.position, camera.forward, 30.0);
-        world_svo.raycast(batch);
-
-        let block_result = block_result.get();
+        batch.ray(player_entity.position, camera.forward, 30.0);
+        let batch_result = world_svo.raycast(batch);
+        let block_result = batch_result.rays[0];
 
         window.update(|frame| {
             Window::new("Debug")
@@ -277,10 +276,11 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     }
 
                     frame.ui.text(format!(
-                        "fps: {}, frame: {:.2}ms, update: {:.2}ms",
+                        "fps: {}, frame: {:.2}ms, update: {:.2}ms, delta: {:.2}",
                         frame.stats.frames_per_second,
                         frame.stats.avg_frame_time_per_second * 1000.0,
                         frame.stats.avg_update_time_per_second * 1000.0,
+                        frame.stats.delta_time,
                     ));
                     frame.ui.text(format!(
                         "abs pos: ({:.3},{:.3},{:.3})",
@@ -462,7 +462,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     if frame.input.is_key_pressed(&glfw::Key::Space) && was_grounded {
                         if !is_jumping {
                             is_jumping = true;
-                            impulse.y += 0.24;
+                            impulse.y += 0.35;
                         }
                     } else if is_grounded {
                         is_jumping = false;
@@ -584,7 +584,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     }
                 }
 
-                physics.step(frame.stats.delta_time, &world_svo, vec![&mut player_entity]);
+                physics.step(frame.stats.delta_time, &world_svo, &mut [&mut player_entity]);
             }
 
             unsafe {
