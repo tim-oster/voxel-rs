@@ -9,10 +9,10 @@ mod tests {
     use crate::core::{Config, GlContext};
     use crate::graphics::{buffer, ShaderProgram, TextureArray, TextureArrayError};
     use crate::graphics::buffer::{Buffer, MappedBuffer};
-    use crate::graphics::consts::shader_buffer_indices;
     use crate::graphics::resource::Resource;
     use crate::graphics::shader::ShaderError;
     use crate::graphics::macros::{AlignedBool, AlignedPoint2, AlignedPoint3, AlignedVec3, AlignedVec4};
+    use crate::graphics::svo::buffer_indices;
     use crate::graphics::svo_registry::MaterialInstance;
     use crate::world::allocator::Allocator;
     use crate::world::chunk::Chunk;
@@ -190,14 +190,14 @@ mod tests {
         });
 
         let world_buffer = create_test_world(world_builder);
-        world_buffer.bind_as_storage_buffer(shader_buffer_indices::WORLD);
+        world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);
 
         let shader = Resource::new(
             || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/svo.test.glsl")?.build()
         ).unwrap();
 
         let (material_buffer, tex_array) = create_test_materials();
-        material_buffer.bind_as_storage_buffer(shader_buffer_indices::MATERIALS);
+        material_buffer.bind_as_storage_buffer(buffer_indices::MATERIALS);
         shader.bind();
         shader.set_texture("u_texture", 0, &tex_array);
         shader.unbind();
@@ -218,7 +218,7 @@ mod tests {
             pos: AlignedPoint3(pos),
             dir: AlignedVec3(dir.normalize()),
         }], buffer::STATIC_READ);
-        buffer_in.bind_as_storage_buffer(shader_buffer_indices::DEBUG_IN);
+        buffer_in.bind_as_storage_buffer(buffer_indices::DEBUG_IN);
 
         let mut buffer_out = Buffer::new(vec![BufferOut {
             result: OctreeResult {
@@ -241,7 +241,7 @@ mod tests {
                 is_leaf: AlignedBool::from(false),
             }; 100],
         }], buffer::STATIC_DRAW | buffer::STATIC_READ);
-        buffer_out.bind_as_storage_buffer(shader_buffer_indices::DEBUG_OUT);
+        buffer_out.bind_as_storage_buffer(buffer_indices::DEBUG_OUT);
 
         unsafe {
             shader.bind();

@@ -5,7 +5,6 @@ use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 use crate::{graphics, world};
 use crate::graphics::{ShaderProgram, TextureArray, TextureArrayError};
 use crate::graphics::buffer::{Buffer, MappedBuffer};
-use crate::graphics::consts::shader_buffer_indices;
 use crate::graphics::fence::Fence;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
@@ -14,6 +13,16 @@ use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, PickerResult, 
 use crate::graphics::svo_registry::{MaterialInstance, VoxelRegistry};
 use crate::world::chunk::{BlockPos, ChunkPos};
 use crate::world::svo::SerializedChunk;
+
+/// Buffer indices are constants for all buffer ids used in the SVO shaders.
+pub mod buffer_indices {
+    pub const WORLD: u32 = 0;
+    pub const MATERIALS: u32 = 2;
+    pub const PICKER_OUT: u32 = 1;
+    pub const PICKER_IN: u32 = 3;
+    pub const DEBUG_IN: u32 = 11;
+    pub const DEBUG_OUT: u32 = 12;
+}
 
 /// Svo can be used to render an SVO of [`SerializedChunk`]. It is initialised
 /// with a VoxelRegistry with textures and materials to render the actual chunks.
@@ -71,24 +80,24 @@ impl Svo {
     pub fn new(registry: VoxelRegistry) -> Svo {
         let tex_array = registry.build_texture_array().unwrap();
         let material_buffer = registry.build_material_buffer(&tex_array);
-        material_buffer.bind_as_storage_buffer(shader_buffer_indices::MATERIALS);
+        material_buffer.bind_as_storage_buffer(buffer_indices::MATERIALS);
 
         let world_shader = Resource::new(
             || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
         ).unwrap();
 
         let world_buffer = MappedBuffer::<u32>::new(1000 * 1024 * 1024); // 1000 MB
-        world_buffer.bind_as_storage_buffer(shader_buffer_indices::WORLD);
+        world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);
 
         let picker_shader = Resource::new(
             || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/picker.glsl")?.build()
         ).unwrap();
 
         let picker_in_buffer = MappedBuffer::<PickerTask>::new(100);
-        picker_in_buffer.bind_as_storage_buffer(shader_buffer_indices::PICKER_IN);
+        picker_in_buffer.bind_as_storage_buffer(buffer_indices::PICKER_IN);
 
         let picker_out_buffer = MappedBuffer::<PickerResult>::new(100);
-        picker_out_buffer.bind_as_storage_buffer(shader_buffer_indices::PICKER_OUT);
+        picker_out_buffer.bind_as_storage_buffer(buffer_indices::PICKER_OUT);
 
         Svo {
             tex_array,

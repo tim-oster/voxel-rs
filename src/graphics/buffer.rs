@@ -5,8 +5,6 @@ use std::ops::{Deref, DerefMut};
 
 use gl::types::{GLsizeiptr, GLuint, GLvoid};
 
-use crate::graphics::consts::shader_buffer_indices;
-
 // doc: https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBufferData.xhtml
 type BufferUsage = u32;
 
@@ -73,9 +71,9 @@ impl<T> Buffer<T> {
         }
     }
 
-    pub fn bind_as_storage_buffer(&self, index: shader_buffer_indices::Index) {
+    pub fn bind_as_storage_buffer(&self, index: u32) {
         unsafe {
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index.get(), self.handle);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index, self.handle);
         }
     }
 
@@ -136,9 +134,9 @@ impl<T> MappedBuffer<T> {
         MappedBuffer { handle, size, mapped_ptr }
     }
 
-    pub fn bind_as_storage_buffer(&self, index: shader_buffer_indices::Index) {
+    pub fn bind_as_storage_buffer(&self, index: u32) {
         unsafe {
-            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index.get(), self.handle);
+            gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index, self.handle);
         }
     }
 
