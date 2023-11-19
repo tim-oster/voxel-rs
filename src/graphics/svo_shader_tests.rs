@@ -12,8 +12,8 @@ mod tests {
     use crate::graphics::consts::shader_buffer_indices;
     use crate::graphics::resource::Resource;
     use crate::graphics::shader::ShaderError;
-    use crate::graphics::svo::MaterialInstance;
     use crate::graphics::macros::{AlignedBool, AlignedPoint2, AlignedPoint3, AlignedVec3, AlignedVec4};
+    use crate::graphics::svo_registry::MaterialInstance;
     use crate::world::allocator::Allocator;
     use crate::world::chunk::Chunk;
     use crate::world::svo::{SerializedChunk, Svo};
@@ -79,6 +79,7 @@ mod tests {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             world_buffer.write(max_depth_exp.to_bits());
             svo.write_changes_to(world_buffer.offset(1));
+            svo.reset_changes();
         }
         world_buffer
     }

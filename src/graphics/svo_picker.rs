@@ -1,7 +1,7 @@
 use cgmath::{InnerSpace, Point3, Vector3};
 
 use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
-use crate::systems::worldsvo::CoordSpace;
+use crate::graphics::svo::CoordSpace;
 
 // TODO rename picker to something else
 // TODO be consistent with ray and picker naming

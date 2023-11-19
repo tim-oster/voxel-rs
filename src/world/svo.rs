@@ -182,22 +182,26 @@ impl<T: SvoSerializable> Svo<T> {
     }
 
     // TODO write test
-    // TODO make this immutable and add a cache reset method instead?
-    pub unsafe fn write_changes_to(&mut self, dst: *mut u32) -> Vec<Range> {
+    /// Writes all changes after the last reset to the given buffer. The implementation assumes
+    /// that the buffer passed has the same size and contains the same data as buffers in past
+    /// writes. Changes are **NOT** reset, a call to `reset_changes` is necessary to do so.
+    pub unsafe fn write_changes_to(&self, dst: *mut u32) {
         if self.root_octant_info.is_none() {
-            return Vec::new();
+            return;
         }
 
         let info = self.root_octant_info.unwrap();
         let dst = Self::write_preamble(info, dst);
 
-        let changes = self.buffer.updated_ranges.drain(..).collect::<Vec<Range>>();
-        for changed_range in &changes {
+        for changed_range in &self.buffer.updated_ranges {
             let offset = changed_range.start as isize;
             let src = self.buffer.bytes.as_ptr().offset(offset);
             ptr::copy(src, dst.offset(offset), changed_range.length);
         }
-        changes
+    }
+
+    pub fn reset_changes(&mut self) {
+        self.buffer.updated_ranges.clear();
     }
 
     unsafe fn write_preamble(info: OctantInfo, dst: *mut u32) -> *mut u32 {

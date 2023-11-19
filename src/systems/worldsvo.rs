@@ -2,11 +2,10 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 
-use cgmath::Point3;
-
 use crate::graphics;
+use crate::graphics::svo::CoordSpace;
 use crate::systems::jobs::{JobHandle, JobSystemHandle};
-use crate::world::chunk::{BlockPos, Chunk, ChunkPos};
+use crate::world::chunk::{Chunk, ChunkPos};
 use crate::world::octree::{OctantId, Position};
 use crate::world::svo::{SerializedChunk, Svo};
 
@@ -105,7 +104,8 @@ impl<'js> Manager<'js> {
 
         self.has_changed = false;
         self.svo.serialize();
-        svo.update(&mut self.svo, self.coord_space); // TODO this reference should not be mutable
+        svo.update(&self.svo, self.coord_space);
+        self.svo.reset_changes();
     }
 
     // TODO this should use the coord space instead
@@ -174,76 +174,4 @@ impl<'js> Manager<'js> {
     }
 }
 
-#[derive(Copy, Clone)]
-pub struct CoordSpace {
-    center: ChunkPos,
-    dst: u32,
-}
-
-pub type CoordSpacePos = Point3<f32>;
-
-impl CoordSpace {
-    pub fn cnv_into_space(&self, pos: Point3<f32>) -> CoordSpacePos {
-        let mut block_pos = BlockPos::from(pos);
-        let delta = block_pos.chunk - self.center;
-
-        let rd = self.dst as i32;
-        block_pos.chunk.x = rd + delta.x;
-        block_pos.chunk.z = rd + delta.z;
-
-        block_pos.to_point()
-    }
-
-    pub fn cnv_out_of_space(&self, pos: CoordSpacePos) -> Point3<f32> {
-        let mut block_pos = BlockPos::from(pos);
-
-        let rd = self.dst as i32;
-        // TODO y=rd is ignored here
-        let delta = block_pos.chunk - ChunkPos::new(rd, 0, rd);
-
-        block_pos.chunk.x = self.center.x + delta.x;
-        block_pos.chunk.z = self.center.z + delta.z;
-
-        block_pos.to_point()
-    }
-}
-
-// TODO write more tests
-
-#[cfg(test)]
-mod test {
-    use cgmath::Point3;
-
-    use crate::systems::worldsvo::CoordSpace;
-    use crate::world::chunk::ChunkPos;
-
-    #[test]
-    fn coord_space_positive() {
-        let cs = CoordSpace {
-            center: ChunkPos::new(4, 5, 12),
-            dst: 2,
-        };
-
-        let world_pos = Point3::new(32.0 * 5.0 + 16.25, 32.0 * 2.0 + 4.2, 32.0 * 10.0 + 20.5);
-        let svo_pos = cs.cnv_into_space(world_pos);
-        assert_eq!(svo_pos, Point3::new(32.0 * 3.0 + 16.25, 32.0 * 2.0 + 4.2, 32.0 * 0.0 + 20.5));
-
-        let cnv_back = cs.cnv_out_of_space(svo_pos);
-        assert_eq!(cnv_back, world_pos);
-    }
-
-    #[test]
-    fn coord_space_negative() {
-        let cs = CoordSpace {
-            center: ChunkPos::new(-1, -1, -1),
-            dst: 2,
-        };
-
-        let world_pos = Point3::new(-16.25, 4.2, -20.5);
-        let svo_pos = cs.cnv_into_space(world_pos);
-        assert_eq!(svo_pos, Point3::new(32.0 * 2.0 + 15.75, 4.2, 32.0 * 2.0 + 11.5));
-
-        let cnv_back = cs.cnv_out_of_space(svo_pos);
-        assert_eq!(cnv_back, world_pos);
-    }
-}
+// TODO write tests

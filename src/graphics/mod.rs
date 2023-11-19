@@ -15,6 +15,7 @@ mod svo_shader_tests;
 pub mod screen_quad;
 pub mod consts;
 pub mod svo_picker;
+pub mod svo_registry;
 
 pub use shader::ShaderProgramBuilder;
 pub use shader::ShaderProgram;

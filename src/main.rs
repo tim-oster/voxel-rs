@@ -17,8 +17,9 @@ use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::svo;
-use crate::graphics::svo::{ContentRegistry, Material, RenderParams};
+use crate::graphics::svo::{RenderParams};
 use crate::graphics::svo_picker::PickerBatch;
+use crate::graphics::svo_registry::{Material, VoxelRegistry};
 use crate::systems::{chunkloading, storage, worldgen, worldsvo};
 use crate::systems::chunkloading::ChunkEvent;
 use crate::systems::gameplay::blocks;
@@ -117,7 +118,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
     let mut world_generator = worldgen::Generator::new(jobs.new_handle(), 1, world_cfg.clone());
     let mut world = systems::world::World::new();
 
-    let mut registry = ContentRegistry::new();
+    let mut registry = VoxelRegistry::new();
     registry
         .add_texture("dirt", "assets/textures/dirt.png")
         .add_texture("dirt_normal", "assets/textures/dirt_n.png")
@@ -327,7 +328,8 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     let svo_stats = world_svo.get_stats();
                     frame.ui.text(format!(
                         "svo size: {:.3}mb, depth: {}",
-                        svo_stats.size_bytes, svo_stats.depth,
+                        svo_stats.size_bytes as f32 / 1024f32 / 1024f32,
+                        svo_stats.depth,
                     ));
 
                     frame.ui.text(format!(
