@@ -203,11 +203,11 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
             let pos = player_entity.position;
             let current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
 
-            let chunk_world_pos = Point3::new(current_chunk_pos.x as f32, 0.0, current_chunk_pos.z as f32) * 32.0;
+            let chunk_world_pos = Point3::new(current_chunk_pos.x as f32, current_chunk_pos.y as f32, current_chunk_pos.z as f32) * 32.0;
             let delta = pos - chunk_world_pos;
 
-            camera.position.y = pos.y;
             camera.position.x = render_distance as f32 * 32.0 + delta.x;
+            camera.position.y = render_distance as f32 * 32.0 + delta.y;
             camera.position.z = render_distance as f32 * 32.0 + delta.z;
 
             let mut generate_count = 0;

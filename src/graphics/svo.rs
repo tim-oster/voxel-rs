@@ -220,7 +220,7 @@ impl CoordSpace {
 
         let rd = self.dst as i32;
         block_pos.chunk.x = rd + delta.x;
-        // block_pos.chunk.y = rd + delta.y;
+        block_pos.chunk.y = rd + delta.y;
         block_pos.chunk.z = rd + delta.z;
 
         block_pos.to_point()
@@ -230,11 +230,10 @@ impl CoordSpace {
         let mut block_pos = BlockPos::from(pos);
 
         let rd = self.dst as i32;
-        // TODO y=rd is ignored here
-        let delta = block_pos.chunk - ChunkPos::new(rd, 0/*rd*/, rd);
+        let delta = block_pos.chunk - ChunkPos::new(rd, rd, rd);
 
         block_pos.chunk.x = self.center.x + delta.x;
-        //block_pos.chunk.y = self.center.y + delta.y;
+        block_pos.chunk.y = self.center.y + delta.y;
         block_pos.chunk.z = self.center.z + delta.z;
 
         block_pos.to_point()
@@ -255,14 +254,9 @@ mod coord_space_tests {
             dst: 2,
         };
 
-        // TODO
-        // let world_pos = Point3::new(32.0 * 5.0 + 16.25, 32.0 * 2.0 + 4.25, 32.0 * 10.0 + 20.5);
-        // let svo_pos = cs.cnv_into_space(world_pos);
-        // assert_eq!(svo_pos, Point3::new(32.0 * 3.0 + 16.25, 32.0 * -1.0 + 4.25, 32.0 * 0.0 + 20.5));
-
-        let world_pos = Point3::new(32.0 * 5.0 + 16.25, 32.0 * 2.0 + 4.2, 32.0 * 10.0 + 20.5);
+        let world_pos = Point3::new(32.0 * 5.0 + 16.25, 32.0 * 3.0 + 4.25, 32.0 * 10.0 + 20.5);
         let svo_pos = cs.cnv_into_space(world_pos);
-        assert_eq!(svo_pos, Point3::new(32.0 * 3.0 + 16.25, 32.0 * 2.0 + 4.2, 32.0 * 0.0 + 20.5));
+        assert_eq!(svo_pos, Point3::new(32.0 * 3.0 + 16.25, 32.0 * 0.0 + 4.25, 32.0 * 0.0 + 20.5));
 
         let cnv_back = cs.cnv_out_of_space(svo_pos);
         assert_eq!(cnv_back, world_pos);
@@ -275,14 +269,9 @@ mod coord_space_tests {
             dst: 2,
         };
 
-        // TODO
-        // let world_pos = Point3::new(-16.25, 4.25, -20.5);
-        // let svo_pos = cs.cnv_into_space(world_pos);
-        // assert_eq!(svo_pos, Point3::new(32.0 * 2.0 + 15.75, 32.0 * 3.0 + 4.25, 32.0 * 2.0 + 11.5));
-
-        let world_pos = Point3::new(-16.25, 4.2, -20.5);
+        let world_pos = Point3::new(-16.25, -4.25, -20.5);
         let svo_pos = cs.cnv_into_space(world_pos);
-        assert_eq!(svo_pos, Point3::new(32.0 * 2.0 + 15.75, 4.2, 32.0 * 2.0 + 11.5));
+        assert_eq!(svo_pos, Point3::new(32.0 * 2.0 + 15.75, 32.0 * 2.0 + 4.25, 32.0 * 2.0 + 11.5));
 
         let cnv_back = cs.cnv_out_of_space(svo_pos);
         assert_eq!(cnv_back, world_pos);

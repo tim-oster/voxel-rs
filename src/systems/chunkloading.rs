@@ -49,8 +49,7 @@ impl ChunkLoader {
     pub fn update(&mut self, pos: Point3<f32>) -> Vec<ChunkEvent> {
         let mut events = Vec::new();
 
-        // chunk loading is two dimensional, hence pos.y has no impact
-        let current_pos = ChunkPos::from_block_pos(pos.x as i32, 0, pos.z as i32);
+        let current_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
         if self.last_pos == Some(current_pos) {
             return events;
         }
@@ -69,6 +68,12 @@ impl ChunkLoader {
                 let lod = ChunkLoader::calculate_lod(&current_pos, &pos);
 
                 for y in self.start_y..self.end_y {
+                    // ensure that y is still within loading radius
+                    let dy = y - current_pos.y;
+                    if dy < -r || dy > r {
+                        continue;
+                    }
+
                     pos.y = y;
 
                     let existing = self.loaded_chunks.get(&pos);
@@ -90,9 +95,10 @@ impl ChunkLoader {
         let mut delete_list = Vec::new();
         for pos in self.loaded_chunks.keys() {
             let dx = (pos.x - current_pos.x).abs();
+            let dy = (pos.y - current_pos.y).abs();
             let dz = (pos.z - current_pos.z).abs();
 
-            if dx * dx + dz * dz > r * r {
+            if (dy < -r || dy > r) || dx * dx + dz * dz > r * r {
                 delete_list.push(*pos);
                 events.push(ChunkEvent::Unload { pos: *pos });
             }
@@ -154,10 +160,6 @@ mod tests {
         let events = cl.update(Point3::new(16.0, 16.0, 16.0));
         assert!(events.is_empty());
 
-        // changing chunks along y-axis does not have an effect
-        let events = cl.update(Point3::new(16.0, 64.0, 16.0));
-        assert!(events.is_empty());
-
         // change to neighbor chunk causes partial unloading of old chunks and additional loading
         // of new chunks
         let mut events = cl.update(Point3::new(32.0, 0.0, 0.0));
@@ -186,6 +188,21 @@ mod tests {
             ChunkEvent::Unload { pos: ChunkPos { x: 1, y: 0, z: 1 } },
             ChunkEvent::Unload { pos: ChunkPos { x: 2, y: 0, z: 0 } },
         ]);
+
+        // changing y above current loading radius to cause a full unload
+        let mut events = cl.update(Point3::new(128.0, 64.0, 0.0));
+        events.sort();
+        assert_eq!(events, vec![
+            ChunkEvent::Unload { pos: ChunkPos { x: 3, y: 0, z: 0 } },
+            ChunkEvent::Unload { pos: ChunkPos { x: 4, y: 0, z: -1 } },
+            ChunkEvent::Unload { pos: ChunkPos { x: 4, y: 0, z: 0 } },
+            ChunkEvent::Unload { pos: ChunkPos { x: 4, y: 0, z: 1 } },
+            ChunkEvent::Unload { pos: ChunkPos { x: 5, y: 0, z: 0 } },
+        ]);
+
+        // staying at unloaded y and changing to a different position does nothing
+        let events = cl.update(Point3::new(0.0, 64.0, 0.0));
+        assert!(events.is_empty());
     }
 
     /// Asserts that already loaded chunks are changing their LOD depending on their distance

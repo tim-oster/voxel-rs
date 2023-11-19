@@ -9,7 +9,6 @@ use crate::world::chunk::{Chunk, ChunkPos};
 use crate::world::octree::{OctantId, Position};
 use crate::world::svo::{SerializedChunk, Svo};
 
-// TODO should this support y axis changes or not? not consistent ATM
 pub struct Manager<'js> {
     jobs: JobSystemHandle<'js>,
     tx: Sender<SerializedChunk>,
@@ -76,6 +75,7 @@ impl<'js> Manager<'js> {
         if self.coord_space.center != *world_center {
             let last_center = self.coord_space.center;
             self.shift_chunks(&last_center, world_center);
+            self.has_changed = true;
         }
         self.coord_space.center = *world_center;
 
@@ -108,19 +108,25 @@ impl<'js> Manager<'js> {
         self.svo.reset_changes();
     }
 
-    // TODO this should use the coord space instead
     fn world_to_svo_pos(chunk_pos: &ChunkPos, world_center: &ChunkPos, render_distance: u32) -> Position {
         let offset_x = chunk_pos.x - world_center.x;
+        let offset_y = chunk_pos.y - world_center.y;
         let offset_z = chunk_pos.z - world_center.z;
         Position(
             (render_distance as i32 + offset_x) as u32,
-            chunk_pos.y as u32,
+            (render_distance as i32 + offset_y) as u32,
             (render_distance as i32 + offset_z) as u32,
         )
     }
 
     fn is_out_of_bounds(&self, pos: &Position) -> bool {
         let r = self.coord_space.dst as i32;
+
+        let dcy = pos.1 as i32 - r;
+        if dcy < -r || dcy > r {
+            return true;
+        }
+
         let dcx = pos.0 as i32 - r;
         let dcz = pos.2 as i32 - r;
         dcx * dcx + dcz * dcz > r * r
@@ -136,7 +142,7 @@ impl<'js> Manager<'js> {
                     continue;
                 }
 
-                for dy in -r..r {
+                for dy in -r..=r {
                     let chunk_pos = ChunkPos {
                         x: last_center.x + dx,
                         y: last_center.y + dy,
