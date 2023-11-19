@@ -40,7 +40,7 @@ impl PickerBatch {
         self.aabbs.push(AABBTask { aabb });
     }
 
-    pub(crate) fn serialize_tasks(&self, tasks: &mut [PickerTask], cs: Option<CoordSpace>) {
+    pub(crate) fn serialize_tasks(&self, tasks: &mut [PickerTask], cs: Option<CoordSpace>) -> usize {
         let mut offset = 0;
 
         for task in &self.rays {
@@ -65,6 +65,8 @@ impl PickerBatch {
                 offset += 1;
             }
         }
+
+        offset
     }
 
     pub(crate) fn deserialize_results(&self, results: &[PickerResult], cs: Option<CoordSpace>) -> PickerBatchResult {

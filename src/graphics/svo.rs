@@ -172,10 +172,10 @@ impl Svo {
         let world_buffer = MappedBuffer::<u32>::new(1000 * 1024 * 1024); // 1000 MB
         world_buffer.bind_as_storage_buffer(shader_buffer_indices::WORLD);
 
-        let picker_in_buffer = MappedBuffer::<PickerTask>::new(50);
+        let picker_in_buffer = MappedBuffer::<PickerTask>::new(100);
         picker_in_buffer.bind_as_storage_buffer(shader_buffer_indices::PICKER_IN);
 
-        let picker_out_buffer = MappedBuffer::<PickerResult>::new(50);
+        let picker_out_buffer = MappedBuffer::<PickerResult>::new(100);
         picker_out_buffer.bind_as_storage_buffer(shader_buffer_indices::PICKER_OUT);
 
         Svo {
@@ -327,14 +327,11 @@ impl Svo {
         self.picker_shader.bind();
 
         let in_data = self.picker_in_buffer.as_slice_mut();
-        batch.serialize_tasks(in_data, self.coord_space);
+        let task_count = batch.serialize_tasks(in_data, self.coord_space);
 
         unsafe {
             gl::MemoryBarrier(gl::BUFFER_UPDATE_BARRIER_BIT);
-            // TODO count how many active tasks are in the batch
-            // TODO upsize buffer to support for more tasks?
-            // TODO use actual count of tasks to avoid unnecessary work if buffer was not reset to zero?
-            gl::DispatchCompute(50, 1, 1);
+            gl::DispatchCompute(task_count as u32, 1, 1);
 
             // memory barrier + sync fence necessary to ensure that persistently mapped buffer changes
             // are loaded from the server (https://www.khronos.org/opengl/wiki/Buffer_Object#Persistent_mapping)
@@ -347,7 +344,7 @@ impl Svo {
         self.picker_shader.unbind();
 
         let out_data = self.picker_out_buffer.as_slice();
-        batch.deserialize_results(out_data, self.coord_space)
+        batch.deserialize_results(&out_data[..task_count], self.coord_space)
     }
 }
 
