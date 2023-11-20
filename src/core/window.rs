@@ -16,6 +16,9 @@ pub struct Config {
     pub headless: bool,
 }
 
+/// GlContext holds the native OpenGL rendering context for glfw as well as the associated event
+/// queue. Unless for headless testing, creating it directly is discouraged. Use [`Window`]
+/// directly instead.
 pub struct GlContext {
     window: glfw::Window,
     events: mpsc::Receiver<(f64, glfw::WindowEvent)>,
@@ -55,6 +58,8 @@ impl GlContext {
     }
 }
 
+/// Window holds the native window in which OpenGL renders to. Additionally, it handles all
+/// input events to that window.
 pub struct Window {
     context: RefCell<GlContext>,
     imgui: imgui_wrapper::Wrapper,
@@ -106,50 +111,20 @@ impl Window {
         }
     }
 
+    /// update should be called from the main run loop of the program. It handles all input
+    /// processing and native OpenGL buffer swapping. If v-sync or other settings are enabled,
+    /// it will handle the throttling of updates accordingly.
+    /// Perform all rendering logic inside the passed function handle, as well as any input
+    /// handling.
     pub fn update<F: FnOnce(&mut Frame)>(&mut self, f: F) {
-        let delta_time = self.current_stats.last_frame.elapsed();
-        self.current_stats.frame_time_accumulation += delta_time;
-        self.current_stats.delta_time = delta_time.as_secs_f32();
-        self.current_stats.last_frame = Instant::now();
+        self.update_frame_state();
+        let (size, was_resized) = self.handle_input_events();
 
-        self.current_stats.frame_count += 1;
-        if self.current_stats.last_measurement.elapsed() > Duration::from_secs(1) {
-            self.current_stats.frames_per_second = self.current_stats.frame_count;
-            self.current_stats.avg_frame_time_per_second = self.current_stats.frame_time_accumulation.as_secs_f32() / self.current_stats.frame_count as f32;
-            self.current_stats.avg_update_time_per_second = self.current_stats.update_time_accumulation.as_secs_f32() / self.current_stats.frame_count as f32;
-
-            self.current_stats.frame_count = 0;
-            self.current_stats.frame_time_accumulation = Duration::new(0, 0);
-            self.current_stats.update_time_accumulation = Duration::new(0, 0);
-            self.current_stats.last_measurement = Instant::now();
-        }
-
-        self.input.update();
-
-        let mut was_resized = false;
-        let size = self.get_size();
-
-        for (_, event) in glfw::flush_messages(&self.context.borrow().events) {
-            match event {
-                glfw::WindowEvent::FramebufferSize(width, height) => {
-                    unsafe { gl::Viewport(0, 0, width, height); }
-                    was_resized = true;
-                }
-                _ => self.input.handle_event(event),
-            }
-        }
-
+        // run update function and handle imgui rendering
         let request_close: Option<bool>;
         let request_grab_cursor: Option<bool>;
-
         {
-            let io = self.imgui.context.io_mut();
-            io.delta_time = self.current_stats.delta_time;
-            io.display_size = [size.0 as f32, size.1 as f32];
-            self.input.apply_imgui_io(io, !self.is_cursor_grabbed);
-
             let ui = self.imgui.context.frame();
-
             let mut frame = Frame {
                 input: &self.input,
                 stats: &self.current_stats,
@@ -166,7 +141,6 @@ impl Window {
 
             self.imgui.renderer.render(frame.ui);
         }
-
         if let Some(true) = request_close {
             self.request_close();
         }
@@ -176,16 +150,63 @@ impl Window {
 
         GLFW_CONTEXT.lock().unwrap().poll_events();
 
+        // measure update timing
         let delta_time = self.current_stats.last_frame.elapsed();
         self.current_stats.update_time_accumulation += delta_time;
 
         self.context.borrow_mut().window.swap_buffers();
     }
 
+    fn update_frame_state(&mut self) {
+        let delta_time = self.current_stats.last_frame.elapsed();
+        self.current_stats.frame_time_accumulation += delta_time;
+        self.current_stats.delta_time = delta_time.as_secs_f32();
+        self.current_stats.last_frame = Instant::now();
+
+        self.current_stats.frame_count += 1;
+        if self.current_stats.last_measurement.elapsed() > Duration::from_secs(1) {
+            self.current_stats.frames_per_second = self.current_stats.frame_count;
+            self.current_stats.avg_frame_time_per_second = self.current_stats.frame_time_accumulation.as_secs_f32() / self.current_stats.frame_count as f32;
+            self.current_stats.avg_update_time_per_second = self.current_stats.update_time_accumulation.as_secs_f32() / self.current_stats.frame_count as f32;
+
+            self.current_stats.frame_count = 0;
+            self.current_stats.frame_time_accumulation = Duration::new(0, 0);
+            self.current_stats.update_time_accumulation = Duration::new(0, 0);
+            self.current_stats.last_measurement = Instant::now();
+        }
+    }
+
+    fn handle_input_events(&mut self) -> ((i32, i32), bool) {
+        self.input.update();
+
+        let mut was_resized = false;
+
+        for (_, event) in glfw::flush_messages(&self.context.borrow().events) {
+            match event {
+                glfw::WindowEvent::FramebufferSize(width, height) => {
+                    unsafe { gl::Viewport(0, 0, width, height); }
+                    was_resized = true;
+                }
+                _ => self.input.handle_event(event),
+            }
+        }
+
+        let size = self.get_size();
+        let io = self.imgui.context.io_mut();
+        io.delta_time = self.current_stats.delta_time;
+        io.display_size = [size.0 as f32, size.1 as f32];
+
+        self.input.apply_imgui_io(io, !self.is_cursor_grabbed);
+
+        (size, was_resized)
+    }
+
+    /// should_close returns true, if a close was requested on this window.
     pub fn should_close(&self) -> bool {
         self.context.borrow_mut().window.should_close()
     }
 
+    /// request_close will cause the window to close in the next update cycle.
     pub fn request_close(&self) {
         self.context.borrow_mut().window.set_should_close(true);
     }
@@ -200,10 +221,12 @@ impl Window {
         }
     }
 
+    /// get_size returns the current window's width and height in pixels.
     pub fn get_size(&self) -> (i32, i32) {
         self.context.borrow().window.get_size()
     }
 
+    /// get_aspect returns the current window's aspect ration in (width / height).
     pub fn get_aspect(&self) -> f32 {
         let (w, h) = self.get_size();
         w as f32 / h as f32
