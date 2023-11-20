@@ -106,7 +106,7 @@ impl Physics {
 
         for entity in entities.iter() {
             let aabb = AABB::new(entity.position, entity.aabb_def.offset, entity.aabb_def.extents);
-            batch.aabb(aabb);
+            batch.add_aabb(aabb);
             results.push(RaycastData {
                 aabb,
                 aabb_result: AABBResult::default(),
@@ -165,7 +165,7 @@ impl Physics {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use cgmath::{Point3, Vector3, Zero};
     use mockall::predicate::eq;
 
@@ -362,7 +362,7 @@ mod test {
                 state: c.expected_state.unwrap_or_default(),
             });
 
-            expected_batch.aabb(AABB::new(c.position, e.aabb_def.offset, e.aabb_def.extents));
+            expected_batch.add_aabb(AABB::new(c.position, e.aabb_def.offset, e.aabb_def.extents));
             aabb_results.push(c.aabb_result);
 
             entities.push(e);

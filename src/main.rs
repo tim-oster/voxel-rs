@@ -40,7 +40,7 @@ fn main() {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use image::GenericImageView;
 
     // source: https://rosettacode.org/wiki/Percentage_difference_between_images#Rust
@@ -265,7 +265,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
         // picker logic
         let mut batch = PickerBatch::new();
-        batch.ray(player_entity.position, camera.forward, 30.0);
+        batch.add_ray(player_entity.position, camera.forward, 30.0);
         let batch_result = world_svo.raycast(batch);
         let block_result = batch_result.rays[0];
 
@@ -303,8 +303,8 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     let mut norm = Vector3::new(0.0, 0.0, 0.0);
 
                     if block_result.did_hit() {
-                        pos = block_result.pos.0;
-                        norm = block_result.normal.0;
+                        pos = block_result.pos;
+                        norm = block_result.normal;
                     }
                     frame.ui.text(format!(
                         "block pos: ({:.2},{:.2},{:.2})",
@@ -564,7 +564,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                 if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
                     if block_result.did_hit() {
                         let block_normal = block_result.normal;
-                        let block_pos = block_result.pos.add(block_normal.0);
+                        let block_pos = block_result.pos.add(block_normal);
                         let x = block_pos.x.floor() as i32 as f32;
                         let y = block_pos.y.floor() as i32 as f32;
                         let z = block_pos.z.floor() as i32 as f32;
@@ -597,7 +597,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
 
                 let mut selected_block = None;
                 if block_result.did_hit() {
-                    selected_block = Some(block_result.pos.0);
+                    selected_block = Some(block_result.pos);
                 }
 
                 world_svo.render(RenderParams {

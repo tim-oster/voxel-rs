@@ -3,41 +3,40 @@ use cgmath::{InnerSpace, Point3, Vector3};
 use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
 use crate::graphics::svo::CoordSpace;
 
-// TODO rename picker to something else
-// TODO be consistent with ray and picker naming
-
 #[derive(Debug, PartialEq)]
 pub struct PickerBatch {
-    rays: Vec<RayTask>,
-    aabbs: Vec<AABBTask>,
+    rays: Vec<Ray>,
+    aabbs: Vec<AABB>,
 }
 
-#[derive(Debug, PartialEq)]
-struct RayTask {
-    pos: Point3<f32>,
-    dir: Vector3<f32>,
-    max_dst: f32,
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PickerTask {
+    pub max_dst: f32,
+    pub pos: AlignedPoint3<f32>,
+    pub dir: AlignedVec3<f32>,
 }
 
-#[derive(Debug, PartialEq)]
-struct AABBTask {
-    pub aabb: AABB,
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PickerResult {
+    pub dst: f32,
+    pub inside_block: bool,
+    pub pos: AlignedPoint3<f32>,
+    pub normal: AlignedVec3<f32>,
 }
 
 impl PickerBatch {
     pub fn new() -> PickerBatch {
-        PickerBatch {
-            rays: Vec::new(),
-            aabbs: Vec::new(),
-        }
+        PickerBatch { rays: Vec::new(), aabbs: Vec::new() }
     }
 
-    pub fn ray(&mut self, pos: Point3<f32>, dir: Vector3<f32>, max_dst: f32) {
-        self.rays.push(RayTask { pos, dir, max_dst });
+    pub fn add_ray(&mut self, pos: Point3<f32>, dir: Vector3<f32>, max_dst: f32) {
+        self.rays.push(Ray { pos, dir, max_dst });
     }
 
-    pub fn aabb(&mut self, aabb: AABB) {
-        self.aabbs.push(AABBTask { aabb });
+    pub fn add_aabb(&mut self, aabb: AABB) {
+        self.aabbs.push(aabb);
     }
 
     pub(crate) fn serialize_tasks(&self, tasks: &mut [PickerTask], cs: Option<CoordSpace>) -> usize {
@@ -56,8 +55,8 @@ impl PickerBatch {
             offset += 1;
         }
 
-        for task in &self.aabbs {
-            for mut task in task.aabb.generate_picker_tasks() {
+        for aabb in &self.aabbs {
+            for mut task in aabb.generate_picker_tasks() {
                 if let Some(cs) = cs {
                     task.pos = AlignedPoint3(cs.cnv_into_space(task.pos.0));
                 }
@@ -78,18 +77,19 @@ impl PickerBatch {
             offset += 1;
 
             if let Some(cs) = cs {
-                let original = result.pos.0;
                 result.pos = AlignedPoint3(cs.cnv_out_of_space(result.pos.0));
-                if original.x == -1.0 { result.pos.x = -1.0 };
-                if original.y == -1.0 { result.pos.y = -1.0 };
-                if original.z == -1.0 { result.pos.z = -1.0 };
             }
 
-            batch_result.rays.push(result);
+            batch_result.rays.push(RayResult {
+                dst: result.dst,
+                inside_block: result.inside_block,
+                pos: result.pos.0,
+                normal: result.normal.0,
+            });
         }
 
-        for task in &self.aabbs {
-            let (result, consumed) = task.aabb.parse_results(&results[offset..]);
+        for aabb in &self.aabbs {
+            let (result, consumed) = aabb.parse_picker_results(&results[offset..]);
             batch_result.aabbs.push(result);
             offset += consumed;
         }
@@ -98,39 +98,28 @@ impl PickerBatch {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub struct PickerBatchResult {
-    pub rays: Vec<PickerResult>,
+    pub rays: Vec<RayResult>,
     pub aabbs: Vec<AABBResult>,
 }
 
-#[repr(C)]
-pub(crate) struct PickerTask {
-    pub max_dst: f32,
-    pub pos: AlignedPoint3<f32>,
-    pub dir: AlignedVec3<f32>,
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ray {
+    pos: Point3<f32>,
+    dir: Vector3<f32>,
+    max_dst: f32,
 }
 
-#[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PickerResult {
+pub struct RayResult {
     pub dst: f32,
     pub inside_block: bool,
-    pub pos: AlignedPoint3<f32>,
-    pub normal: AlignedVec3<f32>,
+    pub pos: Point3<f32>,
+    pub normal: Vector3<f32>,
 }
 
-impl Default for PickerResult {
-    fn default() -> Self {
-        PickerResult {
-            dst: -1.0,
-            inside_block: false,
-            pos: AlignedPoint3::new(0.0, 0.0, 0.0),
-            normal: AlignedVec3::new(0.0, 0.0, 0.0),
-        }
-    }
-}
-
-impl PickerResult {
+impl RayResult {
     pub fn did_hit(&self) -> bool {
         self.dst != -1.0
     }
@@ -204,7 +193,7 @@ impl AABB {
         tasks
     }
 
-    fn parse_results(&self, data: &[PickerResult]) -> (AABBResult, usize) {
+    fn parse_picker_results(&self, data: &[PickerResult]) -> (AABBResult, usize) {
         let blocks_per_axis = vec![
             self.extents.x.ceil() as i32,
             self.extents.y.ceil() as i32,
@@ -235,7 +224,7 @@ impl AABB {
 
                         let ref_index = i * 2 + if v == 0 { 1 } else { 0 };
                         if *references[ref_index] == -1.0 {
-                            *references[ref_index] = if data[res_index].inside_block { 0.0 } else { dst };
+                            *references[ref_index] = dst;
                         } else {
                             *references[ref_index] = references[ref_index].min(dst);
                         }
@@ -247,4 +236,236 @@ impl AABB {
     }
 }
 
-// TODO write tests
+#[cfg(test)]
+mod tests {
+    use cgmath::{Point3, Vector3};
+
+    use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
+    use crate::graphics::svo_picker::{AABB, AABBResult, PickerBatch, PickerBatchResult, PickerResult, PickerTask, RayResult};
+
+    #[test]
+    fn picker_batch_serialization() {
+        let mut batch = PickerBatch::new();
+        batch.add_ray(Point3::new(1.0, 0.0, 1.0), Vector3::new(0.0, 1.0, 0.0), 20.0);
+        batch.add_ray(Point3::new(2.0, 0.0, 2.0), Vector3::new(1.0, 0.0, 0.0), 40.0);
+        batch.add_aabb(AABB {
+            pos: Point3::new(0.5, 0.0, 0.5),
+            offset: Vector3::new(-0.5, 0.0, -0.5),
+            extents: Vector3::new(1.0, 1.0, 1.0),
+        });
+        batch.add_aabb(AABB {
+            pos: Point3::new(0.0, 0.0, 0.0),
+            offset: Vector3::new(0.0, 0.0, 0.0),
+            extents: Vector3::new(1.5, 1.5, 1.5),
+        });
+
+        let default_task = PickerTask { max_dst: 0.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 0.0)) };
+        let mut buffer = vec![default_task; 100];
+        let tasks = batch.serialize_tasks(&mut buffer, None);
+
+        // [2 rays] + [1 unit size aabb * ( 3 rays per corner * 8 corners )] + [1 irregular aabb * ( 3 rays per corner * 8 corners + 2 rays per half side * 4 halves per axis * 3 axis + 1 ray per face * 6 face )]
+        // [ 2 ] + [ 24 ] + [ 54 ] = 80
+        assert_eq!(tasks, 80);
+        assert_eq!(buffer[..tasks], vec![
+            // rays
+            PickerTask { max_dst: 20.0, pos: AlignedPoint3(Point3::new(1.0, 0.0, 1.0)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 40.0, pos: AlignedPoint3(Point3::new(2.0, 0.0, 2.0)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            // aabb 1
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 1.0)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 1.0)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 1.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.0, 0.0)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.0, 1.0)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.0, 1.0)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.0, 1.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 0.0, 1.0)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 0.0, 1.0)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 0.0, 1.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 1.0, 0.0)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 1.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 1.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 1.0, 1.0)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 1.0, 1.0)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.0, 1.0, 1.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            // aabb 2
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.75)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.75)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 1.5)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 1.5)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.75, 0.0)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.75, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.75, 0.75)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.75, 1.5)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 0.75, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.0)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.75)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.75)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.5, 1.5)), dir: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.5, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.0, 1.5, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 0.0, 0.75)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 0.0, 1.5)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 0.0, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 0.75, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 0.75, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 1.5, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 1.5, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 1.5, 0.75)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 1.5, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(0.75, 1.5, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.75)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.75)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.0, 1.5)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.0, 1.5)), dir: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.0, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.75, 0.0)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.75, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.75, 0.75)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.75, 1.5)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 0.75, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.0)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.75)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.75)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 1.5, 1.5)), dir: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 1.5, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerTask { max_dst: 10.0, pos: AlignedPoint3(Point3::new(1.5, 1.5, 1.5)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+        ]);
+    }
+
+    #[test]
+    fn picker_batch_deserialization() {
+        let mut batch = PickerBatch::new();
+        batch.add_ray(Point3::new(0.0, 0.0, 0.0), Vector3::new(-1.0, 0.0, 0.0), 20.0);
+        batch.add_ray(Point3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0), 20.0);
+        batch.add_aabb(AABB {
+            pos: Point3::new(0.5, 0.0, 0.5),
+            offset: Vector3::new(-0.5, 0.0, -0.5),
+            extents: Vector3::new(1.0, 1.0, 1.0),
+        });
+        batch.add_aabb(AABB {
+            pos: Point3::new(0.0, 0.0, 0.0),
+            offset: Vector3::new(0.0, 0.0, 0.0),
+            extents: Vector3::new(1.5, 1.5, 1.5),
+        });
+
+        let buffer = vec![
+            // rays
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 0.0)) },
+            PickerResult { dst: 10.0, inside_block: true, pos: AlignedPoint3(Point3::new(-1.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(10.0, 0.0, 0.0)) },
+            // aabb 1
+            PickerResult { dst: 8.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: 8.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: 8.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: 4.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: 4.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: 4.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: 7.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: 2.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: 1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            // aabb 2
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: 9.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.75)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: 8.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.75)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 1.5)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 1.5)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.0, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.75, 0.0)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.75, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.75, 0.75)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.75, 1.5)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: 5.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 0.75, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.0)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.75)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 1.5, 0.75)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(-1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.0, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 0.0, 0.75)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 0.0, 1.5)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 0.0, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: 7.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 0.75, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 0.75, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 1.5, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 1.5, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 1.5, 0.75)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(0.75, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: 5.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.75)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.0, 0.75)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: 5.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.0, 1.5)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.0, 1.5)), normal: AlignedVec3(Vector3::new(0.0, -1.0, 0.0)) },
+            PickerResult { dst: 3.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.0, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.75, 0.0)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.75, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.75, 0.75)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.75, 1.5)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 0.75, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.0)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.0)), normal: AlignedVec3(Vector3::new(0.0, 0.0, -1.0)) },
+            PickerResult { dst: 1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.75)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: 4.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 0.75)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(1.0, 0.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 1.0, 0.0)) },
+            PickerResult { dst: -1.0, inside_block: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
+        ];
+
+        let result = batch.deserialize_results(&buffer, None);
+
+        assert_eq!(result, PickerBatchResult {
+            rays: vec![
+                RayResult { dst: -1.0, inside_block: false, pos: Point3::new(0.0, 0.0, 0.0), normal: Vector3::new(0.0, 0.0, 0.0) },
+                RayResult { dst: 10.0, inside_block: true, pos: Point3::new(-1.0, 0.0, 0.0), normal: Vector3::new(10.0, 0.0, 0.0) },
+            ],
+            aabbs: vec![
+                AABBResult { neg: Vector3::new(8.0, 7.0, 8.0), pos: Vector3::new(2.0, 4.0, 1.0) },
+                AABBResult { neg: Vector3::new(9.0, 8.0, 7.0), pos: Vector3::new(1.0, 4.0, 3.0) },
+            ],
+        });
+    }
+}
