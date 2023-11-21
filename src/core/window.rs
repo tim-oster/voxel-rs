@@ -18,7 +18,7 @@ pub struct Config {
 
 /// GlContext holds the native OpenGL rendering context for glfw as well as the associated event
 /// queue. Unless for headless testing, creating it directly is discouraged. Use [`Window`]
-/// directly instead.
+/// instead.
 pub struct GlContext {
     window: glfw::Window,
     events: mpsc::Receiver<(f64, glfw::WindowEvent)>,
@@ -36,7 +36,7 @@ static GLFW_CONTEXT: Lazy<Mutex<glfw::Glfw>> = Lazy::new(|| {
 });
 
 impl GlContext {
-    pub fn new(cfg: Config) -> GlContext {
+    fn new(cfg: Config) -> GlContext {
         let mut context = GLFW_CONTEXT.lock().unwrap();
 
         if cfg.msaa_samples > 0 {
@@ -55,6 +55,16 @@ impl GlContext {
         gl::load_with(|symbol| window.get_proc_address(symbol) as *const _);
 
         GlContext { window, events }
+    }
+
+    pub fn new_headless(width: u32, height: u32) -> GlContext {
+        GlContext::new(Config {
+            width,
+            height,
+            title: "",
+            msaa_samples: 0,
+            headless: true,
+        })
     }
 }
 

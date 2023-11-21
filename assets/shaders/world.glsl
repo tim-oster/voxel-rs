@@ -80,8 +80,9 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
         shadow = shadow_res.t < 0 ? 1.0 : 0.0;
     }
 
-    float light = u_ambient + (diffuse + specular) * shadow;
-    return res.color * light;
+    float light = clamp(u_ambient + (diffuse + specular) * shadow, 0.0, 1.0);
+    res.color.rgb *= light;
+    return res.color;
 }
 
 void main() {

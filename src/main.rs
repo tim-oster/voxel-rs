@@ -17,7 +17,7 @@ use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::svo;
-use crate::graphics::svo::{RenderParams};
+use crate::graphics::svo::RenderParams;
 use crate::graphics::svo_picker::PickerBatch;
 use crate::graphics::svo_registry::{Material, VoxelRegistry};
 use crate::systems::{chunkloading, storage, worldgen, worldsvo};
@@ -58,9 +58,9 @@ mod tests {
         let pixels = fb.read_pixels();
         let actual = image::RgbaImage::from_raw(fb.width() as u32, fb.height() as u32, pixels).unwrap();
         let actual = image::DynamicImage::ImageRgba8(actual).flipv();
-        actual.save_with_format("./test_actual.png", image::ImageFormat::Png).unwrap();
+        actual.save_with_format("assets/tests/e2e_actual.png", image::ImageFormat::Png).unwrap();
 
-        let expected = image::open("./test_expected.png").unwrap();
+        let expected = image::open("assets/tests/e2e_expected.png").unwrap();
 
         let mut accum = 0;
         let zipper = actual.pixels().zip(expected.pixels());
@@ -605,7 +605,7 @@ fn run(testing_mode: bool) -> (Framebuffer, core::Window) {
                     light_dir,
                     cam_pos: camera.position,
                     view_mat: camera.get_camera_to_world_matrix(),
-                    fov_y_rad: 70.0f32.to_radians(),
+                    fov_y_rad: camera.get_fov_y_deg().to_radians(),
                     aspect_ratio: frame.get_aspect(),
                     selected_block,
                 });

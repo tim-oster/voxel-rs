@@ -1,33 +1,40 @@
 #![allow(dead_code)]
 
-use cgmath::{Matrix4, Vector3, Point3, InnerSpace, SquareMatrix};
+use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Vector3};
 
 pub struct Camera {
     pub position: Point3<f32>,
     pub forward: Vector3<f32>,
     pub up: Vector3<f32>,
 
+    fov_y_deg: f32,
     projection: Matrix4<f32>,
 }
 
 impl Camera {
-    pub fn new(fov_y: f32, aspect: f32, near: f32, far: f32) -> Camera {
+    pub fn new(fov_y_deg: f32, aspect: f32, near: f32, far: f32) -> Camera {
         let mut cam = Camera {
             position: Point3::new(0.0, 0.0, 0.0),
             forward: Vector3::new(0.0, 0.0, -1.0),
             up: Vector3::new(0.0, 1.0, 0.0),
+            fov_y_deg,
             projection: Matrix4::identity(),
         };
-        cam.update_projection(fov_y, aspect, near, far);
+        cam.update_projection(fov_y_deg, aspect, near, far);
         cam
     }
 
-    pub fn update_projection(&mut self, fov_y: f32, aspect: f32, near: f32, far: f32) {
-        self.projection = cgmath::perspective(cgmath::Deg(fov_y), aspect, near, far);
+    pub fn update_projection(&mut self, fov_y_deg: f32, aspect: f32, near: f32, far: f32) {
+        self.fov_y_deg = fov_y_deg;
+        self.projection = cgmath::perspective(cgmath::Deg(fov_y_deg), aspect, near, far);
     }
 
     pub fn right(&self) -> Vector3<f32> {
         self.forward.cross(self.up).normalize()
+    }
+
+    pub fn get_fov_y_deg(&self) -> f32 {
+        self.fov_y_deg
     }
 
     pub fn get_projection_matrix(&self) -> &Matrix4<f32> {

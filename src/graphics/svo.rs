@@ -131,8 +131,8 @@ impl Svo {
 
     /// update will write all changes from the given `svo` to the GPU buffer. It will also update
     /// the internal `coord_space` used for SVO <-> GPU space conversions.
-    pub fn update(&mut self, svo: &world::svo::Svo<SerializedChunk>, coord_space: CoordSpace) {
-        self.coord_space = Some(coord_space);
+    pub fn update(&mut self, svo: &world::svo::Svo<SerializedChunk>, coord_space: Option<CoordSpace>) {
+        self.coord_space = coord_space;
 
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
@@ -208,7 +208,132 @@ impl Svo {
     }
 }
 
-// TODO write render tests
+#[cfg(test)]
+mod svo_tests {
+    use std::sync::Arc;
+
+    use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Vector3};
+    use image::GenericImageView;
+
+    use crate::{gl_assert_no_error, world};
+    use crate::core::GlContext;
+    use crate::graphics::framebuffer::Framebuffer;
+    use crate::graphics::svo::{RenderParams, Svo};
+    use crate::graphics::svo_registry::{Material, VoxelRegistry};
+    use crate::world::allocator::Allocator;
+    use crate::world::chunk::{Chunk, ChunkPos, ChunkStorage};
+    use crate::world::octree::Position;
+    use crate::world::svo::SerializedChunk;
+
+    // source: https://rosettacode.org/wiki/Percentage_difference_between_images#Rust
+    fn diff_rgba3(rgba1: image::Rgba<u8>, rgba2: image::Rgba<u8>) -> i32 {
+        (rgba1[0] as i32 - rgba2[0] as i32).abs()
+            + (rgba1[1] as i32 - rgba2[1] as i32).abs()
+            + (rgba1[2] as i32 - rgba2[2] as i32).abs()
+    }
+
+    fn create_world_svo<F>(builder: F) -> world::svo::Svo<SerializedChunk>
+        where F: FnOnce(&mut Chunk) {
+        let allocator = Allocator::new(
+            Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
+            Some(Box::new(|storage| storage.reset())),
+        );
+        let allocator = Arc::new(allocator);
+
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), allocator);
+        builder(&mut chunk);
+
+        let chunk = SerializedChunk::new(chunk.pos, chunk.get_storage().unwrap(), 5);
+        let mut svo = world::svo::Svo::<SerializedChunk>::new();
+        svo.set(Position(0, 0, 0), Some(chunk));
+        svo.serialize();
+        svo
+    }
+
+    #[test]
+    fn render() {
+        let (width, height) = (640, 490);
+
+        let context = GlContext::new_headless(width, height);
+
+        let world_svo = create_world_svo(|chunk| {
+            for x in 0..5 {
+                for z in 0..5 {
+                    chunk.set_block(x, 0, z, 1);
+                }
+            }
+
+            chunk.set_block(1, 1, 1, 2);
+            chunk.set_block(3, 1, 1, 2);
+            chunk.set_block(1, 3, 1, 2);
+            chunk.set_block(3, 3, 1, 2);
+
+            chunk.set_block(1, 1, 3, 2);
+            chunk.set_block(3, 1, 3, 2);
+            chunk.set_block(1, 3, 3, 2);
+            chunk.set_block(3, 3, 3, 2);
+        });
+
+        let mut registry = VoxelRegistry::new();
+        registry
+            .add_texture("stone", "assets/textures/stone.png")
+            .add_texture("stone_normal", "assets/textures/stone_n.png")
+            .add_texture("dirt", "assets/textures/dirt.png")
+            .add_texture("dirt_normal", "assets/textures/dirt_n.png")
+            .add_texture("grass_side", "assets/textures/grass_side.png")
+            .add_texture("grass_side_normal", "assets/textures/grass_side_n.png")
+            .add_texture("grass_top", "assets/textures/grass_top.png")
+            .add_texture("grass_top_normal", "assets/textures/grass_top_n.png")
+            .add_material(0, Material::new())
+            .add_material(1, Material::new().specular(70.0, 0.4).all_sides("stone").with_normals())
+            .add_material(2, Material::new().specular(14.0, 0.4).top("grass_top").side("grass_side").bottom("dirt").with_normals());
+
+        let mut svo = Svo::new(registry);
+        svo.update(&world_svo, None);
+
+        let fb = Framebuffer::new(width as i32, height as i32);
+
+        fb.bind();
+        unsafe {
+            gl::ClearColor(0.0, 0.0, 0.0, 1.0);
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
+        }
+
+        let cam_pos = Point3::new(2.5, 2.5, 7.5);
+        svo.render(RenderParams {
+            ambient_intensity: 0.3,
+            light_dir: Vector3::new(-1.0, -1.0, -1.0).normalize(),
+            cam_pos,
+            view_mat: Matrix4::look_to_rh(cam_pos, -Vector3::unit_z(), Vector3::unit_y()).invert().unwrap(),
+            fov_y_rad: 72.0f32.to_radians(),
+            aspect_ratio: width as f32 / height as f32,
+            selected_block: Some(Point3::new(1.0, 1.0, 3.0)),
+        });
+        fb.unbind();
+        gl_assert_no_error!();
+
+        let pixels = fb.read_pixels();
+        let actual = image::RgbaImage::from_raw(fb.width() as u32, fb.height() as u32, pixels).unwrap();
+        let actual = image::DynamicImage::ImageRgba8(actual).flipv();
+        actual.save_with_format("assets/tests/graphics_svo_render_actual.png", image::ImageFormat::Png).unwrap();
+
+        let expected = image::open("assets/tests/graphics_svo_render_expected.png").unwrap();
+
+        let mut accum = 0;
+        let zipper = actual.pixels().zip(expected.pixels());
+        for (pixel1, pixel2) in zipper {
+            accum += diff_rgba3(pixel1.2, pixel2.2);
+        }
+        let diff_percent = accum as f64 / (255.0 * 3.0 * (actual.width() * actual.height()) as f64);
+        println!("difference: {:.5}", diff_percent);
+        assert!(diff_percent < 0.001);
+    }
+
+    #[test]
+    fn raycast() {
+        // TODO
+    }
+}
 
 #[derive(Copy, Clone)]
 pub struct CoordSpace {

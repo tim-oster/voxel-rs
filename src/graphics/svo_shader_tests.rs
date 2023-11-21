@@ -6,12 +6,12 @@ mod tests {
 
     use crate::{assert_float_eq, ChunkPos, graphics, Position};
     use crate::chunk::ChunkStorage;
-    use crate::core::{Config, GlContext};
+    use crate::core::GlContext;
     use crate::graphics::{buffer, ShaderProgram, TextureArray, TextureArrayError};
     use crate::graphics::buffer::{Buffer, MappedBuffer};
+    use crate::graphics::macros::{AlignedBool, AlignedPoint2, AlignedPoint3, AlignedVec3, AlignedVec4};
     use crate::graphics::resource::Resource;
     use crate::graphics::shader::ShaderError;
-    use crate::graphics::macros::{AlignedBool, AlignedPoint2, AlignedPoint3, AlignedVec3, AlignedVec4};
     use crate::graphics::svo::buffer_indices;
     use crate::graphics::svo_registry::MaterialInstance;
     use crate::world::allocator::Allocator;
@@ -59,7 +59,6 @@ mod tests {
 
     fn create_test_world<F>(builder: F) -> MappedBuffer<u32>
         where F: FnOnce(&mut Chunk) {
-        // TODO refactor world & svo setup logic once rest of codebase has been refactored
         let allocator = Allocator::new(
             Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
             Some(Box::new(|storage| storage.reset())),
@@ -181,13 +180,7 @@ mod tests {
 
     fn setup_test<F>(world_builder: F) -> TestSetup
         where F: FnOnce(&mut Chunk) {
-        let context = GlContext::new(Config {
-            width: 640,
-            height: 490,
-            title: "",
-            msaa_samples: 0,
-            headless: true,
-        });
+        let context = GlContext::new_headless(640, 490);
 
         let world_buffer = create_test_world(world_builder);
         world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);

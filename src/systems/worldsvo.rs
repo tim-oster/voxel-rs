@@ -104,7 +104,7 @@ impl<'js> Manager<'js> {
 
         self.has_changed = false;
         self.svo.serialize();
-        svo.update(&self.svo, self.coord_space);
+        svo.update(&self.svo, Some(self.coord_space));
         self.svo.reset_changes();
     }
 
