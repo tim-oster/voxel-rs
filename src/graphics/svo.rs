@@ -215,10 +215,11 @@ mod svo_tests {
     use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Vector3};
     use image::GenericImageView;
 
-    use crate::{gl_assert_no_error, world};
+    use crate::{assert_float_eq, gl_assert_no_error, world};
     use crate::core::GlContext;
     use crate::graphics::framebuffer::Framebuffer;
     use crate::graphics::svo::{RenderParams, Svo};
+    use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
     use crate::world::allocator::Allocator;
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorage};
@@ -250,12 +251,27 @@ mod svo_tests {
         svo
     }
 
+    fn create_voxel_registry() -> VoxelRegistry {
+        let mut registry = VoxelRegistry::new();
+        registry
+            .add_texture("stone", "assets/textures/stone.png")
+            .add_texture("stone_normal", "assets/textures/stone_n.png")
+            .add_texture("dirt", "assets/textures/dirt.png")
+            .add_texture("dirt_normal", "assets/textures/dirt_n.png")
+            .add_texture("grass_side", "assets/textures/grass_side.png")
+            .add_texture("grass_side_normal", "assets/textures/grass_side_n.png")
+            .add_texture("grass_top", "assets/textures/grass_top.png")
+            .add_texture("grass_top_normal", "assets/textures/grass_top_n.png")
+            .add_material(0, Material::new())
+            .add_material(1, Material::new().specular(70.0, 0.4).all_sides("stone").with_normals())
+            .add_material(2, Material::new().specular(14.0, 0.4).top("grass_top").side("grass_side").bottom("dirt").with_normals());
+        registry
+    }
+
     #[test]
     fn render() {
         let (width, height) = (640, 490);
-
-        let context = GlContext::new_headless(width, height);
-
+        let _context = GlContext::new_headless(width, height); // do not drop context
         let world_svo = create_world_svo(|chunk| {
             for x in 0..5 {
                 for z in 0..5 {
@@ -274,21 +290,7 @@ mod svo_tests {
             chunk.set_block(3, 3, 3, 2);
         });
 
-        let mut registry = VoxelRegistry::new();
-        registry
-            .add_texture("stone", "assets/textures/stone.png")
-            .add_texture("stone_normal", "assets/textures/stone_n.png")
-            .add_texture("dirt", "assets/textures/dirt.png")
-            .add_texture("dirt_normal", "assets/textures/dirt_n.png")
-            .add_texture("grass_side", "assets/textures/grass_side.png")
-            .add_texture("grass_side_normal", "assets/textures/grass_side_n.png")
-            .add_texture("grass_top", "assets/textures/grass_top.png")
-            .add_texture("grass_top_normal", "assets/textures/grass_top_n.png")
-            .add_material(0, Material::new())
-            .add_material(1, Material::new().specular(70.0, 0.4).all_sides("stone").with_normals())
-            .add_material(2, Material::new().specular(14.0, 0.4).top("grass_top").side("grass_side").bottom("dirt").with_normals());
-
-        let mut svo = Svo::new(registry);
+        let mut svo = Svo::new(create_voxel_registry());
         svo.update(&world_svo, None);
 
         let fb = Framebuffer::new(width as i32, height as i32);
@@ -331,7 +333,45 @@ mod svo_tests {
 
     #[test]
     fn raycast() {
-        // TODO
+        let _context = GlContext::new_headless(1, 1); // do not drop context
+        let world_svo = create_world_svo(|chunk| {
+            chunk.set_block(0, 0, 0, 1);
+            chunk.set_block(1, 0, 0, 1);
+        });
+
+        let mut svo = Svo::new(create_voxel_registry());
+        svo.update(&world_svo, None);
+
+        let mut batch = PickerBatch::new();
+        batch.add_ray(Point3::new(0.5, 1.5, 0.5), Vector3::new(0.0, -1.0, 0.0), 1.0);
+        batch.add_ray(Point3::new(0.5, 0.5, 0.5), Vector3::new(1.0, 0.0, 0.0), 1.0);
+        batch.add_ray(Point3::new(0.5, 0.5, -2.0), Vector3::new(0.0, 0.0, 1.0), 1.0);
+
+        let result = svo.raycast(batch);
+        gl_assert_no_error!();
+        assert_eq!(result, PickerBatchResult {
+            rays: vec![
+                RayResult {
+                    dst: 0.5,
+                    inside_block: false,
+                    pos: Point3::new(0.5, assert_float_eq!(result.rays[0].pos.y, 1.0), 0.5),
+                    normal: Vector3::new(0.0, 1.0, 0.0),
+                },
+                RayResult {
+                    dst: 0.5,
+                    inside_block: true,
+                    pos: Point3::new(assert_float_eq!(result.rays[1].pos.x, 1.0), 0.5, 0.5),
+                    normal: Vector3::new(-1.0, 0.0, 0.0),
+                },
+                RayResult {
+                    dst: -1.0,
+                    inside_block: false,
+                    pos: Point3::new(0.0, 0.0, 0.0),
+                    normal: Vector3::new(0.0, 0.0, 0.0),
+                },
+            ],
+            aabbs: vec![],
+        });
     }
 }
 
