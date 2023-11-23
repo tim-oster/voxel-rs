@@ -117,6 +117,9 @@ pub struct Ray {
     max_dst: f32,
 }
 
+/// RayResult represent a ray intersection with a voxel. Only if dst != -1.0, are any of the other
+/// fields valid. If a ray is cast from within a voxel, no intersection is returned for the voxel
+/// from within the cast originates.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RayResult {
     pub dst: f32,
@@ -192,7 +195,7 @@ impl AABB {
                                 if v == 0 { return -1.0; }
                                 return 1.0;
                             }
-                            0.001 // TODO why does straight down not work?
+                            0.0
                         };
 
                         let point = Vector3::new(
@@ -203,7 +206,7 @@ impl AABB {
                         tasks.push(PickerTask {
                             max_dst: 10.0,
                             pos: AlignedPoint3(self.pos + self.offset + point),
-                            dir: AlignedVec3(Vector3::new(dir(0), dir(1), dir(2)).normalize()),
+                            dir: AlignedVec3(Vector3::new(dir(0), dir(1), dir(2))),
                         });
                     }
                 }

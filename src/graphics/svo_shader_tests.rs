@@ -57,7 +57,7 @@ mod tests {
         is_leaf: AlignedBool,
     }
 
-    fn create_test_world<F>(builder: F) -> MappedBuffer<u32>
+    fn create_test_world<F>(svo_pos: Position, builder: F) -> MappedBuffer<u32>
         where F: FnOnce(&mut Chunk) {
         let allocator = Allocator::new(
             Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
@@ -70,7 +70,7 @@ mod tests {
 
         let chunk = SerializedChunk::new(chunk.pos, chunk.get_storage().unwrap(), 5);
         let mut svo = Svo::<SerializedChunk>::new();
-        svo.set(Position(0, 0, 0), Some(chunk));
+        svo.set(svo_pos, Some(chunk));
         svo.serialize();
 
         let world_buffer = MappedBuffer::<u32>::new(1000 * 1024 * 1024 / 4);
@@ -178,11 +178,12 @@ mod tests {
         shader: Resource<ShaderProgram, ShaderError>,
     }
 
-    fn setup_test<F>(world_builder: F) -> TestSetup
+    fn setup_test<F>(svo_pos: Option<Position>, world_builder: F) -> TestSetup
         where F: FnOnce(&mut Chunk) {
         let context = GlContext::new_headless(640, 490);
 
-        let world_buffer = create_test_world(world_builder);
+        let svo_pos = svo_pos.unwrap_or(Position(0, 0, 0));
+        let world_buffer = create_test_world(svo_pos, world_builder);
         world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);
 
         let shader = Resource::new(
@@ -218,9 +219,9 @@ mod tests {
                 t: 0.0,
                 value: 0,
                 face_id: 0,
-                pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)),
-                uv: AlignedPoint2(Point2::new(0.0, 0.0)),
-                color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
+                pos: AlignedPoint3::new(0.0, 0.0, 0.0),
+                uv: AlignedPoint2::new(0.0, 0.0),
+                color: AlignedVec4::new(0.0, 0.0, 0.0, 0.0),
                 inside_block: AlignedBool::from(false),
             },
             stack_ptr: 0,
@@ -254,7 +255,7 @@ mod tests {
     fn shader_svo_traversal() {
         // setup a world with one block at the "end" of the chunk to make sure that the algorithm
         // has to step through many empty children
-        let setup = setup_test(|chunk| chunk.set_block(31, 0, 0, 1));
+        let setup = setup_test(None, |chunk| chunk.set_block(31, 0, 0, 1));
         let buffer_out = cast_ray(
             &setup.shader,
             Point3::new(0.0, 0.5, 0.5),
@@ -271,33 +272,33 @@ mod tests {
 
         assert_eq!(buffer_out.stack_ptr, 18);
         assert_eq!(&buffer_out.stack[..19], &[
-            StackFrame { t_min: 0.0, ptr: 0, idx: 1, parent_octant_idx: 0, scale: 22, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 0.0, ptr: 113, idx: 1, parent_octant_idx: 0, scale: 21, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 0.0, ptr: 5, idx: 1, parent_octant_idx: 0, scale: 20, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 0.0, ptr: 17, idx: 1, parent_octant_idx: 0, scale: 19, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 0.0, ptr: 29, idx: 1, parent_octant_idx: 0, scale: 18, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 0.0, ptr: 41, idx: 1, parent_octant_idx: 0, scale: 17, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 1.0, ptr: 41, idx: 0, parent_octant_idx: 0, scale: 17, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 2.0, ptr: 29, idx: 0, parent_octant_idx: 0, scale: 18, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 4.0, ptr: 17, idx: 0, parent_octant_idx: 0, scale: 19, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 8.0, ptr: 5, idx: 0, parent_octant_idx: 0, scale: 20, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 16.0, ptr: 113, idx: 0, parent_octant_idx: 0, scale: 21, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 16.0, ptr: 5, idx: 1, parent_octant_idx: 1, scale: 20, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 24.0, ptr: 5, idx: 0, parent_octant_idx: 1, scale: 20, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 24.0, ptr: 65, idx: 1, parent_octant_idx: 1, scale: 19, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 28.0, ptr: 65, idx: 0, parent_octant_idx: 1, scale: 19, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 28.0, ptr: 77, idx: 1, parent_octant_idx: 1, scale: 18, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 30.0, ptr: 77, idx: 0, parent_octant_idx: 1, scale: 18, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 30.0, ptr: 89, idx: 1, parent_octant_idx: 1, scale: 17, is_child: AlignedBool::from(false), is_leaf: AlignedBool::from(false) },
-            StackFrame { t_min: 31.0, ptr: 89, idx: 0, parent_octant_idx: 1, scale: 17, is_child: AlignedBool::from(true), is_leaf: AlignedBool::from(true) },
+            StackFrame { t_min: 0.0, ptr: 0, idx: 7, parent_octant_idx: 0, scale: 22, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 113, idx: 7, parent_octant_idx: 0, scale: 21, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 5, idx: 7, parent_octant_idx: 0, scale: 20, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 17, idx: 7, parent_octant_idx: 0, scale: 19, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 29, idx: 7, parent_octant_idx: 0, scale: 18, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 41, idx: 7, parent_octant_idx: 0, scale: 17, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 1.0, ptr: 41, idx: 6, parent_octant_idx: 0, scale: 17, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 2.0, ptr: 29, idx: 6, parent_octant_idx: 0, scale: 18, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 4.0, ptr: 17, idx: 6, parent_octant_idx: 0, scale: 19, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 8.0, ptr: 5, idx: 6, parent_octant_idx: 0, scale: 20, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 16.0, ptr: 113, idx: 6, parent_octant_idx: 0, scale: 21, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 16.0, ptr: 5, idx: 7, parent_octant_idx: 1, scale: 20, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 24.0, ptr: 5, idx: 6, parent_octant_idx: 1, scale: 20, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 24.0, ptr: 65, idx: 7, parent_octant_idx: 1, scale: 19, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 28.0, ptr: 65, idx: 6, parent_octant_idx: 1, scale: 19, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 28.0, ptr: 77, idx: 7, parent_octant_idx: 1, scale: 18, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 30.0, ptr: 77, idx: 6, parent_octant_idx: 1, scale: 18, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 30.0, ptr: 89, idx: 7, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 31.0, ptr: 89, idx: 6, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(1), is_leaf: AlignedBool(1) },
         ]);
         assert_eq!(buffer_out.result, OctreeResult {
             t: 31.0,
             value: 1,
             face_id: 0,
-            pos: AlignedPoint3(Point3::new(31.000008, 0.5, 0.5)),
-            uv: AlignedPoint2(Point2::new(0.5, 0.5)),
-            color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+            pos: AlignedPoint3::new(31.000008, 0.5, 0.5),
+            uv: AlignedPoint2::new(0.5, 0.5),
+            color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
             inside_block: AlignedBool::from(false),
         });
     }
@@ -308,7 +309,7 @@ mod tests {
     #[test]
     fn cast_inside_outside_all_axes() {
         // place blocks at 30 instead of 31 to have space for inside casts for every axis
-        let setup = setup_test(|chunk| {
+        let setup = setup_test(None, |chunk| {
             chunk.set_block(30, 0, 0, 1);
             chunk.set_block(0, 30, 0, 1);
             chunk.set_block(0, 0, 30, 1);
@@ -330,9 +331,9 @@ mod tests {
                     t: 29.5,
                     value: 1,
                     face_id: 0,
-                    pos: AlignedPoint3(Point3::new(30.000008, 0.5, 0.5)),
-                    uv: AlignedPoint2(Point2::new(0.5, 0.5)),
-                    color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+                    pos: AlignedPoint3::new(30.000008, 0.5, 0.5),
+                    uv: AlignedPoint2::new(0.5, 0.5),
+                    color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
                     inside_block: AlignedBool::from(false),
                 },
             },
@@ -344,9 +345,9 @@ mod tests {
                     t: 0.5,
                     value: 1,
                     face_id: 1,
-                    pos: AlignedPoint3(Point3::new(30.999992, 0.5, 0.5)),
-                    uv: AlignedPoint2(Point2::new(0.5, 0.5)),
-                    color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+                    pos: AlignedPoint3::new(30.999992, 0.5, 0.5),
+                    uv: AlignedPoint2::new(0.5, 0.5),
+                    color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
                     inside_block: AlignedBool::from(false),
                 },
             },
@@ -358,9 +359,9 @@ mod tests {
                     t: 29.5,
                     value: 1,
                     face_id: 2,
-                    pos: AlignedPoint3(Point3::new(0.5, 30.000008, 0.5)),
-                    uv: AlignedPoint2(Point2::new(0.5, 0.5)),
-                    color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+                    pos: AlignedPoint3::new(0.5, 30.000008, 0.5),
+                    uv: AlignedPoint2::new(0.5, 0.5),
+                    color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
                     inside_block: AlignedBool::from(false),
                 },
             },
@@ -372,9 +373,9 @@ mod tests {
                     t: 0.5,
                     value: 1,
                     face_id: 3,
-                    pos: AlignedPoint3(Point3::new(0.5, 30.999992, 0.5)),
-                    uv: AlignedPoint2(Point2::new(0.5, 0.5)),
-                    color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+                    pos: AlignedPoint3::new(0.5, 30.999992, 0.5),
+                    uv: AlignedPoint2::new(0.5, 0.5),
+                    color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
                     inside_block: AlignedBool::from(false),
                 },
             },
@@ -386,9 +387,9 @@ mod tests {
                     t: 29.5,
                     value: 1,
                     face_id: 4,
-                    pos: AlignedPoint3(Point3::new(0.5, 0.5, 30.000008)),
-                    uv: AlignedPoint2(Point2::new(0.5, 0.5)),
-                    color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+                    pos: AlignedPoint3::new(0.5, 0.5, 30.000008),
+                    uv: AlignedPoint2::new(0.5, 0.5),
+                    color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
                     inside_block: AlignedBool::from(false),
                 },
             },
@@ -400,9 +401,9 @@ mod tests {
                     t: 0.5,
                     value: 1,
                     face_id: 5,
-                    pos: AlignedPoint3(Point3::new(0.5, 0.5, 30.999992)),
-                    uv: AlignedPoint2(Point2::new(0.5, 0.5)),
-                    color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+                    pos: AlignedPoint3::new(0.5, 0.5, 30.999992),
+                    uv: AlignedPoint2::new(0.5, 0.5),
+                    color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
                     inside_block: AlignedBool::from(false),
                 },
             },
@@ -414,9 +415,9 @@ mod tests {
                     t: 51.095497,
                     value: 1,
                     face_id: 2,
-                    pos: AlignedPoint3(Point3::new(30.099998, 30.000008, 30.099998)),
-                    uv: AlignedPoint2(Point2::new(0.099998474, 0.9000015)),
-                    color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+                    pos: AlignedPoint3::new(30.099998, 30.000008, 30.099998),
+                    uv: AlignedPoint2::new(0.099998474, 0.9000015),
+                    color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
                     inside_block: AlignedBool::from(false),
                 },
             },
@@ -428,9 +429,9 @@ mod tests {
                     t: 0.86602306,
                     value: 1,
                     face_id: 3,
-                    pos: AlignedPoint3(Point3::new(30.900002, 30.999992, 30.900002)),
-                    uv: AlignedPoint2(Point2::new(0.9000015, 0.9000015)),
-                    color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+                    pos: AlignedPoint3::new(30.900002, 30.999992, 30.900002),
+                    uv: AlignedPoint2::new(0.9000015, 0.9000015),
+                    color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
                     inside_block: AlignedBool::from(false),
                 },
             },
@@ -453,7 +454,7 @@ mod tests {
     /// onto each side along the uv space.
     #[test]
     fn uv_coords_on_all_sides() {
-        let setup = setup_test(|chunk| chunk.set_block(0, 0, 0, 2));
+        let setup = setup_test(None, |chunk| chunk.set_block(0, 0, 0, 2));
 
         struct TestCase {
             pos: Point3<f32>,
@@ -572,7 +573,7 @@ mod tests {
         // blocks while the second one has two different kinds. Both kinds have textures that
         // are transparent on the left half and opaque on the right half. This allows testing
         // the algorithm's behaviour when casting diagonally through them.
-        let setup = setup_test(|chunk| {
+        let setup = setup_test(None, |chunk| {
             chunk.set_block(0, 0, 0, 3);
             chunk.set_block(0, 0, 1, 3);
             chunk.set_block(5, 0, 0, 3);
@@ -587,16 +588,16 @@ mod tests {
             t: assert_float_eq!(buffer_out.result.t, 0.1, 0.01),
             value: 3,
             face_id: 4,
-            pos: AlignedPoint3(Point3::new(
+            pos: AlignedPoint3::new(
                 assert_float_eq!(buffer_out.result.pos.x, 0.295, 0.01),
                 assert_float_eq!(buffer_out.result.pos.y, 0.5),
                 assert_float_eq!(buffer_out.result.pos.z, 0.0),
-            )),
-            uv: AlignedPoint2(Point2::new(
+            ),
+            uv: AlignedPoint2::new(
                 assert_float_eq!(buffer_out.result.uv.x, 0.295, 0.01),
                 assert_float_eq!(buffer_out.result.uv.y, 0.5),
-            )),
-            color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
+            ),
+            color: AlignedVec4::new(0.0, 0.0, 0.0, 0.0),
             inside_block: AlignedBool::from(false),
         }, "do not cast translucent");
 
@@ -606,9 +607,9 @@ mod tests {
             t: -1.0,
             value: 0,
             face_id: 0,
-            pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)),
-            uv: AlignedPoint2(Point2::new(0.0, 0.0)),
-            color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
+            pos: AlignedPoint3::new(0.0, 0.0, 0.0),
+            uv: AlignedPoint2::new(0.0, 0.0),
+            color: AlignedVec4::new(0.0, 0.0, 0.0, 0.0),
             inside_block: AlignedBool::from(false),
         }, "cast translucent with adjacent identical");
 
@@ -618,16 +619,16 @@ mod tests {
             t: assert_float_eq!(buffer_out.result.t, 1.2, 0.01),
             value: 4,
             face_id: 4,
-            pos: AlignedPoint3(Point3::new(
+            pos: AlignedPoint3::new(
                 assert_float_eq!(buffer_out.result.pos.x, 5.75, 0.01),
                 assert_float_eq!(buffer_out.result.pos.y, 0.5),
                 assert_float_eq!(buffer_out.result.pos.z, 1.0),
-            )),
-            uv: AlignedPoint2(Point2::new(
+            ),
+            uv: AlignedPoint2::new(
                 assert_float_eq!(buffer_out.result.uv.x, 0.75, 0.01),
                 assert_float_eq!(buffer_out.result.uv.y, 0.5),
-            )),
-            color: AlignedVec4(Vector4::new(0.0, 1.0, 0.0, 1.0)),
+            ),
+            color: AlignedVec4::new(0.0, 1.0, 0.0, 1.0),
             inside_block: AlignedBool::from(false),
         }, "cast translucent with adjacent different");
     }
@@ -636,7 +637,7 @@ mod tests {
     /// intersect with that voxel.
     #[test]
     fn detect_inside_leaf_voxel() {
-        let setup = setup_test(|chunk| chunk.set_block(0, 0, 0, 1));
+        let setup = setup_test(None, |chunk| chunk.set_block(0, 0, 0, 1));
 
         // inside block
         let buffer_out = cast_ray(
@@ -650,9 +651,9 @@ mod tests {
             t: -1.0,
             value: 0,
             face_id: 0,
-            pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)),
-            uv: AlignedPoint2(Point2::new(0.0, 0.0)),
-            color: AlignedVec4(Vector4::new(0.0, 0.0, 0.0, 0.0)),
+            pos: AlignedPoint3::new(0.0, 0.0, 0.0),
+            uv: AlignedPoint2::new(0.0, 0.0),
+            color: AlignedVec4::new(0.0, 0.0, 0.0, 0.0),
             inside_block: AlignedBool::from(true),
         }, "inside block");
 
@@ -668,14 +669,66 @@ mod tests {
             t: 0.5,
             value: 1,
             face_id: 0,
-            pos: AlignedPoint3(Point3::new(
+            pos: AlignedPoint3::new(
                 assert_float_eq!(buffer_out.result.pos.x, 8e-6),
                 0.5,
                 0.5,
-            )),
-            uv: AlignedPoint2(Point2::new(0.5, 0.5)),
-            color: AlignedVec4(Vector4::new(1.0, 0.0, 0.0, 1.0)),
+            ),
+            uv: AlignedPoint2::new(0.5, 0.5),
+            color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
             inside_block: AlignedBool::from(false),
         }, "outside block");
+    }
+
+    /// Tests large coordinates at the upper end of the SVO bounds. This caused problems before due
+    /// to division by zero errors inside the traversal algorithm because the epsilon values were
+    /// not properly applied on axes of the direction vector with a value of 0.0.
+    #[test]
+    fn check_at_higher_coordinates() {
+        let setup = setup_test(Some(Position(15, 15, 15)), |chunk| {
+            for x in 0..32 {
+                for z in 0..32 {
+                    for y in 0..5 {
+                        chunk.set_block(x, y, z, 1);
+                    }
+                }
+            }
+        });
+        let buffer_out = cast_ray(
+            &setup.shader,
+            Point3::new(484.9203, 485.95938, 493.8467),
+            Vector3::new(0.0, -1.0, 0.0),
+            10.0,
+            false,
+        );
+
+        println!("total stack frames: {}", buffer_out.stack_ptr + 1);
+        for i in 0..=buffer_out.stack_ptr {
+            println!("f{}: {:?}", i, buffer_out.stack[i as usize]);
+        }
+        println!("\n{:?}", buffer_out.result);
+
+        assert_eq!(buffer_out.stack_ptr, 9);
+        assert_eq!(&buffer_out.stack[..10], &[
+            StackFrame { t_min: 0.0, ptr: 0, idx: 2, parent_octant_idx: 0, scale: 22, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 11009, idx: 2, parent_octant_idx: 7, scale: 21, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 11057, idx: 2, parent_octant_idx: 7, scale: 20, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 11069, idx: 2, parent_octant_idx: 7, scale: 19, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 11081, idx: 5, parent_octant_idx: 7, scale: 18, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 5, idx: 1, parent_octant_idx: 0, scale: 17, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 17, idx: 2, parent_octant_idx: 4, scale: 16, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 1397, idx: 5, parent_octant_idx: 7, scale: 15, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.0, ptr: 2021, idx: 3, parent_octant_idx: 0, scale: 14, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
+            StackFrame { t_min: 0.9593506, ptr: 2021, idx: 1, parent_octant_idx: 0, scale: 14, is_child: AlignedBool(1), is_leaf: AlignedBool(1) },
+        ]);
+        assert_eq!(buffer_out.result, OctreeResult {
+            t: 0.9593506,
+            value: 1,
+            face_id: 3,
+            pos: AlignedPoint3::new(484.9203, 484.99994, 493.84668),
+            uv: AlignedPoint2::new(0.9202881, 0.8466797),
+            color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
+            inside_block: AlignedBool::from(false),
+        });
     }
 }

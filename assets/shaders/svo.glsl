@@ -102,10 +102,12 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
     int last_leaf_value = -1;
     int adjecent_leaf_count = 0;
 
-    // prevents divide by zero
-    if (abs(rd.x) < epsilon) rd.x = epsilon * sign(rd.x);
-    if (abs(rd.y) < epsilon) rd.y = epsilon * sign(rd.y);
-    if (abs(rd.z) < epsilon) rd.z = epsilon * sign(rd.z);
+    // prevents divide by zero (bit-magic to copy sign of rd to epsilon value)
+    int sign_mask = 1 << 31;
+    int epsilon_bits_without_sign = floatBitsToInt(epsilon) & ~sign_mask;
+    if (abs(rd.x) < epsilon) rd.x = intBitsToFloat(epsilon_bits_without_sign | (floatBitsToInt(rd.x) & sign_mask));
+    if (abs(rd.y) < epsilon) rd.y = intBitsToFloat(epsilon_bits_without_sign | (floatBitsToInt(rd.y) & sign_mask));
+    if (abs(rd.z) < epsilon) rd.z = intBitsToFloat(epsilon_bits_without_sign | (floatBitsToInt(rd.z) & sign_mask));
 
     // abs to prevent negative directions from inversing the ordering of min(tx, ty, tz). Negative components
     // will reuslt in negative coefficients, which always leads to smaller t values, regardless of what the other
