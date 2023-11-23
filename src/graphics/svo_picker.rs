@@ -45,6 +45,8 @@ impl PickerBatch {
         self.aabbs.push(aabb);
     }
 
+    /// serialize_tasks transforms all tasks on this batch into actual PickerTasks and writes them
+    /// to the given task buffer.
     pub(crate) fn serialize_tasks(&self, tasks: &mut [PickerTask], cs: Option<CoordSpace>) -> usize {
         let mut offset = 0;
 
@@ -74,6 +76,8 @@ impl PickerBatch {
         offset
     }
 
+    /// deserialize_results reads all results from the given result buffer and parses the results
+    /// for all jobs on this batch.
     pub(crate) fn deserialize_results(&self, results: &[PickerResult], cs: Option<CoordSpace>) -> PickerBatchResult {
         let mut offset = 0;
         let mut batch_result = PickerBatchResult { rays: Vec::new(), aabbs: Vec::new() };
@@ -269,6 +273,7 @@ mod tests {
     use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
     use crate::graphics::svo_picker::{AABB, AABBResult, PickerBatch, PickerBatchResult, PickerResult, PickerTask, RayResult};
 
+    /// Tests if task serialization works as expected.
     #[test]
     fn picker_batch_serialization() {
         let mut batch = PickerBatch::new();
@@ -379,6 +384,7 @@ mod tests {
         ]);
     }
 
+    /// Tests if task deserialization works as expected.
     #[test]
     fn picker_batch_deserialization() {
         let mut batch = PickerBatch::new();

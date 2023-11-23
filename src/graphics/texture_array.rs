@@ -23,10 +23,16 @@ impl From<ImageError> for TextureArrayError {
 }
 
 enum ImageContent {
+    /// File(path)
     File(String),
+    /// RGB8(width, height, data)
     RGB8(u32, u32, Vec<u8>),
 }
 
+/// TextureArrayBuilder allows for combining multiple ImageContent values into one texture array.
+/// The first ImageContent object decides the resolution of the texture array. All other images
+/// must have the same dimensions. Adding a new image requires specifying a unique name which
+/// can later be used, to lookup the texture's index in the array.
 pub struct TextureArrayBuilder {
     mip_levels: u8,
     textures: HashMap<String, u32>,

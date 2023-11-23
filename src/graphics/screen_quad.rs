@@ -1,10 +1,10 @@
-use std::ffi::c_void;
 use std::{mem, ptr};
+use std::ffi::c_void;
 
 use gl::types::{GLint, GLsizeiptr, GLuint};
 
-use crate::graphics::resource::Bind;
 use crate::graphics::macros::{AlignedPoint2, AlignedPoint3, AlignedVec3};
+use crate::graphics::resource::Bind;
 
 #[repr(C)]
 struct Vertex {
@@ -13,6 +13,7 @@ struct Vertex {
     normal: AlignedVec3<f32>,
 }
 
+/// ScreenQuad creates a OpenGL VAO for a full-screen quad in clip space/normalized device coordinates.
 pub struct ScreenQuad {
     vao: GLuint,
     vbo: GLuint,

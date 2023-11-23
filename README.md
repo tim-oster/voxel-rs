@@ -23,8 +23,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    main(main.rs) --> core(core)
-    main --> systems(systems)
+    main(main.rs) --> systems
     
     graphics --> core
     

@@ -18,7 +18,7 @@ pub struct Input {
 
 #[allow(dead_code)]
 impl Input {
-    pub fn new() -> Input {
+    pub(crate) fn new() -> Input {
         Input {
             pressed_keys: HashSet::new(),
             released_keys: HashSet::new(),
@@ -34,7 +34,7 @@ impl Input {
         }
     }
 
-    pub fn update(&mut self) {
+    pub(crate) fn update(&mut self) {
         self.released_keys.clear();
         self.last_key_modifiers = glfw::Modifiers::empty();
         self.char_input_buffer.clear();
@@ -44,7 +44,7 @@ impl Input {
         self.last_button_state = self.pressed_buttons.clone();
     }
 
-    pub fn handle_event(&mut self, event: glfw::WindowEvent) {
+    pub(crate) fn handle_event(&mut self, event: glfw::WindowEvent) {
         match event {
             glfw::WindowEvent::Key(key, _, action, modifiers) => match action {
                 glfw::Action::Press => {
@@ -86,31 +86,37 @@ impl Input {
         }
     }
 
+    /// is_key_pressed returns true if the key is currently pressed down.
     pub fn is_key_pressed(&self, key: &glfw::Key) -> bool {
         self.pressed_keys.contains(key)
     }
 
+    /// was_key_pressed returns true if the key was released in the last update.
     pub fn was_key_pressed(&self, key: &glfw::Key) -> bool {
         self.released_keys.contains(key)
     }
 
+    /// is_button_pressed returns true if the mouse button is currently being held.
     pub fn is_button_pressed(&self, button: &glfw::MouseButton) -> bool {
         self.pressed_buttons.contains(button)
     }
 
+    /// is_button_pressed_once returns true if this is the first update the mouse button was pressed.
     pub fn is_button_pressed_once(&self, button: &glfw::MouseButton) -> bool {
         self.pressed_buttons.contains(button) && !self.last_button_state.contains(button)
     }
 
+    /// was_button_pressed returns true if the mouse button was released in the last update.
     pub fn was_button_pressed(&self, button: &glfw::MouseButton) -> bool {
         self.released_buttons.contains(button)
     }
 
+    /// get_mouse_delta returns the distance the mouse has moved since the last update.
     pub fn get_mouse_delta(&self) -> cgmath::Vector2<f32> {
         self.mouse_delta
     }
 
-    pub fn apply_imgui_io(&self, io: &mut imgui::Io, forward_input_events: bool) {
+    pub(crate) fn apply_imgui_io(&self, io: &mut imgui::Io, forward_input_events: bool) {
         if forward_input_events {
             io.mouse_pos = [self.last_mouse_pos.x, self.last_mouse_pos.y];
             io.mouse_delta = [self.mouse_delta.x, self.mouse_delta.y];

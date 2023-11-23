@@ -10,6 +10,7 @@ pub trait Constructor<T, E>: Fn() -> Result<T, E> + 'static {}
 impl<X, T, E> Constructor<T, E> for X
     where X: Fn() -> Result<T, E> + 'static {}
 
+/// Resource holds an actual resource and its constructor, allowing it to be reloaded in place.
 impl<T, E> Resource<T, E> {
     pub fn new<F: Constructor<T, E>>(constructor: F) -> Result<Self, E> {
         match constructor() {

@@ -268,6 +268,8 @@ mod svo_tests {
         registry
     }
 
+    /// Tests if rendering of a demo chunks works correctly. Voxels are textured and lighting is
+    /// applied. Result is stored in an image an compared against a reference image.
     #[test]
     fn render() {
         let (width, height) = (640, 490);
@@ -331,6 +333,7 @@ mod svo_tests {
         assert!(diff_percent < 0.001);
     }
 
+    /// Tests if multiple raycasts return the expected results.
     #[test]
     fn raycast() {
         let _context = GlContext::new_headless(1, 1); // do not drop context
@@ -421,6 +424,7 @@ mod coord_space_tests {
     use crate::graphics::svo::CoordSpace;
     use crate::world::chunk::ChunkPos;
 
+    /// Test transformation for positive coordinates.
     #[test]
     fn coord_space_positive() {
         let cs = CoordSpace {
@@ -436,6 +440,7 @@ mod coord_space_tests {
         assert_eq!(cnv_back, world_pos);
     }
 
+    /// Test transformation for negative coordinates.
     #[test]
     fn coord_space_negative() {
         let cs = CoordSpace {

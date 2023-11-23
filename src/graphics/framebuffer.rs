@@ -12,6 +12,8 @@ pub struct Framebuffer {
     height: i32,
 }
 
+/// Framebuffer is a wrapper around a OpenGL framebuffer object. It attaches color, depth & stencil
+/// buffer for the given resolution. No multi-sampling is applied.
 impl Framebuffer {
     pub fn new(width: i32, height: i32) -> Framebuffer {
         let mut handle = 0;

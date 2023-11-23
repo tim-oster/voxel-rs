@@ -53,6 +53,8 @@ impl GlError {
     }
 }
 
+/// ShaderProgramBuilder allows for loading multiple GLSL source files and compiling them into one
+/// OpenGL shader program.
 pub struct ShaderProgramBuilder {
     shaders: HashMap<ShaderType, Shader>,
     include_cache: HashMap<String, String>,
@@ -240,6 +242,8 @@ mod shader_program_builder_tests {
 
     use crate::graphics::ShaderProgramBuilder;
 
+    /// Tests if files with includes and other directives are loaded correctly without actually
+    /// compiling the shader.
     #[test]
     fn load_file() {
         let mut include_file = NamedTempFile::new().unwrap();

@@ -52,12 +52,14 @@ impl Material {
         }
     }
 
+    /// specular set specular material properties for this material.
     pub fn specular(mut self, pow: f32, strength: f32) -> Material {
         self.specular_pow = pow;
         self.specular_strength = strength;
         self
     }
 
+    /// all_sides applies the same texture to all sides of the material.
     pub fn all_sides(self, name: &'static str) -> Material {
         self.top(name).side(name).bottom(name)
     }
@@ -77,6 +79,8 @@ impl Material {
         self
     }
 
+    /// with_normals adds normal textures to all sides a texture was set for. The path is the
+    /// same as the side's texture with a "_normal" suffix.
     pub fn with_normals(mut self) -> Material {
         if let Some(tex) = &self.tex_top {
             self.tex_top_normal = Some(tex.clone() + "_normal");

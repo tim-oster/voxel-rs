@@ -1,5 +1,10 @@
 use gl::types::GLsync;
 
+use crate::gl_assert_no_error;
+
+/// Fence is a low level synchronization object. Placing a fence will drop any previously placed
+/// fence first and then immediately flush the new fence to the GPU command queue. After that,
+/// calls to wait will block until the fence is signaled.
 pub struct Fence {
     handle: Option<GLsync>,
 }
@@ -25,8 +30,12 @@ impl Fence {
         unsafe {
             loop {
                 let result = gl::ClientWaitSync(lock, gl::SYNC_FLUSH_COMMANDS_BIT, 1);
-                if result == gl::ALREADY_SIGNALED || result == gl::CONDITION_SATISFIED {
+                if result == gl::TIMEOUT_EXPIRED {
+                    continue;
+                } else if result == gl::ALREADY_SIGNALED || result == gl::CONDITION_SATISFIED {
                     return;
+                } else {
+                    gl_assert_no_error!();
                 }
             }
         }
