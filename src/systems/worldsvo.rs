@@ -1,16 +1,17 @@
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::sync::mpsc::{Receiver, Sender};
 
 use crate::graphics;
 use crate::graphics::svo::CoordSpace;
-use crate::systems::jobs::{JobHandle, JobSystemHandle};
+use crate::systems::jobs::{JobHandle, JobSystem};
 use crate::world::chunk::{Chunk, ChunkPos};
 use crate::world::octree::{OctantId, Position};
 use crate::world::svo::{SerializedChunk, Svo};
 
-pub struct Manager<'js> {
-    jobs: JobSystemHandle<'js>,
+pub struct Manager {
+    job_system: Rc<JobSystem>,
     tx: Sender<SerializedChunk>,
     rx: Receiver<SerializedChunk>,
     chunk_jobs: HashMap<ChunkPos, JobHandle>,
@@ -21,11 +22,11 @@ pub struct Manager<'js> {
     coord_space: CoordSpace,
 }
 
-impl<'js> Manager<'js> {
-    pub fn new(jobs: JobSystemHandle<'js>, render_distance: u32) -> Manager {
+impl Manager {
+    pub fn new(job_system: Rc<JobSystem>, render_distance: u32) -> Manager {
         let (tx, rx) = mpsc::channel::<SerializedChunk>();
         Manager {
-            jobs,
+            job_system,
             tx,
             rx,
             chunk_jobs: HashMap::new(),
@@ -48,7 +49,7 @@ impl<'js> Manager<'js> {
             let lod = chunk.lod;
             let tx = self.tx.clone();
 
-            let handle = self.jobs.push(true, Box::new(move || {
+            let handle = self.job_system.push(true, Box::new(move || {
                 let serialized = SerializedChunk::new(pos, storage, lod);
                 tx.send(serialized).unwrap();
             }));

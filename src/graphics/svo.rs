@@ -218,7 +218,7 @@ mod svo_tests {
 
     use crate::{assert_float_eq, gl_assert_no_error, world};
     use crate::core::GlContext;
-    use crate::graphics::framebuffer::Framebuffer;
+    use crate::graphics::framebuffer::{diff_rgba3, Framebuffer};
     use crate::graphics::svo::{RenderParams, Svo};
     use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
@@ -226,13 +226,6 @@ mod svo_tests {
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorage};
     use crate::world::octree::Position;
     use crate::world::svo::SerializedChunk;
-
-    // source: https://rosettacode.org/wiki/Percentage_difference_between_images#Rust
-    fn diff_rgba3(rgba1: image::Rgba<u8>, rgba2: image::Rgba<u8>) -> i32 {
-        (rgba1[0] as i32 - rgba2[0] as i32).abs()
-            + (rgba1[1] as i32 - rgba2[1] as i32).abs()
-            + (rgba1[2] as i32 - rgba2[2] as i32).abs()
-    }
 
     fn create_world_svo<F>(builder: F) -> world::svo::Svo<SerializedChunk>
         where F: FnOnce(&mut Chunk) {

@@ -49,11 +49,7 @@ impl Camera {
         self.get_world_to_camera_matrix().invert().unwrap()
     }
 
-    pub fn set_forward_from_euler(&mut self, euler: Vector3<f32>) {
-        self.forward = Vector3::new(
-            euler.y.cos() * euler.x.cos(),
-            euler.x.sin(),
-            euler.y.sin() * euler.x.cos(),
-        ).normalize();
+    pub fn set_forward(&mut self, forward: Vector3<f32>) {
+        self.forward = forward;
     }
 }

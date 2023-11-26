@@ -105,22 +105,6 @@ impl JobSystem {
             }
         })
     }
-
-    pub fn new_handle(&self) -> JobSystemHandle {
-        JobSystemHandle {
-            job_system: self,
-        }
-    }
-}
-
-pub struct JobSystemHandle<'js> {
-    job_system: &'js JobSystem,
-}
-
-impl<'js> JobSystemHandle<'js> {
-    pub fn push(&self, prioritize: bool, exec: Box<dyn FnOnce() + Send>) -> JobHandle {
-        self.job_system.push(prioritize, exec)
-    }
 }
 
 pub struct JobHandle {

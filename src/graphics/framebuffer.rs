@@ -62,6 +62,13 @@ impl Framebuffer {
         unsafe { gl::BindFramebuffer(gl::FRAMEBUFFER, 0); }
     }
 
+    pub fn clear(&self, r: f32, g: f32, b: f32, a: f32) {
+        unsafe {
+            gl::ClearColor(r, g, b, a);
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
+        }
+    }
+
     pub fn read_pixels(&self) -> Vec<u8> {
         let mut bytes = vec![0; (self.width * self.height * 4) as usize];
         unsafe {
@@ -77,4 +84,11 @@ impl Drop for Framebuffer {
     fn drop(&mut self) {
         unsafe { gl::DeleteFramebuffers(1, &self.handle) }
     }
+}
+
+// source: https://rosettacode.org/wiki/Percentage_difference_between_images#Rust
+pub fn diff_rgba3(rgba1: image::Rgba<u8>, rgba2: image::Rgba<u8>) -> i32 {
+    (rgba1[0] as i32 - rgba2[0] as i32).abs()
+        + (rgba1[1] as i32 - rgba2[1] as i32).abs()
+        + (rgba1[2] as i32 - rgba2[2] as i32).abs()
 }

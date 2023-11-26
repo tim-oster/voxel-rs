@@ -14,6 +14,7 @@ pub struct Config {
     pub title: &'static str,
     pub msaa_samples: u32,
     pub headless: bool,
+    pub resizable: bool,
 }
 
 /// GlContext holds the native OpenGL rendering context for glfw as well as the associated event
@@ -35,6 +36,7 @@ static GLFW_CONTEXT: Lazy<Mutex<glfw::Glfw>> = Lazy::new(|| {
     Mutex::new(context)
 });
 
+#[allow(dead_code)]
 impl GlContext {
     fn new(cfg: Config) -> GlContext {
         let mut context = GLFW_CONTEXT.lock().unwrap();
@@ -42,9 +44,8 @@ impl GlContext {
         if cfg.msaa_samples > 0 {
             context.window_hint(glfw::WindowHint::Samples(Some(cfg.msaa_samples)));
         }
-        if cfg.headless {
-            context.window_hint(glfw::WindowHint::Visible(false));
-        }
+        context.window_hint(glfw::WindowHint::Visible(!cfg.headless));
+        context.window_hint(glfw::WindowHint::Resizable(cfg.resizable));
 
         let (mut window, events) = context
             .create_window(cfg.width, cfg.height, &cfg.title, glfw::WindowMode::Windowed)
@@ -53,6 +54,19 @@ impl GlContext {
         window.make_current();
 
         gl::load_with(|symbol| window.get_proc_address(symbol) as *const _);
+
+        // apply OpenGL default settings
+        unsafe {
+            gl::Enable(gl::CULL_FACE);
+            gl::CullFace(gl::BACK);
+            gl::FrontFace(gl::CCW);
+
+            if cfg.msaa_samples > 0 {
+                gl::Enable(gl::MULTISAMPLE);
+                gl::Enable(gl::SAMPLE_SHADING);
+                gl::MinSampleShading(1.0);
+            }
+        }
 
         GlContext { window, events }
     }
@@ -64,6 +78,7 @@ impl GlContext {
             title: "",
             msaa_samples: 0,
             headless: true,
+            resizable: false,
         })
     }
 }
@@ -141,6 +156,7 @@ impl Window {
                 was_resized,
                 size,
                 ui,
+                is_cursor_grabbed: self.is_cursor_grabbed,
                 request_close: None,
                 request_grab_cursor: None,
             };
@@ -250,6 +266,7 @@ pub struct Frame<'window> {
     pub size: (i32, i32),
     pub ui: imgui::Ui<'window>,
 
+    is_cursor_grabbed: bool,
     request_close: Option<bool>,
     request_grab_cursor: Option<bool>,
 }
@@ -257,6 +274,10 @@ pub struct Frame<'window> {
 impl<'window> Frame<'window> {
     pub fn request_close(&mut self) {
         self.request_close = Some(true);
+    }
+
+    pub fn is_cursor_grabbed(&self) -> bool {
+        self.is_cursor_grabbed
     }
 
     pub fn request_grab_cursor(&mut self, grab: bool) {

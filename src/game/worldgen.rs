@@ -1,9 +1,9 @@
 use noise::{NoiseFn, Perlin, Seedable};
 
-// TODO this dependency should not exist
-use crate::systems::gameplay::blocks;
+use crate::game::gameplay::blocks;
+use crate::systems::worldgen::ChunkGenerator;
+use crate::world::chunk::Chunk;
 
-// TODO move into worldgen system? or make this part of an engine layer?
 #[derive(Clone)]
 pub struct Noise {
     pub frequency: f32,
@@ -87,8 +87,10 @@ impl Generator {
         let perlin = perlin.set_seed(seed);
         Generator { perlin, cfg }
     }
+}
 
-    pub fn generate_chunk(&self, chunk: &mut Chunk) {
+impl ChunkGenerator for Generator {
+    fn generate_chunk(&self, chunk: &mut Chunk) {
         for z in 0..32 {
             for x in 0..32 {
                 let noise_x = chunk.pos.x as f64 * 32.0 + x as f64;

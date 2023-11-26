@@ -1,25 +1,29 @@
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::{Arc, mpsc};
 use std::sync::mpsc::{Receiver, Sender};
 
-use crate::systems::jobs::{JobHandle, JobSystemHandle};
+use crate::systems::jobs::{JobHandle, JobSystem};
 use crate::world::chunk::{Chunk, ChunkPos};
-use crate::world::generator;
 
-pub struct Generator<'js> {
-    jobs: JobSystemHandle<'js>,
-    gen: Arc<generator::Generator>,
+pub trait ChunkGenerator {
+    fn generate_chunk(&self, chunk: &mut Chunk);
+}
+
+pub struct Generator {
+    job_system: Rc<JobSystem>,
+    gen: Arc<dyn ChunkGenerator + Send + Sync + 'static>,
     tx: Sender<Chunk>,
     rx: Receiver<Chunk>,
     chunk_jobs: HashMap<ChunkPos, JobHandle>,
 }
 
-impl<'js> Generator<'js> {
-    pub fn new(jobs: JobSystemHandle<'js>, seed: u32, cfg: generator::Config) -> Generator {
+impl Generator {
+    pub fn new(job_system: Rc<JobSystem>, chunk_generator: impl ChunkGenerator + Send + Sync + 'static) -> Generator {
         let (tx, rx) = mpsc::channel::<Chunk>();
         Generator {
-            jobs,
-            gen: Arc::new(generator::Generator::new(seed, cfg)),
+            job_system,
+            gen: Arc::new(chunk_generator),
             tx,
             rx,
             chunk_jobs: HashMap::new(),
@@ -36,7 +40,7 @@ impl<'js> Generator<'js> {
         let gen = Arc::clone(&self.gen);
         let tx = self.tx.clone();
 
-        let handle = self.jobs.push(false, Box::new(move || {
+        let handle = self.job_system.push(false, Box::new(move || {
             gen.generate_chunk(&mut chunk);
             tx.send(chunk).unwrap(); // TODO this panics sometimes
         }));

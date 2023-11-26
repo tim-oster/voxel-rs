@@ -1,7 +1,7 @@
 use std::ops::Sub;
 use std::sync::{Arc, RwLock};
 
-use cgmath::Point3;
+use cgmath::{num_traits, Point3};
 
 use crate::world::allocator::{Allocated, Allocator};
 use crate::world::octree::{Octree, Position};
@@ -44,6 +44,12 @@ impl ChunkPos {
 
     pub fn to_block_pos(&self) -> Point3<i32> {
         Point3::new(self.x << 5, self.y << 5, self.z << 5)
+    }
+}
+
+impl<T: num_traits::AsPrimitive<i32>> From<Point3<T>> for ChunkPos {
+    fn from(value: Point3<T>) -> Self {
+        ChunkPos::from_block_pos(value.x.as_(), value.y.as_(), value.z.as_())
     }
 }
 
@@ -104,6 +110,7 @@ pub struct BlockPos {
     pub rel_z: f32,
 }
 
+#[allow(dead_code)]
 impl BlockPos {
     pub fn new(x: i32, y: i32, z: i32) -> BlockPos {
         BlockPos {

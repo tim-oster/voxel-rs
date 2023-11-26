@@ -1,4 +1,4 @@
-use cgmath::{Point3, Vector3};
+use cgmath::{InnerSpace, Point3, Vector3};
 #[cfg(test)]
 use mockall::automock;
 
@@ -11,9 +11,20 @@ const EPSILON: f32 = 0.0005;
 pub struct Entity {
     pub position: Point3<f32>,
     pub velocity: Vector3<f32>,
+    pub euler_rotation: Vector3<f32>,
     pub aabb_def: AABBDef,
     pub caps: EntityCapabilities,
     state: EntityState,
+}
+
+impl Entity {
+    pub fn get_forward(&self) -> Vector3<f32> {
+        Vector3::new(
+            self.euler_rotation.y.cos() * self.euler_rotation.x.cos(),
+            self.euler_rotation.x.sin(),
+            self.euler_rotation.y.sin() * self.euler_rotation.x.cos(),
+        ).normalize()
+    }
 }
 
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
@@ -45,6 +56,7 @@ impl Entity {
         Entity {
             position,
             velocity: Vector3::new(0.0, 0.0, 0.0),
+            euler_rotation: Vector3::new(0.0, 0.0, 0.0),
             aabb_def,
             caps: EntityCapabilities::default(),
             state: EntityState::default(),
@@ -81,6 +93,7 @@ impl Raycaster for Svo {
 
 pub struct Physics {}
 
+#[allow(dead_code)]
 struct RaycastData {
     aabb: AABB,
     aabb_result: AABBResult,
@@ -91,8 +104,9 @@ impl Physics {
         Physics {}
     }
 
-    pub fn step(&self, delta_time: f32, raycaster: &impl Raycaster, entities: &mut [&mut Entity]) {
-        let results = Physics::raycast_entities(raycaster, entities);
+    pub fn step(&self, delta_time: f32, raycaster: &impl Raycaster, entities: Vec<&mut Entity>) {
+        let results = Physics::raycast_entities(raycaster, &entities);
+        let mut entities = entities;
 
         for i in 0..entities.len() {
             let data = &results[i];
@@ -100,7 +114,7 @@ impl Physics {
         }
     }
 
-    fn raycast_entities(raycaster: &impl Raycaster, entities: &[&mut Entity]) -> Vec<RaycastData> {
+    fn raycast_entities(raycaster: &impl Raycaster, entities: &Vec<&mut Entity>) -> Vec<RaycastData> {
         let mut batch = PickerBatch::new();
         let mut results = Vec::with_capacity(entities.len());
 
@@ -344,6 +358,7 @@ mod tests {
             let e = Entity {
                 position: c.position,
                 velocity: c.velocity.unwrap_or(Vector3::zero()),
+                euler_rotation: Vector3::new(0.0, 0.0, 0.0),
                 aabb_def: c.aabb_def.unwrap_or(AABBDef::new(Vector3::zero(), Vector3::new(1.0, 1.0, 1.0))),
                 caps: c.caps.unwrap_or(EntityCapabilities {
                     wall_clip: false,
@@ -357,6 +372,7 @@ mod tests {
             expected_entities.push(Entity {
                 position: c.expected_position,
                 velocity: c.expected_velocity,
+                euler_rotation: e.euler_rotation,
                 aabb_def: e.aabb_def,
                 caps: e.caps,
                 state: c.expected_state.unwrap_or_default(),
@@ -375,12 +391,7 @@ mod tests {
             .returning(move |_| PickerBatchResult { rays: Vec::new(), aabbs: aabb_results.clone() });
 
         let physics = Physics::new();
-        let mut entity_refs = Vec::new();
-        for e in entities.iter_mut() {
-            entity_refs.push(e);
-        }
-        physics.step(1.0, &mock, &mut entity_refs);
-
+        physics.step(1.0, &mock, entities.iter_mut().collect());
         for (i, expected) in expected_entities.iter().enumerate() {
             assert_eq!(expected, &entities[i], "entity case '{}'", &test_cases[i].name);
         }
