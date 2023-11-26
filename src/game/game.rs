@@ -91,12 +91,12 @@ impl State {
         self.handle_debug_keys(frame);
 
         self.world.update(&mut self.player, frame.stats.delta_time);
-        self.gameplay.update(frame, &mut self.player, &mut self.world.world, &mut self.world.world_svo);
+        self.gameplay.update(frame, &mut self.player, &mut self.world.world, &self.world.world_svo);
         self.world.selected_voxel = self.gameplay.looking_at_block.map(|result| result.pos);
     }
 
     fn handle_render(&mut self, frame: &mut Frame) {
-        self.world.render(frame);
+        self.world.render(frame.get_aspect());
         self.gameplay.render_ui(frame.size);
 
         self.render_debug_window(frame);

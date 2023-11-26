@@ -9,7 +9,6 @@ use crate::game::gameplay::blocks;
 use crate::game::worldgen;
 use crate::game::worldgen::{Generator, Noise, SplinePoint};
 use crate::graphics::camera::Camera;
-use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::svo::RenderParams;
 use crate::systems::{storage, worldsvo};
 use crate::systems::chunkloading::{ChunkEvent, ChunkLoader};
@@ -33,15 +32,11 @@ pub struct World {
 
     pub camera: Camera,
     pub selected_voxel: Option<Point3<f32>>,
-    pub target_framebuffer: Option<Framebuffer>, // TODO matrices are incorrect if FB is used
-
     pub ambient_intensity: f32,
     pub sun_direction: Vector3<f32>,
 }
 
 impl World {
-    // TODO split into world & world_renderer?
-
     pub fn new(job_system: Rc<JobSystem>, loading_radius: u32, aspect_ratio: f32) -> World {
         let world_cfg = worldgen::Config {
             sea_level: 70,
@@ -80,7 +75,6 @@ impl World {
             physics: Physics::new(),
             camera: Camera::new(72.0, aspect_ratio, 0.01, 1024.0),
             selected_voxel: None,
-            target_framebuffer: None,
             ambient_intensity: 0.3,
             sun_direction: Vector3::new(-1.0, -1.0, -1.0).normalize(),
         }
@@ -169,25 +163,16 @@ impl World {
         self.camera.set_forward(entity.get_forward());
     }
 
-    pub fn render(&self, frame: &Frame) {
-        if let Some(fb) = &self.target_framebuffer {
-            fb.bind();
-            fb.clear(0.0, 0.0, 0.0, 1.0);
-        }
-
+    pub fn render(&self, aspect_ratio: f32) {
         self.world_svo.render(RenderParams {
             ambient_intensity: self.ambient_intensity,
             light_dir: self.sun_direction,
             cam_pos: self.camera.position,
             view_mat: self.camera.get_camera_to_world_matrix(),
             fov_y_rad: self.camera.get_fov_y_deg().to_radians(),
-            aspect_ratio: frame.get_aspect(),
+            aspect_ratio,
             selected_voxel: self.selected_voxel,
         });
-
-        if let Some(fb) = &self.target_framebuffer {
-            fb.unbind();
-        }
     }
 
     pub fn render_debug_window(&mut self, frame: &mut Frame) {
@@ -281,65 +266,56 @@ impl World {
     }
 }
 
-// TODO fix end to end test
-// mod tests {
-//     use std::time::{Duration, Instant};
-//
-//     use cgmath::{Point3, Vector3};
-//     use image::GenericImageView;
-//
-//     use crate::core::{Config, Window};
-//     use crate::game::game::Game;
-//     use crate::graphics::framebuffer::{diff_rgba3, Framebuffer};
-//     use crate::systems::physics::{AABBDef, Entity};
-//
-//     #[test]
-//     fn test_game_end_to_end() {
-//         let window = Window::new(Config {
-//             width: 1024,
-//             height: 768,
-//             title: "",
-//             msaa_samples: 0,
-//             headless: true,
-//             resizable: false,
-//         });
-//
-//         let mut player = Entity::new(
-//             Point3::new(-24.0, 80.0, 174.0),
-//             AABBDef::new(Vector3::new(-0.4, -1.7, -0.4), Vector3::new(0.8, 1.8, 0.8)),
-//         );
-//         player.euler_rotation = Vector3::new(0.0, -90f32.to_radians(), 0.0);
-//         player.caps.flying = true;
-//
-//         let fb = Framebuffer::new(window.get_size().0, window.get_size().1);
-//
-//         let mut game = Game::new_from(window, 15, player);
-//         game.update_hook = Some(Box::new({
-//             let start_time = Instant::now();
-//             move |frame, state| {
-//                 if start_time.elapsed() > Duration::from_secs(5) && state.job_system.len() == 0 {
-//                     frame.request_close();
-//                 }
-//             }
-//         }));
-//         game.state.world.target_framebuffer = Some(fb);
-//
-//         let mut state = game.run_with_state();
-//         let fb = state.world.target_framebuffer.take().unwrap();
-//         let pixels = fb.read_pixels();
-//         let actual = image::RgbaImage::from_raw(fb.width() as u32, fb.height() as u32, pixels).unwrap();
-//         let actual = image::DynamicImage::ImageRgba8(actual).flipv();
-//         actual.save_with_format("assets/tests/e2e_actual.png", image::ImageFormat::Png).unwrap();
-//
-//         let expected = image::open("assets/tests/e2e_expected.png").unwrap();
-//
-//         let mut accum = 0;
-//         let zipper = actual.pixels().zip(expected.pixels());
-//         for (pixel1, pixel2) in zipper {
-//             accum += diff_rgba3(pixel1.2, pixel2.2);
-//         }
-//         let diff_percent = accum as f64 / (255.0 * 3.0 * (actual.width() * actual.height()) as f64);
-//         println!("difference: {:.5}", diff_percent);
-//         assert!(diff_percent < 0.001);
-//     }
-// }
+mod tests {
+    use std::rc::Rc;
+
+    use cgmath::{Point3, Vector3};
+
+    use crate::core::GlContext;
+    use crate::game::world::World;
+    use crate::gl_assert_no_error;
+    use crate::graphics::framebuffer::{diff_images, Framebuffer};
+    use crate::systems::jobs::JobSystem;
+    use crate::systems::physics::{AABBDef, Entity};
+
+    /// Tests if a standalone world object generates chunks, adds them to the SVO and renders them
+    /// correctly after given enough time to properly load everything.
+    #[test]
+    fn end_to_end() {
+        let (width, height) = (1024, 768);
+        let aspect_ratio = width as f32 / height as f32;
+        let _context = GlContext::new_headless(width, height); // do not drop context
+
+        let mut player = Entity::new(
+            Point3::new(-24.0, 80.0, 174.0),
+            AABBDef::new(Vector3::new(-0.4, -1.7, -0.4), Vector3::new(0.8, 1.8, 0.8)),
+        );
+        player.euler_rotation = Vector3::new(0.0, -90f32.to_radians(), 0.0);
+        player.caps.flying = true;
+
+        let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
+        let mut world = World::new(Rc::clone(&job_system), 15, aspect_ratio);
+
+        loop {
+            world.update(&mut player, 0.1);
+
+            if job_system.len() == 0 {
+                break;
+            }
+        }
+
+        let fb = Framebuffer::new(width as i32, height as i32);
+        fb.bind();
+        fb.clear(0.0, 0.0, 0.0, 1.0);
+        world.render(aspect_ratio);
+        fb.unbind();
+        gl_assert_no_error!();
+
+        let actual = fb.as_image();
+        actual.save_with_format("assets/tests/game_world_end_to_end_actual.png", image::ImageFormat::Png).unwrap();
+
+        let expected = image::open("assets/tests/game_world_end_to_end_expected.png").unwrap();
+        let diff_percent = diff_images(&actual, &expected);
+        assert!(diff_percent < 0.001, "difference: {:.5} < 0.001", diff_percent);
+    }
+}

@@ -214,11 +214,10 @@ mod svo_tests {
     use std::sync::Arc;
 
     use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Vector3};
-    use image::GenericImageView;
 
     use crate::{assert_float_eq, gl_assert_no_error, world};
     use crate::core::GlContext;
-    use crate::graphics::framebuffer::{diff_rgba3, Framebuffer};
+    use crate::graphics::framebuffer::{diff_images, Framebuffer};
     use crate::graphics::svo::{RenderParams, Svo};
     use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
@@ -292,10 +291,7 @@ mod svo_tests {
         let fb = Framebuffer::new(width as i32, height as i32);
 
         fb.bind();
-        unsafe {
-            gl::ClearColor(0.0, 0.0, 0.0, 1.0);
-            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
-        }
+        fb.clear(0.0, 0.0, 0.0, 1.0);
 
         let cam_pos = Point3::new(2.5, 2.5, 7.5);
         svo.render(RenderParams {
@@ -310,21 +306,12 @@ mod svo_tests {
         fb.unbind();
         gl_assert_no_error!();
 
-        let pixels = fb.read_pixels();
-        let actual = image::RgbaImage::from_raw(fb.width() as u32, fb.height() as u32, pixels).unwrap();
-        let actual = image::DynamicImage::ImageRgba8(actual).flipv();
+        let actual = fb.as_image();
         actual.save_with_format("assets/tests/graphics_svo_render_actual.png", image::ImageFormat::Png).unwrap();
 
         let expected = image::open("assets/tests/graphics_svo_render_expected.png").unwrap();
-
-        let mut accum = 0;
-        let zipper = actual.pixels().zip(expected.pixels());
-        for (pixel1, pixel2) in zipper {
-            accum += diff_rgba3(pixel1.2, pixel2.2);
-        }
-        let diff_percent = accum as f64 / (255.0 * 3.0 * (actual.width() * actual.height()) as f64);
-        println!("difference: {:.5}", diff_percent);
-        assert!(diff_percent < 0.001);
+        let diff_percent = diff_images(&actual, &expected);
+        assert!(diff_percent < 0.001, "difference: {:.5} < 0.001", diff_percent);
     }
 
     /// Tests if multiple raycasts return the expected results.
