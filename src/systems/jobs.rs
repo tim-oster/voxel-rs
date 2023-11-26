@@ -1,7 +1,8 @@
+use std::{panic, thread};
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::thread;
 use std::thread::{JoinHandle, ThreadId};
 use std::time::Instant;
 
@@ -99,9 +100,13 @@ impl JobSystem {
                 last_exec = Instant::now();
 
                 let job = job.unwrap();
-                if !job.cancelled.load(Ordering::Relaxed) {
-                    (job.exec)();
+                if job.cancelled.load(Ordering::Relaxed) {
+                    continue;
                 }
+
+                _ = panic::catch_unwind(AssertUnwindSafe(|| {
+                    (job.exec)();
+                }));
             }
         })
     }
