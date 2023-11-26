@@ -18,6 +18,8 @@ use crate::systems::storage::Storage;
 use crate::world::chunk::ChunkPos;
 
 pub struct World {
+    job_system: Rc<JobSystem>,
+
     loading_radius: u32,
     chunk_loader: ChunkLoader,
     pub storage: Storage,
@@ -64,6 +66,7 @@ impl World {
         let chunk_generator = Generator::new(1, world_cfg.clone());
 
         World {
+            job_system: Rc::clone(&job_system),
             loading_radius,
             chunk_loader: ChunkLoader::new(loading_radius, 0, 8),
             storage: Storage::new(),
@@ -176,25 +179,27 @@ impl World {
     }
 
     pub fn render_debug_window(&mut self, frame: &mut Frame) {
-        let cfg = &mut self.world_generator_cfg;
-
         imgui::Window::new("World Gen")
             .size([300.0, 100.0], Condition::FirstUseEver)
             .build(&frame.ui, || {
-                frame.ui.input_int("sea level", &mut cfg.sea_level).build();
+                frame.ui.input_int("sea level", &mut self.world_generator_cfg.sea_level).build();
 
-                // TODO
-                if frame.ui.button("generate") {
-                    //     jobs.borrow().clear();
-                    //
-                    //     // last_chunk_pos = ChunkPos::new(-9999, 0, 0);
-                    //     svo_octant_ids.clear();
-                    //     currently_generating_chunks.clear();
-                    //     did_cam_repos = false;
-                    //
-                    //     world = systems::world::World::new();
-                    //     svo.lock().unwrap().clear();
-                    //     fly_mode = true;
+                if frame.ui.button("generate (AT YOUR OWN RISK)") {
+                    // NOTE: this is a very inefficient approach of regenerating the world, intended
+                    // for testing/debugging purposes only. It does not properly wait for all
+                    // inflight processed to finish, neither does it properly reuse resources but
+                    // simply overrides everything instead.
+
+                    self.job_system.clear();
+
+                    let chunk_generator = Generator::new(1, self.world_generator_cfg.clone());
+
+                    self.chunk_loader = ChunkLoader::new(self.loading_radius, 0, 8);
+                    self.storage = Storage::new();
+                    self.world = systems::world::World::new();
+                    self.world_generator = systems::worldgen::Generator::new(Rc::clone(&self.job_system), chunk_generator);
+                    self.world_svo = graphics::svo::Svo::new(blocks::new_registry());
+                    self.world_svo_mgr = worldsvo::Manager::new(Rc::clone(&self.job_system), self.loading_radius);
                 }
 
                 frame.ui.new_line();
@@ -227,7 +232,9 @@ impl World {
                         frame.ui.same_line();
                         if frame.ui.small_button("del") {
                             noise.spline_points.remove(i);
-                            i -= 1;
+                            if i > 0 {
+                                i -= 1;
+                            }
                             continue;
                         }
 
@@ -260,8 +267,8 @@ impl World {
 
                     stack.end();
                 };
-                display_noise("continentalness", &mut cfg.continentalness);
-                display_noise("erosion", &mut cfg.erosion);
+                display_noise("continentalness", &mut self.world_generator_cfg.continentalness);
+                display_noise("erosion", &mut self.world_generator_cfg.erosion);
             });
     }
 }
