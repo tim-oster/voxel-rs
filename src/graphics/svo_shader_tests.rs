@@ -4,18 +4,19 @@ mod tests {
 
     use cgmath::{InnerSpace, Point2, Point3, Vector3, Vector4};
 
-    use crate::{assert_float_eq, ChunkPos, graphics, Position};
-    use crate::chunk::ChunkStorage;
+    use crate::assert_float_eq;
     use crate::core::GlContext;
-    use crate::graphics::{buffer, ShaderProgram, TextureArray, TextureArrayError};
+    use crate::graphics::buffer;
     use crate::graphics::buffer::{Buffer, MappedBuffer};
     use crate::graphics::macros::{AlignedBool, AlignedPoint2, AlignedPoint3, AlignedVec3, AlignedVec4};
     use crate::graphics::resource::Resource;
-    use crate::graphics::shader::ShaderError;
+    use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
     use crate::graphics::svo::buffer_indices;
     use crate::graphics::svo_registry::MaterialInstance;
+    use crate::graphics::texture_array::{TextureArray, TextureArrayBuilder, TextureArrayError};
     use crate::world::allocator::Allocator;
-    use crate::world::chunk::Chunk;
+    use crate::world::chunk::{Chunk, ChunkPos, ChunkStorage};
+    use crate::world::octree::Position;
     use crate::world::svo::{SerializedChunk, Svo};
 
     #[repr(C)]
@@ -85,7 +86,7 @@ mod tests {
 
     fn create_test_materials() -> (Buffer<MaterialInstance>, Resource<TextureArray, TextureArrayError>) {
         let tex_array = Resource::new(
-            || graphics::TextureArrayBuilder::new(1)
+            || TextureArrayBuilder::new(1)
                 .add_rgba8("full", 4, 4, vec![
                     255, 000, 000, 255, /**/ 255, 000, 000, 255, /**/ 255, 000, 000, 255, /**/ 255, 000, 000, 255,
                     255, 000, 000, 255, /**/ 255, 000, 000, 255, /**/ 255, 000, 000, 255, /**/ 255, 000, 000, 255,
@@ -187,7 +188,7 @@ mod tests {
         world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);
 
         let shader = Resource::new(
-            || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/svo.test.glsl")?.build()
+            || ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/svo.test.glsl")?.build()
         ).unwrap();
 
         let (material_buffer, tex_array) = create_test_materials();

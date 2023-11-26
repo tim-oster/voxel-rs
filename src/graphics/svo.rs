@@ -2,19 +2,20 @@ use std::cell::RefCell;
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
 
-use crate::{graphics, world};
-use crate::graphics::{ShaderProgram, TextureArray, TextureArrayError};
 use crate::graphics::buffer::{Buffer, MappedBuffer};
 use crate::graphics::fence::Fence;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
-use crate::graphics::shader::ShaderError;
+use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
 use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, PickerResult, PickerTask};
 use crate::graphics::svo_registry::{MaterialInstance, VoxelRegistry};
+use crate::graphics::texture_array::{TextureArray, TextureArrayError};
+use crate::world;
 use crate::world::chunk::{BlockPos, ChunkPos};
 use crate::world::svo::SerializedChunk;
 
 /// Buffer indices are constants for all buffer ids used in the SVO shaders.
+#[allow(dead_code)]
 pub mod buffer_indices {
     pub const WORLD: u32 = 0;
     pub const MATERIALS: u32 = 2;
@@ -71,9 +72,9 @@ pub struct RenderParams {
     pub fov_y_rad: f32,
     /// aspect_ratio is `width / height` of the screen's resolution.
     pub aspect_ratio: f32,
-    /// selected_block is the position, in SVO-space, of the block to be highlighted. It is
+    /// selected_voxel is the position, in SVO-space, of the voxel to be highlighted. It is
     /// transformed using the `coord_space` passed in [`Svo::update`].
-    pub selected_block: Option<Point3<f32>>,
+    pub selected_voxel: Option<Point3<f32>>,
 }
 
 impl Svo {
@@ -83,14 +84,14 @@ impl Svo {
         material_buffer.bind_as_storage_buffer(buffer_indices::MATERIALS);
 
         let world_shader = Resource::new(
-            || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
+            || ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
         ).unwrap();
 
         let world_buffer = MappedBuffer::<u32>::new(1000 * 1024 * 1024); // 1000 MB
         world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);
 
         let picker_shader = Resource::new(
-            || graphics::ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/picker.glsl")?.build()
+            || ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/picker.glsl")?.build()
         ).unwrap();
 
         let picker_in_buffer = MappedBuffer::<PickerTask>::new(100);
@@ -166,7 +167,7 @@ impl Svo {
         self.world_shader.set_texture("u_texture", 0, &self.tex_array);
 
         let mut selected_block = Vector3::new(f32::NAN, f32::NAN, f32::NAN);
-        if let Some(mut pos) = params.selected_block {
+        if let Some(mut pos) = params.selected_voxel {
             if let Some(cs) = self.coord_space {
                 pos = cs.cnv_into_space(pos);
             }
@@ -311,7 +312,7 @@ mod svo_tests {
             view_mat: Matrix4::look_to_rh(cam_pos, -Vector3::unit_z(), Vector3::unit_y()).invert().unwrap(),
             fov_y_rad: 72.0f32.to_radians(),
             aspect_ratio: width as f32 / height as f32,
-            selected_block: Some(Point3::new(1.0, 1.0, 3.0)),
+            selected_voxel: Some(Point3::new(1.0, 1.0, 3.0)),
         });
         fb.unbind();
         gl_assert_no_error!();
@@ -386,6 +387,7 @@ pub struct CoordSpace {
 
 pub type CoordSpacePos = Point3<f32>;
 
+#[allow(dead_code)]
 impl CoordSpace {
     pub fn new(center: ChunkPos, dst: u32) -> CoordSpace {
         CoordSpace { center, dst }

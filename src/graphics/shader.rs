@@ -240,7 +240,7 @@ mod shader_program_builder_tests {
     use indoc::{formatdoc, indoc};
     use tempfile::NamedTempFile;
 
-    use crate::graphics::ShaderProgramBuilder;
+    use crate::graphics::shader::ShaderProgramBuilder;
 
     /// Tests if files with includes and other directives are loaded correctly without actually
     /// compiling the shader.

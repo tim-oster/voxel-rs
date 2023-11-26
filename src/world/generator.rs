@@ -1,10 +1,9 @@
 use noise::{NoiseFn, Perlin, Seedable};
 
-use crate::chunk::Chunk;
 // TODO this dependency should not exist
 use crate::systems::gameplay::blocks;
 
-// TODO move into worldgen system?
+// TODO move into worldgen system? or make this part of an engine layer?
 #[derive(Clone)]
 pub struct Noise {
     pub frequency: f32,

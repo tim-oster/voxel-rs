@@ -1,4 +1,4 @@
-use cgmath::{InnerSpace, Point3, Vector3};
+use cgmath::{Point3, Vector3};
 
 use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
 use crate::graphics::svo::CoordSpace;

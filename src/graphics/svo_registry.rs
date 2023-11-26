@@ -1,6 +1,7 @@
-use crate::graphics::{buffer, TextureArray, TextureArrayBuilder, TextureArrayError};
+use crate::graphics::buffer;
 use crate::graphics::buffer::Buffer;
 use crate::graphics::resource::Resource;
+use crate::graphics::texture_array::{TextureArray, TextureArrayBuilder, TextureArrayError};
 use crate::world::chunk::BlockId;
 
 #[derive(Clone)]

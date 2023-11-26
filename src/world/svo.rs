@@ -4,10 +4,9 @@ use std::collections::{HashMap, HashSet};
 use std::ptr;
 use std::sync::{Arc, RwLock};
 
-use crate::{BlockId, ChunkPos, Octree, Position};
-use crate::chunk::ChunkStorage;
 use crate::world::allocator::Allocated;
-use crate::world::octree::{Octant, OctantId};
+use crate::world::chunk::{BlockId, ChunkPos, ChunkStorage};
+use crate::world::octree::{Octant, OctantId, Octree, Position};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 enum OctantChange {
@@ -356,7 +355,7 @@ fn breadth_first<'a, T>(octree: &'a Octree<T>, parent: &'a Octant<T>) -> Option<
 mod svo_tests {
     use std::collections::HashMap;
 
-    use crate::chunk::BlockId;
+    use crate::world::chunk::BlockId;
     use crate::world::octree::{Octree, Position};
     use crate::world::svo::{OctantInfo, Range, SerializationResult, Svo, SvoBuffer};
 

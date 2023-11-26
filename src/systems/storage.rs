@@ -35,11 +35,11 @@ impl Storage {
         Storage { allocator: Arc::new(allocator) }
     }
 
-    pub fn load(&mut self, pos: &ChunkPos) -> Result<Chunk, LoadError> {
+    pub fn load(&mut self, _pos: &ChunkPos) -> Result<Chunk, LoadError> {
         Err(LoadError::NotFound)
     }
 
-    pub fn store(&mut self, chunk: &Chunk) -> Result<(), StoreError> {
+    pub fn store(&mut self, _chunk: &Chunk) -> Result<(), StoreError> {
         Ok(())
     }
 
