@@ -11,7 +11,7 @@ pub struct PickerBatch {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PickerTask {
+pub(super) struct PickerTask {
     pub max_dst: f32,
     pub pos: AlignedPoint3<f32>,
     pub dir: AlignedVec3<f32>,
@@ -19,7 +19,7 @@ pub(crate) struct PickerTask {
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct PickerResult {
+pub(super) struct PickerResult {
     /// dst is the distance to the hit object.
     pub dst: f32,
     /// inside_voxel is true, if the ray origin is within a voxel itself.
@@ -47,7 +47,7 @@ impl PickerBatch {
 
     /// serialize_tasks transforms all tasks on this batch into actual PickerTasks and writes them
     /// to the given task buffer.
-    pub(crate) fn serialize_tasks(&self, tasks: &mut [PickerTask], cs: Option<CoordSpace>) -> usize {
+    pub(super) fn serialize_tasks(&self, tasks: &mut [PickerTask], cs: Option<CoordSpace>) -> usize {
         let mut offset = 0;
 
         for task in &self.rays {
@@ -78,7 +78,7 @@ impl PickerBatch {
 
     /// deserialize_results reads all results from the given result buffer and parses the results
     /// for all jobs on this batch.
-    pub(crate) fn deserialize_results(&self, results: &[PickerResult], cs: Option<CoordSpace>) -> PickerBatchResult {
+    pub(super) fn deserialize_results(&self, results: &[PickerResult], cs: Option<CoordSpace>) -> PickerBatchResult {
         let mut offset = 0;
         let mut batch_result = PickerBatchResult { rays: Vec::new(), aabbs: Vec::new() };
 

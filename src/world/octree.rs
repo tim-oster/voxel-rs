@@ -25,10 +25,10 @@ impl Position {
 
 #[derive(Debug, PartialEq)]
 pub struct Octree<T> {
-    pub(in crate::world) octants: Vec<Octant<T>>,
-    pub(in crate::world) free_list: Vec<OctantId>,
-    pub(in crate::world) root: Option<OctantId>,
-    pub(in crate::world) depth: u32,
+    pub(super) octants: Vec<Octant<T>>,
+    pub(super) free_list: Vec<OctantId>,
+    pub(super) root: Option<OctantId>,
+    pub(super) depth: u32,
 }
 
 impl<T> Octree<T> {
@@ -309,13 +309,13 @@ impl<T> Octree<T> {
 }
 
 #[derive(Debug, PartialEq)]
-pub(in crate::world) struct Octant<T> {
-    pub(in crate::world) parent: Option<OctantId>,
+pub(super) struct Octant<T> {
+    pub(super) parent: Option<OctantId>,
 
-    pub(in crate::world) children: [Option<OctantId>; 8],
-    pub(in crate::world) children_count: u8,
+    pub(super) children: [Option<OctantId>; 8],
+    pub(super) children_count: u8,
 
-    pub(in crate::world) content: Option<T>,
+    pub(super) content: Option<T>,
 }
 
 impl<T> Octant<T> {

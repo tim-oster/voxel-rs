@@ -28,7 +28,7 @@ pub struct Material {
 
 #[repr(C)]
 #[derive(Clone, Default)]
-pub(crate) struct MaterialInstance {
+pub(super) struct MaterialInstance {
     pub specular_pow: f32,
     pub specular_strength: f32,
     pub tex_top: i32,
@@ -119,7 +119,7 @@ impl VoxelRegistry {
         self
     }
 
-    pub(crate) fn build_texture_array(&self) -> Result<Resource<TextureArray, TextureArrayError>, TextureArrayError> {
+    pub(super) fn build_texture_array(&self) -> Result<Resource<TextureArray, TextureArrayError>, TextureArrayError> {
         let textures = self.textures.clone();
         Resource::new(
             move || {
@@ -132,7 +132,7 @@ impl VoxelRegistry {
         )
     }
 
-    pub(crate) fn build_material_buffer(&self, tex_array: &TextureArray) -> Buffer<MaterialInstance> {
+    pub(super) fn build_material_buffer(&self, tex_array: &TextureArray) -> Buffer<MaterialInstance> {
         fn lookup(array: &TextureArray, name: Option<&String>) -> i32 {
             name.map_or(
                 0,

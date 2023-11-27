@@ -18,7 +18,7 @@ pub struct Input {
 
 #[allow(dead_code)]
 impl Input {
-    pub(crate) fn new() -> Input {
+    pub(super) fn new() -> Input {
         Input {
             pressed_keys: HashSet::new(),
             released_keys: HashSet::new(),
@@ -34,7 +34,7 @@ impl Input {
         }
     }
 
-    pub(crate) fn update(&mut self) {
+    pub(super) fn update(&mut self) {
         self.released_keys.clear();
         self.last_key_modifiers = glfw::Modifiers::empty();
         self.char_input_buffer.clear();
@@ -44,7 +44,7 @@ impl Input {
         self.last_button_state = self.pressed_buttons.clone();
     }
 
-    pub(crate) fn handle_event(&mut self, event: glfw::WindowEvent) {
+    pub(super) fn handle_event(&mut self, event: glfw::WindowEvent) {
         match event {
             glfw::WindowEvent::Key(key, _, action, modifiers) => match action {
                 glfw::Action::Press => {
@@ -116,7 +116,7 @@ impl Input {
         self.mouse_delta
     }
 
-    pub(crate) fn apply_imgui_io(&self, io: &mut imgui::Io, forward_input_events: bool) {
+    pub(super) fn apply_imgui_io(&self, io: &mut imgui::Io, forward_input_events: bool) {
         if forward_input_events {
             io.mouse_pos = [self.last_mouse_pos.x, self.last_mouse_pos.y];
             io.mouse_delta = [self.mouse_delta.x, self.mouse_delta.y];
