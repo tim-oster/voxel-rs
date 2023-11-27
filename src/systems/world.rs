@@ -70,8 +70,11 @@ impl World {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashSet, VecDeque};
+    use std::sync::Arc;
 
     use crate::systems::world::ChunkPos;
+    use crate::world::allocator::Allocator;
+    use crate::world::chunk::{Chunk, ChunkStorage};
 
     #[test]
     fn chunk_pos_from_block_pos() {
@@ -92,7 +95,14 @@ mod tests {
 
     #[test]
     fn world_get_and_set_block() {
+        let allocator = Allocator::new(
+            Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
+            Some(Box::new(|storage| storage.reset())),
+        );
+        let allocator = Arc::new(allocator);
+
         let mut world = super::World::new();
+        world.set_chunk(Chunk::new(ChunkPos::new(0, 1, 2), allocator));
 
         let block = world.get_block(1, 33, 65);
         assert_eq!(block, super::chunk::NO_BLOCK);
@@ -108,7 +118,14 @@ mod tests {
 
     #[test]
     fn world_changed_chunks() {
+        let allocator = Allocator::new(
+            Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
+            Some(Box::new(|storage| storage.reset())),
+        );
+        let allocator = Arc::new(allocator);
+
         let mut world = super::World::new();
+        world.set_chunk(Chunk::new(ChunkPos::new(0, 0, 0), allocator));
 
         for _ in 0..2 {
             world.set_block(0, 0, 0, 1);

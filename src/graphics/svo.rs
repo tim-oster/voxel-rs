@@ -432,7 +432,7 @@ mod coord_space_tests {
 
         let world_pos = Point3::new(-16.25, -4.25, -20.5);
         let svo_pos = cs.cnv_into_space(world_pos);
-        assert_eq!(svo_pos, Point3::new(32.0 * 2.0 + 15.75, 32.0 * 2.0 + 4.25, 32.0 * 2.0 + 11.5));
+        assert_eq!(svo_pos, Point3::new(32.0 * 2.0 + 15.75, 32.0 * 2.0 + 27.75, 32.0 * 2.0 + 11.5));
 
         let cnv_back = cs.cnv_out_of_space(svo_pos);
         assert_eq!(cnv_back, world_pos);
