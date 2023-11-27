@@ -184,13 +184,12 @@ impl World {
             .build(&frame.ui, || {
                 frame.ui.input_int("sea level", &mut self.world_generator_cfg.sea_level).build();
 
-                if frame.ui.button("generate (AT YOUR OWN RISK)") {
+                if frame.ui.button("generate") {
                     // NOTE: this is a very inefficient approach of regenerating the world, intended
-                    // for testing/debugging purposes only. It does not properly wait for all
-                    // inflight processed to finish, neither does it properly reuse resources but
-                    // simply overrides everything instead.
+                    // for testing/debugging purposes only
 
                     self.job_system.clear();
+                    self.job_system.wait_until_processed();
 
                     let chunk_generator = Generator::new(1, self.world_generator_cfg.clone());
 

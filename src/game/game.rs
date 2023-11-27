@@ -77,6 +77,9 @@ impl Game {
             });
         }
 
+        self.job_system.clear();
+        self.job_system.wait_until_processed();
+
         // drop all refs to job system before stopping it
         drop(state);
 

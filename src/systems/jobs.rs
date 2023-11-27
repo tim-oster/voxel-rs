@@ -2,15 +2,16 @@ use std::{panic, thread};
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::thread::{JoinHandle, ThreadId};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crossbeam_queue::SegQueue;
 
 pub struct JobSystem {
     worker_handles: HashMap<ThreadId, JoinHandle<()>>,
     is_running: Arc<AtomicBool>,
+    currently_executing: Arc<AtomicU8>,
 
     queue: Arc<SegQueue<Job>>,
     prio_queue: Arc<SegQueue<Job>>,
@@ -28,6 +29,7 @@ impl JobSystem {
         let mut system = JobSystem {
             worker_handles: HashMap::new(),
             is_running: Arc::new(AtomicBool::new(true)),
+            currently_executing: Arc::new(AtomicU8::new(0)),
             queue: Arc::new(SegQueue::<Job>::new()),
             prio_queue: Arc::new(SegQueue::<Job>::new()),
             sleeping_threads: Arc::new(SegQueue::<ThreadId>::new()),
@@ -78,8 +80,19 @@ impl JobSystem {
         self.queue.len() + self.prio_queue.len()
     }
 
+    pub fn wait_until_processed(&self) {
+        loop {
+            let count = self.currently_executing.load(Ordering::Relaxed);
+            if count == 0 {
+                break;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     fn spawn_worker(&self) -> JoinHandle<()> {
         let is_running = self.is_running.clone();
+        let currently_executing = self.currently_executing.clone();
         let queue = self.queue.clone();
         let prio_queue = self.prio_queue.clone();
         let sleeping_threads = self.sleeping_threads.clone();
@@ -104,9 +117,11 @@ impl JobSystem {
                     continue;
                 }
 
+                currently_executing.fetch_add(1, Ordering::Relaxed);
                 _ = panic::catch_unwind(AssertUnwindSafe(|| {
                     (job.exec)();
                 }));
+                currently_executing.fetch_sub(1, Ordering::Relaxed);
             }
         })
     }
