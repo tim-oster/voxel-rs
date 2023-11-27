@@ -11,8 +11,8 @@ use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
 use crate::graphics::svo::Svo;
 use crate::graphics::svo_picker::{PickerBatch, RayResult};
 use crate::systems::physics::Entity;
-use crate::systems::world::World;
 use crate::world::chunk::BlockId;
+use crate::world::world::World;
 
 #[allow(dead_code)]
 pub mod blocks {

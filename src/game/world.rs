@@ -16,6 +16,7 @@ use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{Entity, Physics};
 use crate::systems::storage::Storage;
 use crate::world::chunk::ChunkPos;
+use crate::world::world;
 
 pub struct World {
     job_system: Rc<JobSystem>,
@@ -24,7 +25,7 @@ pub struct World {
     chunk_loader: ChunkLoader,
     pub storage: Storage,
 
-    pub world: systems::world::World,
+    pub world: world::World,
     world_generator: systems::worldgen::Generator,
     world_generator_cfg: worldgen::Config,
     pub world_svo: graphics::svo::Svo,
@@ -70,7 +71,7 @@ impl World {
             loading_radius,
             chunk_loader: ChunkLoader::new(loading_radius, 0, 8),
             storage: Storage::new(),
-            world: systems::world::World::new(),
+            world: world::World::new(),
             world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_generator),
             world_generator_cfg: world_cfg,
             world_svo: graphics::svo::Svo::new(blocks::new_registry()),
@@ -195,7 +196,7 @@ impl World {
 
                     self.chunk_loader = ChunkLoader::new(self.loading_radius, 0, 8);
                     self.storage = Storage::new();
-                    self.world = systems::world::World::new();
+                    self.world = world::World::new();
                     self.world_generator = systems::worldgen::Generator::new(Rc::clone(&self.job_system), chunk_generator);
                     self.world_svo = graphics::svo::Svo::new(blocks::new_registry());
                     self.world_svo_mgr = worldsvo::Manager::new(Rc::clone(&self.job_system), self.loading_radius);
@@ -309,6 +310,8 @@ mod tests {
                 break;
             }
         }
+
+        job_system.wait_until_processed();
 
         let fb = Framebuffer::new(width as i32, height as i32);
         fb.bind();

@@ -72,9 +72,8 @@ mod tests {
     use std::collections::{HashSet, VecDeque};
     use std::sync::Arc;
 
-    use crate::systems::world::ChunkPos;
     use crate::world::allocator::Allocator;
-    use crate::world::chunk::{Chunk, ChunkStorage};
+    use crate::world::chunk::{Chunk, ChunkPos, ChunkStorage};
 
     #[test]
     fn chunk_pos_from_block_pos() {
