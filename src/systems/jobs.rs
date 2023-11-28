@@ -1,12 +1,16 @@
 use std::{panic, thread};
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
-use std::sync::Arc;
+use std::rc::Rc;
+use std::sync::{Arc, mpsc};
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::mpsc::{Receiver, Sender};
 use std::thread::{JoinHandle, ThreadId};
 use std::time::{Duration, Instant};
 
 use crossbeam_queue::SegQueue;
+
+use crate::world::chunk::ChunkPos;
 
 pub struct JobSystem {
     worker_handles: HashMap<ThreadId, JoinHandle<()>>,
@@ -52,9 +56,12 @@ impl JobSystem {
         }
     }
 
-    pub fn push(&self, prioritize: bool, exec: Box<dyn FnOnce() + Send>) -> JobHandle {
+    pub fn push<Fn: FnOnce() + Send + 'static>(&self, prioritize: bool, exec: Fn) -> JobHandle {
         let cancelled = Arc::new(AtomicBool::new(false));
-        let job = Job { cancelled: Arc::clone(&cancelled), exec };
+        let job = Job {
+            cancelled: Arc::clone(&cancelled),
+            exec: Box::new(exec),
+        };
 
         if prioritize {
             self.prio_queue.push(job);
@@ -134,6 +141,61 @@ pub struct JobHandle {
 impl JobHandle {
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Relaxed);
+    }
+}
+
+// TODO write tests
+
+pub struct ChunkProcessor<T> {
+    job_system: Rc<JobSystem>,
+    tx: Sender<ChunkResult<T>>,
+    rx: Receiver<ChunkResult<T>>,
+    chunk_jobs: HashMap<ChunkPos, JobHandle>,
+}
+
+pub struct ChunkResult<T> {
+    pub pos: ChunkPos,
+    pub value: T,
+}
+
+impl<T: Send + 'static> ChunkProcessor<T> {
+    pub fn new(job_system: Rc<JobSystem>) -> ChunkProcessor<T> {
+        let (tx, rx) = mpsc::channel();
+        ChunkProcessor { job_system, tx, rx, chunk_jobs: HashMap::new() }
+    }
+
+    pub fn enqueue<Fn: FnOnce() -> T + Send + 'static>(&mut self, pos: ChunkPos, prioritize: bool, exec: Fn) {
+        self.dequeue(&pos);
+
+        let tx = self.tx.clone();
+
+        let handle = self.job_system.push(prioritize, move || {
+            let result = exec();
+            let result = ChunkResult { pos, value: result };
+            tx.send(result).unwrap();
+        });
+        self.chunk_jobs.insert(pos, handle);
+    }
+
+    pub fn dequeue(&mut self, pos: &ChunkPos) {
+        if let Some(handle) = self.chunk_jobs.remove(pos) {
+            handle.cancel();
+        }
+    }
+
+    pub fn get_results(&mut self, limit: u32) -> Vec<ChunkResult<T>> {
+        let mut results = Vec::new();
+
+        for _ in 0..limit {
+            if let Ok(result) = self.rx.try_recv() {
+                self.chunk_jobs.remove(&result.pos);
+                results.push(result);
+            } else {
+                break;
+            }
+        }
+
+        results
     }
 }
 

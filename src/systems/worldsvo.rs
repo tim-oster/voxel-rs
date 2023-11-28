@@ -1,21 +1,15 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
 
 use crate::graphics;
 use crate::graphics::svo::CoordSpace;
-use crate::systems::jobs::{JobHandle, JobSystem};
+use crate::systems::jobs::{ChunkProcessor, JobSystem};
 use crate::world::chunk::{Chunk, ChunkPos};
 use crate::world::octree::{OctantId, Position};
 use crate::world::svo::{SerializedChunk, Svo};
 
 pub struct Manager {
-    job_system: Rc<JobSystem>,
-    tx: Sender<SerializedChunk>,
-    rx: Receiver<SerializedChunk>,
-    chunk_jobs: HashMap<ChunkPos, JobHandle>,
-
+    processor: ChunkProcessor<SerializedChunk>,
     svo: Svo<SerializedChunk>,
     octant_ids: HashMap<ChunkPos, OctantId>,
     has_changed: bool,
@@ -24,13 +18,8 @@ pub struct Manager {
 
 impl Manager {
     pub fn new(job_system: Rc<JobSystem>, render_distance: u32) -> Manager {
-        let (tx, rx) = mpsc::channel::<SerializedChunk>();
         Manager {
-            job_system,
-            tx,
-            rx,
-            chunk_jobs: HashMap::new(),
-
+            processor: ChunkProcessor::new(job_system),
             svo: Svo::new(),
             octant_ids: HashMap::new(),
             has_changed: false,
@@ -42,33 +31,21 @@ impl Manager {
     }
 
     pub fn set_chunk(&mut self, chunk: &Chunk) {
-        self.dequeue_chunk(&chunk.pos);
+        self.processor.dequeue(&chunk.pos);
 
         if let Some(storage) = chunk.get_storage() {
-            let pos = chunk.pos;
+            let pos = chunk.pos.clone();
             let lod = chunk.lod;
-            let tx = self.tx.clone();
-
-            let handle = self.job_system.push(true, Box::new(move || {
-                let serialized = SerializedChunk::new(pos, storage, lod);
-                tx.send(serialized).unwrap();
-            }));
-            self.chunk_jobs.insert(pos, handle);
+            self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(pos, storage, lod));
         }
     }
 
     pub fn remove_chunk(&mut self, pos: &ChunkPos) {
-        self.dequeue_chunk(pos);
+        self.processor.dequeue(pos);
 
         if let Some(id) = self.octant_ids.remove(pos) {
             self.svo.remove_octant(id);
             self.has_changed = true;
-        }
-    }
-
-    fn dequeue_chunk(&mut self, pos: &ChunkPos) {
-        if let Some(handle) = self.chunk_jobs.remove(pos) {
-            handle.cancel();
         }
     }
 
@@ -80,22 +57,15 @@ impl Manager {
         }
         self.coord_space.center = *world_center;
 
-        for _ in 0..50 {
-            if let Ok(chunk) = self.rx.try_recv() {
-                let chunk_pos = chunk.pos;
-                self.chunk_jobs.remove(&chunk_pos);
+        for result in self.processor.get_results(50) {
+            let svo_pos = Manager::world_to_svo_pos(&result.pos, &world_center, self.coord_space.dst);
+            if self.is_out_of_bounds(&svo_pos) {
+                continue;
+            }
 
-                let svo_pos = Manager::world_to_svo_pos(&chunk_pos, &world_center, self.coord_space.dst);
-                if self.is_out_of_bounds(&svo_pos) {
-                    continue;
-                }
-
-                if let Some(id) = self.svo.set(svo_pos, Some(chunk)) {
-                    self.octant_ids.insert(chunk_pos, id);
-                    self.has_changed = true;
-                }
-            } else {
-                break;
+            if let Some(id) = self.svo.set(svo_pos, Some(result.value)) {
+                self.octant_ids.insert(result.pos, id);
+                self.has_changed = true;
             }
         }
 
