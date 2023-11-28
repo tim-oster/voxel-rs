@@ -5,7 +5,7 @@ use imgui::{Condition, Id, TreeNodeFlags};
 
 use crate::{graphics, systems};
 use crate::core::Frame;
-use crate::game::gameplay::blocks;
+use crate::game::content::blocks;
 use crate::game::worldgen;
 use crate::game::worldgen::{Generator, Noise, SplinePoint};
 use crate::graphics::camera::Camera;
@@ -18,6 +18,9 @@ use crate::systems::storage::Storage;
 use crate::world::chunk::ChunkPos;
 use crate::world::world;
 
+/// World is the game system responsible for keeping all chunks in the voxel world loaded and
+/// renders them. It delegates loading from memory or generating chunks, as well as serialization
+/// of the chunks into a SVO instance.
 pub struct World {
     job_system: Rc<JobSystem>,
 
@@ -40,7 +43,7 @@ pub struct World {
 }
 
 impl World {
-    pub fn new(job_system: Rc<JobSystem>, loading_radius: u32, aspect_ratio: f32) -> World {
+    pub fn new(job_system: Rc<JobSystem>, loading_radius: u32) -> World {
         let world_cfg = worldgen::Config {
             sea_level: 70,
             continentalness: Noise {
@@ -77,7 +80,7 @@ impl World {
             world_svo: graphics::svo::Svo::new(blocks::new_registry()),
             world_svo_mgr: worldsvo::Manager::new(job_system, loading_radius),
             physics: Physics::new(),
-            camera: Camera::new(72.0, aspect_ratio, 0.01, 1024.0),
+            camera: Camera::new(72.0, 1.0, 0.01, 1024.0),
             selected_voxel: None,
             ambient_intensity: 0.3,
             sun_direction: Vector3::new(-1.0, -1.0, -1.0).normalize(),
@@ -90,7 +93,7 @@ impl World {
         self.physics.step(delta_time, &self.world_svo, vec![entity]);
     }
 
-    pub fn handle_resize(&mut self, aspect_ratio: f32) {
+    pub fn handle_window_resize(&mut self, aspect_ratio: f32) {
         self.camera.update_projection(72.0, aspect_ratio, 0.01, 1024.0);
     }
 
@@ -301,7 +304,7 @@ mod tests {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let mut world = World::new(Rc::clone(&job_system), 15, aspect_ratio);
+        let mut world = World::new(Rc::clone(&job_system), 15);
 
         loop {
             world.update(&mut player, 0.1);

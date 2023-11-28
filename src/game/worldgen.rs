@@ -1,13 +1,21 @@
 use noise::{NoiseFn, Perlin, Seedable};
 
-use crate::game::gameplay::blocks;
+use crate::game::content::blocks;
 use crate::systems::worldgen::ChunkGenerator;
 use crate::world::chunk::Chunk;
 
 #[derive(Clone)]
 pub struct Noise {
+    /// The frequency of the underlying noise.
     pub frequency: f32,
+    /// Each additional octave adds the same noise at double the frequency and half the value.
     pub octaves: i32,
+    /// Use spline points to map the noise value to custom values.
+    /// If the noise value is between two spline point x values, the y value of those to points will
+    /// be linearly interpolated depending on the where the noise value lies between the two
+    /// x values.
+    /// If x is less or greater than the lowest or highest point, that point's value is used without
+    /// interpolation.
     pub spline_points: Vec<SplinePoint>,
 }
 
@@ -22,7 +30,7 @@ pub struct SplinePoint {
 impl Noise {
     fn get(&self, perlin: &Perlin, x: f64, z: f64) -> f64 {
         let v = self.get_noise_value(perlin, x, z);
-        self.interpolate_spline_points(v)
+        Self::interpolate_spline_points(&self.spline_points, v)
     }
 
     fn get_noise_value(&self, perlin: &Perlin, x: f64, z: f64) -> f64 {
@@ -39,27 +47,81 @@ impl Noise {
         v
     }
 
-    fn interpolate_spline_points(&self, x: f64) -> f64 {
-        if self.spline_points.is_empty() {
+    fn interpolate_spline_points(points: &[SplinePoint], x: f64) -> f64 {
+        if points.is_empty() {
             return 0.0;
         }
 
-        let rhs = self.spline_points.iter().position(|p| (p.x as f64) > x);
+        let rhs = points.iter().position(|p| (p.x as f64) > x);
         if rhs.is_none() {
-            return self.spline_points.last().unwrap().y as f64;
+            return points.last().unwrap().y as f64;
         }
         let rhs = rhs.unwrap();
         if rhs == 0 {
-            return self.spline_points.first().unwrap().y as f64;
+            return points.first().unwrap().y as f64;
         }
 
-        let lhs = self.spline_points.get(rhs - 1).unwrap();
-        let rhs = self.spline_points.get(rhs).unwrap();
+        let lhs = points.get(rhs - 1).unwrap();
+        let rhs = points.get(rhs).unwrap();
 
         let v_start = lhs.y as f64;
         let v_diff = (rhs.y - lhs.y) as f64;
         let factor = (x as f32 - lhs.x) / (rhs.x - lhs.x);
         v_start + v_diff * factor as f64
+    }
+}
+
+#[cfg(test)]
+mod noise_tests {
+    use noise::{NoiseFn, Perlin, Seedable};
+
+    use crate::assert_float_eq;
+    use crate::game::worldgen::{Noise, SplinePoint};
+
+    #[test]
+    fn get() {
+        let noise = Noise {
+            frequency: 2.0,
+            octaves: 3,
+            spline_points: vec![SplinePoint { x: -1.0, y: 0.0 }, SplinePoint { x: 1.0, y: 1.0 }],
+        };
+        let perlin = Perlin::new().set_seed(0);
+
+        assert_float_eq!(noise.get(&perlin, 0.0, 0.0), 0.5);
+        assert_float_eq!(noise.get(&perlin, 1.0, 0.0), 0.234834);
+        assert_float_eq!(noise.get(&perlin, 0.0, 1.0), 0.676776);
+        assert_float_eq!(noise.get(&perlin, 1.0, 1.0), 0.411611);
+    }
+
+    /// Tests if all common edge cases work correctly and if a normal use case produces the
+    /// expected results.
+    #[test]
+    fn interpolate_spline_points() {
+        // no spline points
+        let points = vec![];
+        assert_eq!(Noise::interpolate_spline_points(&points, 0.0), 0.0);
+
+        // only higher point
+        let points = vec![SplinePoint { x: 0.5, y: 1.0 }];
+        assert_eq!(Noise::interpolate_spline_points(&points, 0.25), 1.0);
+
+        // only lower point
+        let points = vec![SplinePoint { x: 0.5, y: 1.0 }];
+        assert_eq!(Noise::interpolate_spline_points(&points, 0.75), 1.0);
+
+        // interpolation between multiple points
+        let points = vec![
+            SplinePoint { x: 0.0, y: 1.0 },
+            SplinePoint { x: 0.5, y: 2.0 },
+            SplinePoint { x: 1.0, y: 3.0 },
+        ];
+        assert_eq!(Noise::interpolate_spline_points(&points, -0.5), 1.0);
+        assert_eq!(Noise::interpolate_spline_points(&points, 0.0), 1.0);
+        assert_eq!(Noise::interpolate_spline_points(&points, 0.25), 1.5);
+        assert_eq!(Noise::interpolate_spline_points(&points, 0.5), 2.0);
+        assert_eq!(Noise::interpolate_spline_points(&points, 0.75), 2.5);
+        assert_eq!(Noise::interpolate_spline_points(&points, 1.0), 3.0);
+        assert_eq!(Noise::interpolate_spline_points(&points, 1.5), 3.0);
     }
 }
 

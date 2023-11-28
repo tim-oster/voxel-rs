@@ -10,6 +10,8 @@ use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{AABBDef, Entity};
 use crate::world::chunk::ChunkPos;
 
+/// Game runs the actual game loop and handles communication and calling to the different game
+/// systems.
 pub struct Game {
     window: Window,
     job_system: Rc<JobSystem>,
@@ -43,7 +45,7 @@ impl Game {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let world = World::new(Rc::clone(&job_system), 15, window.get_aspect());
+        let world = World::new(Rc::clone(&job_system), 15);
         let gameplay = Gameplay::new();
 
         Game {
@@ -66,14 +68,14 @@ impl Game {
                     state.handle_window_resize(frame.size.0, frame.size.1, frame.get_aspect());
                 }
 
-                state.handle_update(frame);
+                state.update(frame);
 
                 unsafe {
                     gl::ClearColor(0.0, 0.0, 0.0, 1.0);
                     gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
                 }
 
-                state.handle_render(frame);
+                state.render(frame);
             });
         }
 
@@ -90,7 +92,7 @@ impl Game {
 }
 
 impl State {
-    fn handle_update(&mut self, frame: &mut Frame) {
+    fn update(&mut self, frame: &mut Frame) {
         self.handle_debug_keys(frame);
 
         self.world.update(&mut self.player, frame.stats.delta_time);
@@ -98,7 +100,7 @@ impl State {
         self.world.selected_voxel = self.gameplay.looking_at_block.map(|result| result.pos);
     }
 
-    fn handle_render(&mut self, frame: &mut Frame) {
+    fn render(&mut self, frame: &mut Frame) {
         self.world.render(frame.get_aspect());
         self.gameplay.render_ui(frame.size);
 
@@ -107,8 +109,8 @@ impl State {
     }
 
     fn handle_window_resize(&mut self, width: i32, height: i32, aspect_ratio: f32) {
-        self.world.handle_resize(aspect_ratio);
-        self.gameplay.handle_resize(width, height);
+        self.world.handle_window_resize(aspect_ratio);
+        self.gameplay.handle_window_resize(width, height);
     }
 
     fn handle_resource_reload(&mut self) {
