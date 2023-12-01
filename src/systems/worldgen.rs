@@ -8,8 +8,6 @@ pub trait ChunkGenerator {
     fn generate_chunk(&self, chunk: &mut Chunk);
 }
 
-// TODO is this system required or can it be moved to game?
-
 pub struct Generator {
     processor: ChunkProcessor<Chunk>,
     gen: Arc<dyn ChunkGenerator + Send + Sync + 'static>,
@@ -43,14 +41,12 @@ impl Generator {
     }
 
     /// Returns up to limit chunks from finished generation jobs. This is a non-blocking operation
-    /// so it might return 0 chunks immediately. Limit must be greater than 0.
+    /// so it might return 0 chunks immediately.
     pub fn get_generated_chunks(&mut self, limit: u32) -> Vec<Chunk> {
         let mut chunks = Vec::new();
-        for result in self.processor.get_results(50) {
+        for result in self.processor.get_results(limit) {
             chunks.push(result.value);
         }
         chunks
     }
 }
-
-// TODO write tests
