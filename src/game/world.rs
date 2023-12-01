@@ -1,6 +1,7 @@
+use std::ops::{Add, Sub};
 use std::rc::Rc;
 
-use cgmath::{InnerSpace, Point3, Vector3};
+use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
 use imgui::{Condition, Id, TreeNodeFlags};
 
 use crate::{graphics, systems};
@@ -11,7 +12,7 @@ use crate::game::worldgen::{Generator, Noise, SplinePoint};
 use crate::graphics::camera::Camera;
 use crate::graphics::svo::RenderParams;
 use crate::systems::{storage, worldsvo};
-use crate::systems::chunkloading::{ChunkEvent, ChunkLoader};
+use crate::systems::chunkloader::{ChunkEvent, ChunkLoader};
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{Entity, Physics};
 use crate::systems::storage::Storage;
@@ -102,42 +103,52 @@ impl World {
     }
 
     fn handle_chunk_loading(&mut self, pos: Point3<f32>) {
-        let mut generate_count = 0;
         let chunk_events = self.chunk_loader.update(pos);
-        for event in &chunk_events {
-            match event {
-                ChunkEvent::Load { pos, lod } => {
-                    let result = self.storage.load(pos);
-                    if result.is_ok() {
-                        let mut chunk = result.ok().unwrap();
-                        chunk.lod = *lod;
-                        self.world.set_chunk(chunk);
-                        continue;
-                    }
+        if !chunk_events.is_empty() {
+            let mut generate_count = 0;
 
-                    let err = result.err().unwrap();
-                    match err {
-                        storage::LoadError::NotFound => {
-                            let mut chunk = self.storage.new_chunk(*pos);
+            // camera position is always kept in center of the SVO, so it has to be "moved" to
+            // the actual world space for frustum culling
+            let old_pos = self.camera.position;
+            self.camera.position = pos;
+            let chunk_events = Self::sort_chunks_by_view_frustum(chunk_events, &self.camera);
+            self.camera.position = old_pos;
+
+            for event in &chunk_events {
+                match event {
+                    ChunkEvent::Load { pos, lod } => {
+                        let result = self.storage.load(pos);
+                        if result.is_ok() {
+                            let mut chunk = result.ok().unwrap();
                             chunk.lod = *lod;
-                            self.world_generator.enqueue_chunk(chunk);
-                            generate_count += 1;
+                            self.world.set_chunk(chunk);
+                            continue;
+                        }
+
+                        let err = result.err().unwrap();
+                        match err {
+                            storage::LoadError::NotFound => {
+                                let mut chunk = self.storage.new_chunk(*pos);
+                                chunk.lod = *lod;
+                                self.world_generator.enqueue_chunk(chunk);
+                                generate_count += 1;
+                            }
+                        }
+                    }
+                    ChunkEvent::Unload { pos } => {
+                        self.world_generator.dequeue_chunk(pos);
+                        self.world.remove_chunk(pos);
+                    }
+                    ChunkEvent::LodChange { pos, lod } => {
+                        if let Some(chunk) = self.world.get_chunk_mut(pos) {
+                            chunk.lod = *lod;
                         }
                     }
                 }
-                ChunkEvent::Unload { pos } => {
-                    self.world_generator.dequeue_chunk(pos);
-                    self.world.remove_chunk(pos);
-                }
-                ChunkEvent::LodChange { pos, lod } => {
-                    if let Some(chunk) = self.world.get_chunk_mut(pos) {
-                        chunk.lod = *lod;
-                    }
-                }
             }
-        }
-        if !chunk_events.is_empty() {
-            println!("generate {} new chunks", generate_count);
+            if !chunk_events.is_empty() {
+                println!("generate {} new chunks", generate_count);
+            }
         }
         for chunk in self.world_generator.get_generated_chunks(40) {
             if self.chunk_loader.is_loaded(&chunk.pos) {
@@ -154,6 +165,37 @@ impl World {
 
         let current_chunk_pos = ChunkPos::from(pos);
         self.world_svo_mgr.update(&current_chunk_pos, &mut self.world_svo);
+    }
+
+    /// sort_chunks_by_view_frustum sorts the given chunk event to contain all chunks that are in
+    /// the camera's view first first. All other chunks are sorted radially from forward to backward
+    /// camera vector.
+    fn sort_chunks_by_view_frustum(events: Vec<ChunkEvent>, camera: &Camera) -> Vec<ChunkEvent> {
+        let mut visible_chunks = Vec::new();
+        let mut other_chunks = Vec::new();
+        for evt in events {
+            let pos = evt.get_pos().to_block_pos().add(Vector3::new(16, 16, 16));
+            if camera.is_in_frustum(pos.cast().unwrap(), 32.0) {
+                visible_chunks.push(evt);
+            } else {
+                other_chunks.push(evt);
+            }
+        }
+
+        other_chunks.sort_by(|lhs, rhs| {
+            let lhs: Vector3<f32> = lhs.get_pos().to_block_pos().to_vec().cast().unwrap();
+            let rhs: Vector3<f32> = rhs.get_pos().to_block_pos().to_vec().cast().unwrap();
+
+            let tl = lhs.sub(camera.position.to_vec()).normalize();
+            let tr = rhs.sub(camera.position.to_vec()).normalize();
+            let dl = -tl.dot(camera.forward);
+            let dr = -tr.dot(camera.forward);
+
+            dl.total_cmp(&dr)
+        });
+
+        visible_chunks.extend(other_chunks.iter());
+        visible_chunks
     }
 
     fn update_camera(&mut self, entity: &Entity) {

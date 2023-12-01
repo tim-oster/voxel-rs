@@ -92,6 +92,7 @@ pub struct Window {
     current_stats: FrameStats,
     is_cursor_grabbed: bool,
     input: Input,
+    first_update: bool,
 }
 
 pub struct FrameStats {
@@ -133,6 +134,7 @@ impl Window {
             },
             is_cursor_grabbed: false,
             input: Input::new(),
+            first_update: true,
         }
     }
 
@@ -153,7 +155,7 @@ impl Window {
             let mut frame = Frame {
                 input: &self.input,
                 stats: &self.current_stats,
-                was_resized,
+                was_resized: was_resized || self.first_update,
                 size,
                 ui,
                 is_cursor_grabbed: self.is_cursor_grabbed,
@@ -181,6 +183,7 @@ impl Window {
         self.current_stats.update_time_accumulation += delta_time;
 
         self.context.borrow_mut().window.swap_buffers();
+        self.first_update = false;
     }
 
     fn update_frame_state(&mut self) {

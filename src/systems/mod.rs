@@ -1,4 +1,4 @@
-pub mod chunkloading;
+pub mod chunkloader;
 pub mod jobs;
 pub mod physics;
 pub mod storage;

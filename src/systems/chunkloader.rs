@@ -1,7 +1,8 @@
 use std::cmp;
 use std::collections::HashMap;
+use std::ops::Add;
 
-use cgmath::Point3;
+use cgmath::{InnerSpace, Point3};
 
 use crate::world::chunk::ChunkPos;
 
@@ -22,7 +23,7 @@ pub enum ChunkEvent {
 }
 
 impl ChunkEvent {
-    fn get_pos(&self) -> &ChunkPos {
+    pub fn get_pos(&self) -> &ChunkPos {
         match self {
             ChunkEvent::Load { pos, .. } => pos,
             ChunkEvent::Unload { pos, .. } => pos,
@@ -76,10 +77,8 @@ impl ChunkLoader {
 
                     pos.y = y;
 
-                    let existing = self.loaded_chunks.get(&pos);
-                    if existing.is_some() {
-                        let old_lod = *existing.unwrap();
-                        if old_lod != lod {
+                    if let Some(old_lod) = self.loaded_chunks.get(&pos) {
+                        if *old_lod != lod {
                             events.push(ChunkEvent::LodChange { pos, lod });
                             self.loaded_chunks.insert(pos, lod);
                         }
@@ -137,7 +136,7 @@ mod tests {
 
     use cgmath::Point3;
 
-    use crate::systems::chunkloading::{ChunkEvent, ChunkLoader};
+    use crate::systems::chunkloader::{ChunkEvent, ChunkLoader};
     use crate::world::chunk::ChunkPos;
 
     /// Asserts that chunks inside the specified radius are properly loaded with an accurate LOD
