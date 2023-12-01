@@ -12,6 +12,8 @@ use crossbeam_queue::SegQueue;
 
 use crate::world::chunk::ChunkPos;
 
+/// JobSystem manages a configurable amount of worker threads to distribute jobs to. Each job
+/// can produce a result which can be retrieved on the job producer's side.
 pub struct JobSystem {
     worker_handles: HashMap<ThreadId, JoinHandle<()>>,
     is_running: Arc<AtomicBool>,
@@ -25,6 +27,16 @@ pub struct JobSystem {
 struct Job {
     cancelled: Arc<AtomicBool>,
     exec: Box<dyn FnOnce() + Send>,
+}
+
+pub struct JobHandle {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl JobHandle {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Relaxed);
+    }
 }
 
 #[allow(dead_code)]
@@ -47,6 +59,8 @@ impl JobSystem {
         system
     }
 
+    /// stop signals all worker threads to stop and joins them. Currently processed jobs are not
+    /// cancelled and will cause this method to block.
     pub fn stop(self) {
         self.is_running.store(false, Ordering::Relaxed);
 
@@ -56,6 +70,8 @@ impl JobSystem {
         }
     }
 
+    /// push enqueues a new job. Setting `prioritize` to true, will queue it up in a separate queue,
+    /// which is drained before the normal, un-prioritized queue.
     pub fn push<Fn: FnOnce() + Send + 'static>(&self, prioritize: bool, exec: Fn) -> JobHandle {
         let cancelled = Arc::new(AtomicBool::new(false));
         let job = Job {
@@ -78,15 +94,28 @@ impl JobSystem {
         JobHandle { cancelled }
     }
 
+    /// clear discards all queued up jobs.
     pub fn clear(&self) {
         while !self.queue.is_empty() { self.queue.pop(); }
         while !self.prio_queue.is_empty() { self.prio_queue.pop(); }
     }
 
+    /// len returns the current amount of all queued up jobs.
     pub fn len(&self) -> usize {
         self.queue.len() + self.prio_queue.len()
     }
 
+    /// wait_until_empty_and_processed spin-loops until all queued elements have been picked up by
+    /// a worker thread and all threads have finished processing their jobs.
+    pub fn wait_until_empty_and_processed(&self) {
+        while self.len() > 0 {
+            thread::sleep(Duration::from_millis(50));
+        }
+        self.wait_until_processed();
+    }
+
+    /// wait_until_processed spin-loops until all worker threads have finished processing their
+    /// jobs.
     pub fn wait_until_processed(&self) {
         loop {
             let count = self.currently_executing.load(Ordering::Relaxed);
@@ -134,18 +163,98 @@ impl JobSystem {
     }
 }
 
-pub struct JobHandle {
-    cancelled: Arc<AtomicBool>,
-}
+#[cfg(test)]
+mod job_system_tests {
+    use std::sync::{Arc, Mutex};
+    use std::sync::atomic::{AtomicI32, Ordering};
+    use std::thread;
+    use std::time::Duration;
 
-impl JobHandle {
-    pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Relaxed);
+    use crate::systems::jobs::JobSystem;
+
+    /// Tests that prioritization of jobs works.
+    #[test]
+    fn push_prio_and_normal() {
+        // only one worker to process one at a time
+        let js = JobSystem::new(1);
+
+        // push job to allow for other jobs to be enqueued
+        js.push(false, || thread::sleep(Duration::from_millis(250)));
+
+        // enqueue prioritized and normal job
+        let list = Arc::new(Mutex::new(Vec::new()));
+        let l0 = list.clone();
+        let l1 = list.clone();
+        js.push(false, move || l0.lock().unwrap().push("normal"));
+        js.push(true, move || l1.lock().unwrap().push("prio"));
+
+        js.wait_until_empty_and_processed();
+        js.stop();
+
+        // assert that prioritized job was processed first
+        let list = Arc::try_unwrap(list).unwrap().into_inner().unwrap();
+        assert_eq!(list, vec!["prio", "normal"]);
+    }
+
+    /// Tests that clear discards all pending jobs.
+    #[test]
+    fn clear() {
+        // only one worker to process one at a time
+        let js = JobSystem::new(1);
+
+        // push job to allow for other jobs to be enqueued
+        js.push(false, || thread::sleep(Duration::from_millis(250)));
+
+        let counter = Arc::new(AtomicI32::new(0));
+        for i in 0..5 {
+            let c = counter.clone();
+            js.push(false, move || { c.fetch_add(1, Ordering::Relaxed); });
+        }
+
+        // clear & sleep to ensure that nothing is processed
+        js.clear();
+        thread::sleep(Duration::from_millis(500));
+
+        js.stop();
+
+        // assert that no job was processed
+        assert_eq!(counter.load(Ordering::Relaxed), 0);
+    }
+
+    /// Tests that cancelling already queued jobs works.
+    #[test]
+    fn cancelling_queued_job() {
+        // only one worker to process one at a time
+        let js = JobSystem::new(1);
+
+        // push job to allow for other jobs to be enqueued
+        js.push(false, || thread::sleep(Duration::from_millis(250)));
+
+        let list = Arc::new(Mutex::new(Vec::new()));
+        let handle = js.push(false, {
+            let list = list.clone();
+            move || list.lock().unwrap().push("cancelled")
+        });
+        js.push(false, {
+            let list = list.clone();
+            move || list.lock().unwrap().push("normal")
+        });
+
+        // cancel first job
+        handle.cancel();
+
+        js.wait_until_empty_and_processed();
+        js.stop();
+
+        // assert that first job was not processed first
+        let list = Arc::try_unwrap(list).unwrap().into_inner().unwrap();
+        assert_eq!(list, vec!["normal"]);
     }
 }
 
-// TODO write tests
-
+/// ChunkProcessor is a decorator for [`JobSystem`]. It allows de-/queueing jobs per [`ChunkPos`].
+/// Enqueuing multiple jobs for the same position will override previously enqueued jobs.
+/// Results contain their original chunk position in addition to their actual value.
 pub struct ChunkProcessor<T> {
     job_system: Rc<JobSystem>,
     tx: Sender<ChunkResult<T>>,
@@ -153,6 +262,7 @@ pub struct ChunkProcessor<T> {
     chunk_jobs: HashMap<ChunkPos, JobHandle>,
 }
 
+#[derive(Debug, Eq, PartialEq)]
 pub struct ChunkResult<T> {
     pub pos: ChunkPos,
     pub value: T,
@@ -199,4 +309,66 @@ impl<T: Send + 'static> ChunkProcessor<T> {
     }
 }
 
-// TODO write tests
+#[cfg(test)]
+mod chunk_processor_tests {
+    use std::rc::Rc;
+    use std::thread;
+    use std::time::Duration;
+
+    use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
+    use crate::world::chunk::ChunkPos;
+
+    /// Tests that enqueue & dequeue work for all possible scenarios.
+    #[test]
+    fn enqueue() {
+        // only one worker to process one at a time
+        let js = Rc::new(JobSystem::new(1));
+        let mut cp = ChunkProcessor::new(js.clone());
+
+        // push job to allow for other jobs to be enqueued
+        cp.enqueue(ChunkPos::new(0, 0, 0), false, || {
+            thread::sleep(Duration::from_millis(250));
+            "waiter"
+        });
+
+        // enqueue same chunk pos twice to test override
+        cp.enqueue(ChunkPos::new(1, 0, 0), false, || "first");
+        cp.enqueue(ChunkPos::new(1, 0, 0), false, || "first override");
+
+        // test prioritize enqueue
+        cp.enqueue(ChunkPos::new(2, 0, 0), true, || "prio");
+
+        // test dequeue
+        cp.enqueue(ChunkPos::new(3, 0, 0), false, || "second");
+        cp.dequeue(&ChunkPos::new(3, 0, 0));
+
+        // test normal
+        cp.enqueue(ChunkPos::new(4, 0, 0), false, || "third");
+
+        js.wait_until_empty_and_processed();
+
+        // get no results for limit=0
+        let results = cp.get_results(0);
+        assert!(results.is_empty());
+
+        // get first result
+        let results = cp.get_results(1);
+        assert_eq!(results, vec![
+            ChunkResult { pos: ChunkPos::new(0, 0, 0), value: "waiter" }
+        ]);
+        assert!(!cp.chunk_jobs.is_empty());
+
+        // get remaining results
+        let results = cp.get_results(100);
+        assert_eq!(results, vec![
+            ChunkResult { pos: ChunkPos::new(2, 0, 0), value: "prio" },
+            ChunkResult { pos: ChunkPos::new(1, 0, 0), value: "first override" },
+            ChunkResult { pos: ChunkPos::new(4, 0, 0), value: "third" },
+        ]);
+        assert!(cp.chunk_jobs.is_empty());
+
+        // return immediately as no more results exist
+        let results = cp.get_results(100);
+        assert!(results.is_empty());
+    }
+}
