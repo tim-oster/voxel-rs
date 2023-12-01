@@ -166,11 +166,17 @@ impl JobSystem {
 #[cfg(test)]
 mod job_system_tests {
     use std::sync::{Arc, Mutex};
-    use std::sync::atomic::{AtomicI32, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
     use std::thread;
     use std::time::Duration;
 
     use crate::systems::jobs::JobSystem;
+
+    pub fn wait(atomic: Arc<AtomicBool>) {
+        while !atomic.load(Ordering::SeqCst) {
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
 
     /// Tests that prioritization of jobs works.
     #[test]
@@ -179,7 +185,13 @@ mod job_system_tests {
         let js = JobSystem::new(1);
 
         // push job to allow for other jobs to be enqueued
-        js.push(false, || thread::sleep(Duration::from_millis(250)));
+        let signal = Arc::new(AtomicBool::new(false));
+        let s0 = signal.clone();
+        js.push(false, move || {
+            s0.store(true, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(250))
+        });
+        wait(signal);
 
         // enqueue prioritized and normal job
         let list = Arc::new(Mutex::new(Vec::new()));
@@ -203,7 +215,13 @@ mod job_system_tests {
         let js = JobSystem::new(1);
 
         // push job to allow for other jobs to be enqueued
-        js.push(false, || thread::sleep(Duration::from_millis(250)));
+        let signal = Arc::new(AtomicBool::new(false));
+        let s0 = signal.clone();
+        js.push(false, move || {
+            s0.store(true, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(250))
+        });
+        wait(signal);
 
         let counter = Arc::new(AtomicI32::new(0));
         for i in 0..5 {
@@ -228,7 +246,13 @@ mod job_system_tests {
         let js = JobSystem::new(1);
 
         // push job to allow for other jobs to be enqueued
-        js.push(false, || thread::sleep(Duration::from_millis(250)));
+        let signal = Arc::new(AtomicBool::new(false));
+        let s0 = signal.clone();
+        js.push(false, move || {
+            s0.store(true, Ordering::SeqCst);
+            thread::sleep(Duration::from_millis(250))
+        });
+        wait(signal);
 
         let list = Arc::new(Mutex::new(Vec::new()));
         let handle = js.push(false, {
@@ -312,10 +336,13 @@ impl<T: Send + 'static> ChunkProcessor<T> {
 #[cfg(test)]
 mod chunk_processor_tests {
     use std::rc::Rc;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
     use std::time::Duration;
 
     use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
+    use crate::systems::jobs::job_system_tests::wait;
     use crate::world::chunk::ChunkPos;
 
     /// Tests that enqueue & dequeue work for all possible scenarios.
@@ -326,10 +353,14 @@ mod chunk_processor_tests {
         let mut cp = ChunkProcessor::new(js.clone());
 
         // push job to allow for other jobs to be enqueued
-        cp.enqueue(ChunkPos::new(0, 0, 0), false, || {
+        let signal = Arc::new(AtomicBool::new(false));
+        let s0 = signal.clone();
+        cp.enqueue(ChunkPos::new(0, 0, 0), false, move || {
+            s0.store(true, Ordering::SeqCst);
             thread::sleep(Duration::from_millis(250));
             "waiter"
         });
+        wait(signal);
 
         // enqueue same chunk pos twice to test override
         cp.enqueue(ChunkPos::new(1, 0, 0), false, || "first");
