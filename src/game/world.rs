@@ -347,16 +347,17 @@ mod tests {
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
         let mut world = World::new(Rc::clone(&job_system), 15);
+        world.handle_window_resize(aspect_ratio);
 
         loop {
             world.update(&mut player, 0.1);
 
-            if job_system.len() == 0 {
+            if !world.world_generator.has_pending_jobs() && !world.world_svo_mgr.has_pending_jobs() {
                 break;
             }
         }
 
-        job_system.wait_until_processed();
+        job_system.wait_until_empty_and_processed();
 
         let fb = Framebuffer::new(width as i32, height as i32);
         fb.bind();

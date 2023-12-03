@@ -49,4 +49,10 @@ impl Generator {
         }
         chunks
     }
+
+    /// Returns if the generator still has in-work chunks or if there are unconsumed chunks in the
+    /// buffer.
+    pub fn has_pending_jobs(&self) -> bool {
+        self.processor.has_pending()
+    }
 }

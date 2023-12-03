@@ -49,6 +49,11 @@ impl Manager {
         }
     }
 
+    /// Returns if the SVO still has in-work chunks or if there are unconsumed chunks in the buffer.
+    pub fn has_pending_jobs(&self) -> bool {
+        self.processor.has_pending()
+    }
+
     pub fn update(&mut self, world_center: &ChunkPos, svo: &mut graphics::svo::Svo) {
         if self.coord_space.center != *world_center {
             let last_center = self.coord_space.center;
