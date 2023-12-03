@@ -336,15 +336,23 @@ mod svo_tests {
         assert_eq!(result, PickerBatchResult {
             rays: vec![
                 RayResult {
-                    dst: 0.5,
+                    dst: assert_float_eq!(result.rays[0].dst, 0.5, 0.0001),
                     inside_block: false,
-                    pos: Point3::new(0.5, assert_float_eq!(result.rays[0].pos.y, 1.0), 0.5),
+                    pos: Point3::new(
+                        assert_float_eq!(result.rays[0].pos.x, 0.5, 0.0001),
+                        assert_float_eq!(result.rays[0].pos.y, 1.0, 0.0001),
+                        assert_float_eq!(result.rays[0].pos.z, 0.5, 0.0001),
+                    ),
                     normal: Vector3::new(0.0, 1.0, 0.0),
                 },
                 RayResult {
-                    dst: 0.5,
+                    dst: assert_float_eq!(result.rays[1].dst, 0.5, 0.0001),
                     inside_block: true,
-                    pos: Point3::new(assert_float_eq!(result.rays[1].pos.x, 1.0), 0.5, 0.5),
+                    pos: Point3::new(
+                        assert_float_eq!(result.rays[1].pos.x, 1.0, 0.0001),
+                        assert_float_eq!(result.rays[1].pos.y, 0.5, 0.0001),
+                        assert_float_eq!(result.rays[1].pos.z, 0.5, 0.0001),
+                    ),
                     normal: Vector3::new(-1.0, 0.0, 0.0),
                 },
                 RayResult {

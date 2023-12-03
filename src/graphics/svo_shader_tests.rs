@@ -720,7 +720,7 @@ mod tests {
             StackFrame { t_min: 0.0, ptr: 17, idx: 2, parent_octant_idx: 4, scale: 16, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
             StackFrame { t_min: 0.0, ptr: 1397, idx: 5, parent_octant_idx: 7, scale: 15, is_child: AlignedBool(1), is_leaf: AlignedBool(0) },
             StackFrame { t_min: 0.0, ptr: 2021, idx: 3, parent_octant_idx: 0, scale: 14, is_child: AlignedBool(0), is_leaf: AlignedBool(0) },
-            StackFrame { t_min: 0.9593506, ptr: 2021, idx: 1, parent_octant_idx: 0, scale: 14, is_child: AlignedBool(1), is_leaf: AlignedBool(1) },
+            StackFrame { t_min: assert_float_eq!(buffer_out.stack[9].t_min, 0.9593506), ptr: 2021, idx: 1, parent_octant_idx: 0, scale: 14, is_child: AlignedBool(1), is_leaf: AlignedBool(1) },
         ]);
         assert_eq!(buffer_out.result, OctreeResult {
             t: 0.9593506,
