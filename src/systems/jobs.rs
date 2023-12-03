@@ -1,5 +1,6 @@
 use std::{panic, thread};
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
@@ -12,8 +13,7 @@ use crossbeam_queue::SegQueue;
 
 use crate::world::chunk::ChunkPos;
 
-/// JobSystem manages a configurable amount of worker threads to distribute jobs to. Each job
-/// can produce a result which can be retrieved on the job producer's side.
+/// JobSystem manages a configurable amount of worker threads to distribute jobs to.
 pub struct JobSystem {
     worker_handles: HashMap<ThreadId, JoinHandle<()>>,
     is_running: Arc<AtomicBool>,
@@ -59,7 +59,7 @@ impl JobSystem {
         system
     }
 
-    /// stop signals all worker threads to stop and joins them. Currently processed jobs are not
+    /// Signals all worker threads to stop and joins them. Currently processed jobs are not
     /// cancelled and will cause this method to block.
     pub fn stop(self) {
         self.is_running.store(false, Ordering::Relaxed);
@@ -70,12 +70,12 @@ impl JobSystem {
         }
     }
 
-    /// push enqueues a new job. Setting `prioritize` to true, will queue it up in a separate queue,
+    /// Enqueues a new job. Setting `prioritize` to true, will queue it up in a separate queue,
     /// which is drained before the normal, un-prioritized queue.
     pub fn push<Fn: FnOnce() + Send + 'static>(&self, prioritize: bool, exec: Fn) -> JobHandle {
         let cancelled = Arc::new(AtomicBool::new(false));
         let job = Job {
-            cancelled: Arc::clone(&cancelled),
+            cancelled: cancelled.clone(),
             exec: Box::new(exec),
         };
 
@@ -94,28 +94,37 @@ impl JobSystem {
         JobHandle { cancelled }
     }
 
-    /// clear discards all queued up jobs.
+    /// Discards all queued up jobs and marks them as cancelled.
     pub fn clear(&self) {
-        while !self.queue.is_empty() { self.queue.pop(); }
-        while !self.prio_queue.is_empty() { self.prio_queue.pop(); }
+        let mut handles = Vec::new();
+        while !self.queue.is_empty() {
+            handles.push(self.queue.pop());
+        }
+        while !self.prio_queue.is_empty() {
+            handles.push(self.prio_queue.pop());
+        }
+        for h in handles {
+            if let Some(h) = h {
+                h.cancelled.store(true, Ordering::Relaxed);
+            }
+        }
     }
 
-    /// len returns the current amount of all queued up jobs.
-    pub fn len(&self) -> usize {
+    /// Returns the current amount of all queued up jobs.
+    pub fn queue_len(&self) -> usize {
         self.queue.len() + self.prio_queue.len()
     }
 
-    /// wait_until_empty_and_processed spin-loops until all queued elements have been picked up by
+    /// Spin-loops until all queued elements have been picked up by
     /// a worker thread and all threads have finished processing their jobs.
     pub fn wait_until_empty_and_processed(&self) {
-        while self.len() > 0 {
+        while self.queue_len() > 0 {
             thread::sleep(Duration::from_millis(50));
         }
         self.wait_until_processed();
     }
 
-    /// wait_until_processed spin-loops until all worker threads have finished processing their
-    /// jobs.
+    /// Spin-loops until all worker threads have finished processing their jobs.
     pub fn wait_until_processed(&self) {
         loop {
             let count = self.currently_executing.load(Ordering::Relaxed);
@@ -173,7 +182,7 @@ mod job_system_tests {
     use crate::systems::jobs::JobSystem;
 
     pub fn wait(atomic: Arc<AtomicBool>) {
-        while !atomic.load(Ordering::SeqCst) {
+        while !atomic.load(Ordering::Relaxed) {
             thread::sleep(Duration::from_millis(10));
         }
     }
@@ -188,7 +197,7 @@ mod job_system_tests {
         let signal = Arc::new(AtomicBool::new(false));
         let s0 = signal.clone();
         js.push(false, move || {
-            s0.store(true, Ordering::SeqCst);
+            s0.store(true, Ordering::Relaxed);
             thread::sleep(Duration::from_millis(250))
         });
         wait(signal);
@@ -218,7 +227,7 @@ mod job_system_tests {
         let signal = Arc::new(AtomicBool::new(false));
         let s0 = signal.clone();
         js.push(false, move || {
-            s0.store(true, Ordering::SeqCst);
+            s0.store(true, Ordering::Relaxed);
             thread::sleep(Duration::from_millis(250))
         });
         wait(signal);
@@ -249,7 +258,7 @@ mod job_system_tests {
         let signal = Arc::new(AtomicBool::new(false));
         let s0 = signal.clone();
         js.push(false, move || {
-            s0.store(true, Ordering::SeqCst);
+            s0.store(true, Ordering::Relaxed);
             thread::sleep(Duration::from_millis(250))
         });
         wait(signal);
@@ -278,12 +287,12 @@ mod job_system_tests {
 
 /// ChunkProcessor is a decorator for [`JobSystem`]. It allows de-/queueing jobs per [`ChunkPos`].
 /// Enqueuing multiple jobs for the same position will override previously enqueued jobs.
-/// Results contain their original chunk position in addition to their actual value.
+/// Each job can produce a result of type [`T`] which is retrievable on the job producer's side.
 pub struct ChunkProcessor<T> {
     job_system: Rc<JobSystem>,
     tx: Sender<ChunkResult<T>>,
     rx: Receiver<ChunkResult<T>>,
-    chunk_jobs: HashMap<ChunkPos, JobHandle>,
+    chunk_jobs: RefCell<HashMap<ChunkPos, JobHandle>>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -295,9 +304,13 @@ pub struct ChunkResult<T> {
 impl<T: Send + 'static> ChunkProcessor<T> {
     pub fn new(job_system: Rc<JobSystem>) -> ChunkProcessor<T> {
         let (tx, rx) = mpsc::channel();
-        ChunkProcessor { job_system, tx, rx, chunk_jobs: HashMap::new() }
+        ChunkProcessor { job_system, tx, rx, chunk_jobs: RefCell::new(HashMap::new()) }
     }
 
+    /// Enqueues a new chunk job in either the prioritized or normal queue. If there is already
+    /// a queued up job for this position in the queue, that job is cancelled. Note that it is still
+    /// possible for both jobs to return a result for that position in case the first chunk's job
+    /// is currently being processed when the second chunk is enqueued.
     pub fn enqueue<Fn: FnOnce() -> T + Send + 'static>(&mut self, pos: ChunkPos, prioritize: bool, exec: Fn) {
         self.dequeue(&pos);
 
@@ -308,21 +321,27 @@ impl<T: Send + 'static> ChunkProcessor<T> {
             let result = ChunkResult { pos, value: result };
             tx.send(result).unwrap();
         });
-        self.chunk_jobs.insert(pos, handle);
+        self.chunk_jobs.borrow_mut().insert(pos, handle);
     }
 
+    /// Dequeues a chunk position's job, if any exists. Note that a dequeue whilst processing of the
+    /// chunk has no effect. The result is still produced and consumable.
+    /// This function should be used to prevent unnecessary work, but the caller must double check
+    /// if the result is correct and usable.
     pub fn dequeue(&mut self, pos: &ChunkPos) {
-        if let Some(handle) = self.chunk_jobs.remove(pos) {
+        if let Some(handle) = self.chunk_jobs.borrow_mut().remove(pos) {
             handle.cancel();
         }
     }
 
+    /// Returns all produced results up to `limit`. This is a non-blocking operation
+    /// so it might return 0 results immediately.
     pub fn get_results(&mut self, limit: u32) -> Vec<ChunkResult<T>> {
         let mut results = Vec::new();
 
         for _ in 0..limit {
             if let Ok(result) = self.rx.try_recv() {
-                self.chunk_jobs.remove(&result.pos);
+                self.chunk_jobs.borrow_mut().remove(&result.pos);
                 results.push(result);
             } else {
                 break;
@@ -330,6 +349,40 @@ impl<T: Send + 'static> ChunkProcessor<T> {
         }
 
         results
+    }
+
+    /// Returns true if there are any jobs queued or unconsumed (via [`ChunkProcessor::get_results`])
+    /// for any chunk position.
+    pub fn has_pending(&self) -> bool {
+        // NOTE: uses interior mutability to not expose `has_pending` as `&mut self` to hide
+        // cleanup logic from the API.
+
+        // fast path: jobs map is empty
+        if self.chunk_jobs.borrow().is_empty() {
+            return false;
+        }
+
+        // If not empty: iterate through all jobs and check if they have been cancelled. Interrupt
+        // at the first non-cancelled job as that indicates that there is at least one pending job
+        // in the queue for either processing or consuming.
+        let mut set = HashSet::new();
+        for (pos, handle) in self.chunk_jobs.borrow().iter() {
+            let cancelled = handle.cancelled.load(Ordering::Relaxed);
+            if !cancelled {
+                break;
+            }
+            set.insert(*pos);
+        }
+
+        // Remove all cancelled jobs, if any.
+        let mut jobs = self.chunk_jobs.borrow_mut();
+        for pos in set {
+            jobs.remove(&pos);
+        }
+
+        // If, after cleaning up cancelled jobs, there are still jobs in the map, then there is
+        // still work to be done.
+        !jobs.is_empty()
     }
 }
 
@@ -356,7 +409,7 @@ mod chunk_processor_tests {
         let signal = Arc::new(AtomicBool::new(false));
         let s0 = signal.clone();
         cp.enqueue(ChunkPos::new(0, 0, 0), false, move || {
-            s0.store(true, Ordering::SeqCst);
+            s0.store(true, Ordering::Relaxed);
             thread::sleep(Duration::from_millis(250));
             "waiter"
         });
@@ -387,7 +440,7 @@ mod chunk_processor_tests {
         assert_eq!(results, vec![
             ChunkResult { pos: ChunkPos::new(0, 0, 0), value: "waiter" }
         ]);
-        assert!(!cp.chunk_jobs.is_empty());
+        assert!(cp.has_pending());
 
         // get remaining results
         let results = cp.get_results(100);
@@ -396,10 +449,50 @@ mod chunk_processor_tests {
             ChunkResult { pos: ChunkPos::new(1, 0, 0), value: "first override" },
             ChunkResult { pos: ChunkPos::new(4, 0, 0), value: "third" },
         ]);
-        assert!(cp.chunk_jobs.is_empty());
+        assert!(!cp.has_pending());
 
         // return immediately as no more results exist
         let results = cp.get_results(100);
         assert!(results.is_empty());
+    }
+
+    /// Tests that has_pending handles externally cancelled jobs properly.
+    #[test]
+    fn has_pending() {
+        // only one worker to process one at a time
+        let js = Rc::new(JobSystem::new(1));
+        let mut cp = ChunkProcessor::new(js.clone());
+
+        // push one job to block other jobs from being processed, that waits until the signal is set
+        let signal_started = Arc::new(AtomicBool::new(false));
+        let signal_queued = Arc::new(AtomicBool::new(false));
+        let s0 = signal_started.clone();
+        let s1 = signal_queued.clone();
+        cp.enqueue(ChunkPos::new(0, 0, 0), false, move || {
+            s0.store(true, Ordering::Relaxed);
+            wait(s1);
+            "waiter"
+        });
+        wait(signal_started);
+
+        // enqueue second job that is immediately cancelled and hence never processed
+        cp.enqueue(ChunkPos::new(1, 0, 0), false, || "cancelled");
+        js.clear();
+
+        // signal pending job to finish and wait
+        signal_queued.store(true, Ordering::Relaxed);
+        js.wait_until_processed();
+
+        // ensure that two jobs were still in jobs map
+        assert_eq!(cp.chunk_jobs.borrow().len(), 2);
+        assert!(cp.has_pending());
+
+        // assert waiter was processed
+        let results = cp.get_results(2);
+        assert_eq!(results, vec![ChunkResult { pos: ChunkPos::new(0, 0, 0), value: "waiter" }]);
+
+        // make sure that no job is pending anymore and that the cancelled job was removed
+        assert!(!cp.has_pending());
+        assert_eq!(cp.chunk_jobs.borrow().len(), 0);
     }
 }

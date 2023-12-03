@@ -178,7 +178,7 @@ impl State {
 
                 frame.ui.text(format!(
                     "queue length: {}",
-                    self.job_system.len(),
+                    self.job_system.queue_len(),
                 ));
 
                 let mem_stats = self.world.storage.get_memory_stats();
