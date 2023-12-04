@@ -11,3 +11,5 @@ mod svo_shader_tests;
 pub mod screen_quad;
 pub mod svo_picker;
 pub mod svo_registry;
+
+pub use svo::Svo;

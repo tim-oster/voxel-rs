@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 
-use cgmath::{EuclideanSpace, Matrix4, Point3, Vector3};
+use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
 
 use crate::graphics::buffer::{Buffer, MappedBuffer};
 use crate::graphics::fence::Fence;
@@ -11,7 +11,6 @@ use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, PickerResult, 
 use crate::graphics::svo_registry::{MaterialInstance, VoxelRegistry};
 use crate::graphics::texture_array::{TextureArray, TextureArrayError};
 use crate::world;
-use crate::world::chunk::{BlockPos, ChunkPos};
 use crate::world::svo::SerializedChunk;
 
 /// Buffer indices are constants for all buffer ids used in the SVO shaders.
@@ -28,8 +27,7 @@ pub mod buffer_indices {
 /// Svo can be used to render an SVO of [`SerializedChunk`]. It is initialised
 /// with a VoxelRegistry with textures and materials to render the actual chunks.
 ///
-/// All coordinates passed are transformed from the actual SVO coordinate space to the rendering
-/// space. The converting [`CoordSpace`] can be set with `Svo::update`.
+/// Note that all coordinates passed must be in SVO coordinate space (\[0;size\] along all axes).
 pub struct Svo {
     tex_array: Resource<TextureArray, TextureArrayError>,
     // _material_buffer needs to be stored to drop it together with all other resources
@@ -48,7 +46,6 @@ pub struct Svo {
     picker_fence: RefCell<Fence>,
 
     stats: Stats,
-    coord_space: Option<CoordSpace>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -66,8 +63,10 @@ pub struct RenderParams {
     pub light_dir: Vector3<f32>,
     /// cam_pos is the eye position from which the scene is rendered.
     pub cam_pos: Point3<f32>,
-    /// view_mat is the camera view matrix.
-    pub view_mat: Matrix4<f32>,
+    /// cam_fwd is the look at direction of the camera.
+    pub cam_fwd: Vector3<f32>,
+    /// cam_up is the up vector of the camera.
+    pub cam_up: Vector3<f32>,
     /// fov_y_rad is the vertical field of view in radians.
     pub fov_y_rad: f32,
     /// aspect_ratio is `width / height` of the screen's resolution.
@@ -114,7 +113,6 @@ impl Svo {
             picker_fence: RefCell::new(Fence::new()),
 
             stats: Stats { size_bytes: 0, depth: 0 },
-            coord_space: None,
         }
     }
 
@@ -130,11 +128,8 @@ impl Svo {
         }
     }
 
-    /// update will write all changes from the given `svo` to the GPU buffer. It will also update
-    /// the internal `coord_space` used for SVO <-> GPU space conversions.
-    pub fn update(&mut self, svo: &world::svo::Svo<SerializedChunk>, coord_space: Option<CoordSpace>) {
-        self.coord_space = coord_space;
-
+    /// Writes all changes from the given `svo` to the GPU buffer.
+    pub fn update(&mut self, svo: &world::svo::Svo<SerializedChunk>) {
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             self.world_buffer.write(max_depth_exp.to_bits());
@@ -154,23 +149,22 @@ impl Svo {
         self.stats
     }
 
-    /// render will draw a full-screen quad on which the raytracing shader is executed.
+    /// Draws a full-screen quad on which the raytracing shader is executed.
     pub fn render(&self, params: RenderParams) {
+        let view_mat = Matrix4::look_to_rh(params.cam_pos, params.cam_fwd, params.cam_up).invert().unwrap();
+
         self.world_shader.bind();
 
         self.world_shader.set_f32("u_ambient", params.ambient_intensity);
         self.world_shader.set_f32vec3("u_light_dir", &params.light_dir);
         self.world_shader.set_f32vec3("u_cam_pos", &params.cam_pos.to_vec());
-        self.world_shader.set_f32mat4("u_view", &params.view_mat);
+        self.world_shader.set_f32mat4("u_view", &view_mat);
         self.world_shader.set_f32("u_fovy", params.fov_y_rad);
         self.world_shader.set_f32("u_aspect", params.aspect_ratio);
         self.world_shader.set_texture("u_texture", 0, &self.tex_array);
 
         let mut selected_block = Vector3::new(f32::NAN, f32::NAN, f32::NAN);
         if let Some(mut pos) = params.selected_voxel {
-            if let Some(cs) = self.coord_space {
-                pos = cs.cnv_into_space(pos);
-            }
             selected_block = pos.to_vec();
         }
         self.world_shader.set_f32vec3("u_highlight_pos", &selected_block);
@@ -182,13 +176,13 @@ impl Svo {
         self.render_fence.borrow_mut().place();
     }
 
-    /// raycast uploads the given `batch` to the GPU and runs a compute shader on it to calculate
+    /// Uploads the given `batch` to the GPU and runs a compute shader on it to calculate
     /// SVO interceptions without rendering anything.
     pub fn raycast(&self, batch: PickerBatch) -> PickerBatchResult {
         self.picker_shader.bind();
 
         let in_data = self.picker_in_buffer.as_slice_mut();
-        let task_count = batch.serialize_tasks(in_data, self.coord_space);
+        let task_count = batch.serialize_tasks(in_data);
 
         unsafe {
             gl::MemoryBarrier(gl::BUFFER_UPDATE_BARRIER_BIT);
@@ -205,7 +199,7 @@ impl Svo {
         self.picker_shader.unbind();
 
         let out_data = self.picker_out_buffer.as_slice();
-        batch.deserialize_results(&out_data[..task_count], self.coord_space)
+        batch.deserialize_results(&out_data[..task_count])
     }
 }
 
@@ -213,7 +207,7 @@ impl Svo {
 mod svo_tests {
     use std::sync::Arc;
 
-    use cgmath::{InnerSpace, Matrix4, Point3, SquareMatrix, Vector3};
+    use cgmath::{InnerSpace, Point3, Vector3};
 
     use crate::{assert_float_eq, gl_assert_no_error, world};
     use crate::core::GlContext;
@@ -286,7 +280,7 @@ mod svo_tests {
         });
 
         let mut svo = Svo::new(create_voxel_registry());
-        svo.update(&world_svo, None);
+        svo.update(&world_svo);
 
         let fb = Framebuffer::new(width as i32, height as i32);
 
@@ -298,7 +292,8 @@ mod svo_tests {
             ambient_intensity: 0.3,
             light_dir: Vector3::new(-1.0, -1.0, -1.0).normalize(),
             cam_pos,
-            view_mat: Matrix4::look_to_rh(cam_pos, -Vector3::unit_z(), Vector3::unit_y()).invert().unwrap(),
+            cam_fwd: -Vector3::unit_z(),
+            cam_up: Vector3::unit_y(),
             fov_y_rad: 72.0f32.to_radians(),
             aspect_ratio: width as f32 / height as f32,
             selected_voxel: Some(Point3::new(1.0, 1.0, 3.0)),
@@ -324,7 +319,7 @@ mod svo_tests {
         });
 
         let mut svo = Svo::new(create_voxel_registry());
-        svo.update(&world_svo, None);
+        svo.update(&world_svo);
 
         let mut batch = PickerBatch::new();
         batch.add_ray(Point3::new(0.5, 1.5, 0.5), Vector3::new(0.0, -1.0, 0.0), 1.0);
@@ -364,85 +359,5 @@ mod svo_tests {
             ],
             aabbs: vec![],
         });
-    }
-}
-
-#[derive(Copy, Clone)]
-pub struct CoordSpace {
-    pub center: ChunkPos,
-    pub dst: u32,
-}
-
-pub type CoordSpacePos = Point3<f32>;
-
-#[allow(dead_code)]
-impl CoordSpace {
-    pub fn new(center: ChunkPos, dst: u32) -> CoordSpace {
-        CoordSpace { center, dst }
-    }
-
-    pub fn cnv_into_space(&self, pos: Point3<f32>) -> CoordSpacePos {
-        let mut block_pos = BlockPos::from(pos);
-        let delta = block_pos.chunk - self.center;
-
-        let rd = self.dst as i32;
-        block_pos.chunk.x = rd + delta.x;
-        block_pos.chunk.y = rd + delta.y;
-        block_pos.chunk.z = rd + delta.z;
-
-        block_pos.to_point()
-    }
-
-    pub fn cnv_out_of_space(&self, pos: CoordSpacePos) -> Point3<f32> {
-        let mut block_pos = BlockPos::from(pos);
-
-        let rd = self.dst as i32;
-        let delta = block_pos.chunk - ChunkPos::new(rd, rd, rd);
-
-        block_pos.chunk.x = self.center.x + delta.x;
-        block_pos.chunk.y = self.center.y + delta.y;
-        block_pos.chunk.z = self.center.z + delta.z;
-
-        block_pos.to_point()
-    }
-}
-
-#[cfg(test)]
-mod coord_space_tests {
-    use cgmath::Point3;
-
-    use crate::graphics::svo::CoordSpace;
-    use crate::world::chunk::ChunkPos;
-
-    /// Test transformation for positive coordinates.
-    #[test]
-    fn coord_space_positive() {
-        let cs = CoordSpace {
-            center: ChunkPos::new(4, 5, 12),
-            dst: 2,
-        };
-
-        let world_pos = Point3::new(32.0 * 5.0 + 16.25, 32.0 * 3.0 + 4.25, 32.0 * 10.0 + 20.5);
-        let svo_pos = cs.cnv_into_space(world_pos);
-        assert_eq!(svo_pos, Point3::new(32.0 * 3.0 + 16.25, 32.0 * 0.0 + 4.25, 32.0 * 0.0 + 20.5));
-
-        let cnv_back = cs.cnv_out_of_space(svo_pos);
-        assert_eq!(cnv_back, world_pos);
-    }
-
-    /// Test transformation for negative coordinates.
-    #[test]
-    fn coord_space_negative() {
-        let cs = CoordSpace {
-            center: ChunkPos::new(-1, -1, -1),
-            dst: 2,
-        };
-
-        let world_pos = Point3::new(-16.25, -4.25, -20.5);
-        let svo_pos = cs.cnv_into_space(world_pos);
-        assert_eq!(svo_pos, Point3::new(32.0 * 2.0 + 15.75, 32.0 * 2.0 + 27.75, 32.0 * 2.0 + 11.5));
-
-        let cnv_back = cs.cnv_out_of_space(svo_pos);
-        assert_eq!(cnv_back, world_pos);
     }
 }

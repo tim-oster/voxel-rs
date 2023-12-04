@@ -1,12 +1,11 @@
 use cgmath::{Point3, Vector3};
 
 use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
-use crate::graphics::svo::CoordSpace;
 
 #[derive(Debug, PartialEq)]
 pub struct PickerBatch {
-    rays: Vec<Ray>,
-    aabbs: Vec<AABB>,
+    pub rays: Vec<Ray>,
+    pub aabbs: Vec<AABB>,
 }
 
 #[repr(C)]
@@ -24,7 +23,7 @@ pub(super) struct PickerResult {
     pub dst: f32,
     /// inside_voxel is true, if the ray origin is within a voxel itself.
     pub inside_voxel: bool,
-    /// pos in world space, where the ray hit something.
+    /// pos of intersection.
     pub pos: AlignedPoint3<f32>,
     /// normal is the normal direction where the ray hit.
     pub normal: AlignedVec3<f32>,
@@ -47,27 +46,20 @@ impl PickerBatch {
 
     /// serialize_tasks transforms all tasks on this batch into actual PickerTasks and writes them
     /// to the given task buffer.
-    pub(super) fn serialize_tasks(&self, tasks: &mut [PickerTask], cs: Option<CoordSpace>) -> usize {
+    pub(super) fn serialize_tasks(&self, tasks: &mut [PickerTask]) -> usize {
         let mut offset = 0;
 
         for task in &self.rays {
-            let mut pos = task.pos;
-            if let Some(cs) = cs {
-                pos = cs.cnv_into_space(pos);
-            }
             tasks[offset] = PickerTask {
                 max_dst: task.max_dst,
-                pos: AlignedPoint3(pos),
+                pos: AlignedPoint3(task.pos),
                 dir: AlignedVec3(task.dir),
             };
             offset += 1;
         }
 
         for aabb in &self.aabbs {
-            for mut task in aabb.generate_picker_tasks() {
-                if let Some(cs) = cs {
-                    task.pos = AlignedPoint3(cs.cnv_into_space(task.pos.0));
-                }
+            for task in aabb.generate_picker_tasks() {
                 tasks[offset] = task;
                 offset += 1;
             }
@@ -78,17 +70,13 @@ impl PickerBatch {
 
     /// deserialize_results reads all results from the given result buffer and parses the results
     /// for all jobs on this batch.
-    pub(super) fn deserialize_results(&self, results: &[PickerResult], cs: Option<CoordSpace>) -> PickerBatchResult {
+    pub(super) fn deserialize_results(&self, results: &[PickerResult]) -> PickerBatchResult {
         let mut offset = 0;
         let mut batch_result = PickerBatchResult { rays: Vec::new(), aabbs: Vec::new() };
 
         for _ in &self.rays {
-            let mut result = results[offset];
+            let result = results[offset];
             offset += 1;
-
-            if let Some(cs) = cs {
-                result.pos = AlignedPoint3(cs.cnv_out_of_space(result.pos.0));
-            }
 
             batch_result.rays.push(RayResult {
                 dst: result.dst,
@@ -116,9 +104,9 @@ pub struct PickerBatchResult {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Ray {
-    pos: Point3<f32>,
-    dir: Vector3<f32>,
-    max_dst: f32,
+    pub pos: Point3<f32>,
+    pub dir: Vector3<f32>,
+    pub max_dst: f32,
 }
 
 /// RayResult represent a ray intersection with a voxel. Only if dst != -1.0, are any of the other
@@ -292,7 +280,7 @@ mod tests {
 
         let default_task = PickerTask { max_dst: 0.0, pos: AlignedPoint3(Point3::new(0.0, 0.0, 0.0)), dir: AlignedVec3(Vector3::new(0.0, 0.0, 0.0)) };
         let mut buffer = vec![default_task; 100];
-        let tasks = batch.serialize_tasks(&mut buffer, None);
+        let tasks = batch.serialize_tasks(&mut buffer);
 
         // [2 rays] + [1 unit size aabb * ( 3 rays per corner * 8 corners )] + [1 irregular aabb * ( 3 rays per corner * 8 corners + 2 rays per half side * 4 halves per axis * 3 axis + 1 ray per face * 6 face )]
         // [ 2 ] + [ 24 ] + [ 54 ] = 80
@@ -487,7 +475,7 @@ mod tests {
             PickerResult { dst: -1.0, inside_voxel: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
         ];
 
-        let result = batch.deserialize_results(&buffer, None);
+        let result = batch.deserialize_results(&buffer);
 
         assert_eq!(result, PickerBatchResult {
             rays: vec![

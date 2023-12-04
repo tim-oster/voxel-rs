@@ -82,11 +82,11 @@ impl AABBDef {
 
 #[cfg_attr(test, automock)]
 pub trait Raycaster {
-    fn cast(&self, batch: PickerBatch) -> PickerBatchResult;
+    fn raycast(&self, batch: PickerBatch) -> PickerBatchResult;
 }
 
 impl Raycaster for Svo {
-    fn cast(&self, batch: PickerBatch) -> PickerBatchResult {
+    fn raycast(&self, batch: PickerBatch) -> PickerBatchResult {
         self.raycast(batch)
     }
 }
@@ -127,7 +127,7 @@ impl Physics {
             });
         }
 
-        let batch_result = raycaster.cast(batch);
+        let batch_result = raycaster.raycast(batch);
         for (i, result) in results.iter_mut().enumerate() {
             result.aabb_result = batch_result.aabbs[i];
         }
@@ -385,7 +385,7 @@ mod tests {
         }
 
         let mut mock = MockRaycaster::new();
-        mock.expect_cast()
+        mock.expect_raycast()
             .with(eq(expected_batch))
             .times(1)
             .returning(move |_| PickerBatchResult { rays: Vec::new(), aabbs: aabb_results.clone() });

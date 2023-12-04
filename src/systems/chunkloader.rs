@@ -45,6 +45,10 @@ impl ChunkLoader {
         }
     }
 
+    pub fn get_radius(&self) -> u32 {
+        self.radius
+    }
+
     /// Returns a list of chunk events that occurred due to changes to the target position.
     /// Might be empty if the position did not change.
     pub fn update(&mut self, pos: Point3<f32>) -> Vec<ChunkEvent> {

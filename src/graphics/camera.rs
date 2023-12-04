@@ -64,10 +64,6 @@ impl Camera {
         self.projection * self.get_world_to_camera_matrix()
     }
 
-    pub fn set_forward(&mut self, forward: Vector3<f32>) {
-        self.forward = forward;
-    }
-
     /// is_in_frustum performs "radar frustum culling" to check if the given sphere is inside the
     /// camera's frustum.
     /// It transforms the point into camera view space and uses the distance to the near plane

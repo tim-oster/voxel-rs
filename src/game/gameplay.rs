@@ -9,9 +9,9 @@ use crate::game::content::blocks;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
-use crate::graphics::svo::Svo;
 use crate::graphics::svo_picker::{PickerBatch, RayResult};
-use crate::systems::physics::Entity;
+use crate::systems::physics::{Entity, Raycaster};
+use crate::systems::worldsvo;
 use crate::world::chunk::BlockId;
 use crate::world::world::World;
 
@@ -51,7 +51,7 @@ impl Gameplay {
         }
     }
 
-    pub fn update(&mut self, frame: &mut Frame, player: &mut Entity, world: &mut World, svo: &Svo) {
+    pub fn update(&mut self, frame: &mut Frame, player: &mut Entity, world: &mut World, svo: &worldsvo::Svo) {
         if frame.input.was_key_pressed(&glfw::Key::Escape) {
             frame.request_close();
         }
@@ -149,7 +149,7 @@ impl Gameplay {
         }
     }
 
-    fn handle_voxel_placement(&mut self, frame: &mut Frame, player: &Entity, world: &mut World, svo: &Svo) {
+    fn handle_voxel_placement(&mut self, frame: &mut Frame, player: &Entity, world: &mut World, svo: &worldsvo::Svo) {
         let mut batch = PickerBatch::new();
         batch.add_ray(player.position, player.get_forward(), 30.0);
         let batch_result = svo.raycast(batch);

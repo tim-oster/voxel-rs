@@ -25,15 +25,13 @@ use crate::world::world;
 pub struct World {
     job_system: Rc<JobSystem>,
 
-    loading_radius: u32,
     chunk_loader: ChunkLoader,
     pub storage: Storage,
 
     pub world: world::World,
     world_generator: systems::worldgen::Generator,
     world_generator_cfg: worldgen::Config,
-    pub world_svo: graphics::svo::Svo,
-    world_svo_mgr: worldsvo::Manager,
+    pub world_svo: worldsvo::Svo,
 
     physics: Physics,
 
@@ -70,16 +68,16 @@ impl World {
         };
         let chunk_generator = Generator::new(1, world_cfg.clone());
 
+        let graphics_svo = graphics::Svo::new(blocks::new_registry());
+
         World {
             job_system: Rc::clone(&job_system),
-            loading_radius,
             chunk_loader: ChunkLoader::new(loading_radius, 0, 8),
             storage: Storage::new(),
             world: world::World::new(),
             world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_generator),
             world_generator_cfg: world_cfg,
-            world_svo: graphics::svo::Svo::new(blocks::new_registry()),
-            world_svo_mgr: worldsvo::Manager::new(job_system, loading_radius),
+            world_svo: worldsvo::Svo::new(job_system, graphics_svo, loading_radius),
             physics: Physics::new(),
             camera: Camera::new(72.0, 1.0, 0.01, 1024.0),
             selected_voxel: None,
@@ -89,8 +87,10 @@ impl World {
     }
 
     pub fn update(&mut self, entity: &mut Entity, delta_time: f32) {
-        self.handle_chunk_loading(entity.position);
-        self.update_camera(entity);
+        self.camera.position = entity.position;
+        self.camera.forward = entity.get_forward();
+
+        self.handle_chunk_loading();
         self.physics.step(delta_time, &self.world_svo, vec![entity]);
     }
 
@@ -102,18 +102,12 @@ impl World {
         self.world_svo.reload_resources();
     }
 
-    fn handle_chunk_loading(&mut self, pos: Point3<f32>) {
-        let chunk_events = self.chunk_loader.update(pos);
+    fn handle_chunk_loading(&mut self) {
+        let chunk_events = self.chunk_loader.update(self.camera.position);
         if !chunk_events.is_empty() {
             let mut generate_count = 0;
 
-            // camera position is always kept in center of the SVO, so it has to be "moved" to
-            // the actual world space for frustum culling
-            let old_pos = self.camera.position;
-            self.camera.position = pos;
             let chunk_events = Self::sort_chunks_by_view_frustum(chunk_events, &self.camera);
-            self.camera.position = old_pos;
-
             for event in &chunk_events {
                 match event {
                     ChunkEvent::Load { pos, lod } => {
@@ -157,14 +151,14 @@ impl World {
         }
         for pos in self.world.get_changed_chunks() {
             if let Some(chunk) = self.world.get_chunk(&pos) {
-                self.world_svo_mgr.set_chunk(chunk);
+                self.world_svo.set_chunk(chunk);
             } else {
-                self.world_svo_mgr.remove_chunk(&pos);
+                self.world_svo.remove_chunk(&pos);
             }
         }
 
-        let current_chunk_pos = ChunkPos::from(pos);
-        self.world_svo_mgr.update(&current_chunk_pos, &mut self.world_svo);
+        let current_chunk_pos = ChunkPos::from(self.camera.position);
+        self.world_svo.update(&current_chunk_pos);
     }
 
     /// sort_chunks_by_view_frustum sorts the given chunk event to contain all chunks that are in
@@ -198,26 +192,13 @@ impl World {
         visible_chunks
     }
 
-    fn update_camera(&mut self, entity: &Entity) {
-        let pos = entity.position;
-        let current_chunk_pos = ChunkPos::from_block_pos(pos.x as i32, pos.y as i32, pos.z as i32);
-
-        let chunk_world_pos = Point3::new(current_chunk_pos.x as f32, current_chunk_pos.y as f32, current_chunk_pos.z as f32) * 32.0;
-        let delta = pos - chunk_world_pos;
-
-        self.camera.position.x = self.loading_radius as f32 * 32.0 + delta.x;
-        self.camera.position.y = self.loading_radius as f32 * 32.0 + delta.y;
-        self.camera.position.z = self.loading_radius as f32 * 32.0 + delta.z;
-
-        self.camera.set_forward(entity.get_forward());
-    }
-
     pub fn render(&self, aspect_ratio: f32) {
         self.world_svo.render(RenderParams {
             ambient_intensity: self.ambient_intensity,
             light_dir: self.sun_direction,
             cam_pos: self.camera.position,
-            view_mat: self.camera.get_camera_to_world_matrix(),
+            cam_fwd: self.camera.forward,
+            cam_up: self.camera.up,
             fov_y_rad: self.camera.get_fov_y_deg().to_radians(),
             aspect_ratio,
             selected_voxel: self.selected_voxel,
@@ -238,13 +219,13 @@ impl World {
                     self.job_system.wait_until_processed();
 
                     let chunk_generator = Generator::new(1, self.world_generator_cfg.clone());
+                    let graphics_svo = graphics::Svo::new(blocks::new_registry());
 
-                    self.chunk_loader = ChunkLoader::new(self.loading_radius, 0, 8);
+                    self.chunk_loader = ChunkLoader::new(self.chunk_loader.get_radius(), 0, 8);
                     self.storage = Storage::new();
                     self.world = world::World::new();
                     self.world_generator = systems::worldgen::Generator::new(Rc::clone(&self.job_system), chunk_generator);
-                    self.world_svo = graphics::svo::Svo::new(blocks::new_registry());
-                    self.world_svo_mgr = worldsvo::Manager::new(Rc::clone(&self.job_system), self.loading_radius);
+                    self.world_svo = worldsvo::Svo::new(Rc::clone(&self.job_system), graphics_svo, self.world_svo.get_render_distance());
                 }
 
                 frame.ui.new_line();
@@ -352,7 +333,7 @@ mod tests {
         loop {
             world.update(&mut player, 0.1);
 
-            if !world.world_generator.has_pending_jobs() && !world.world_svo_mgr.has_pending_jobs() {
+            if !world.world_generator.has_pending_jobs() && !world.world_svo.has_pending_jobs() {
                 break;
             }
         }
