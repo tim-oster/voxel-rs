@@ -29,14 +29,19 @@ impl Entity {
 
 #[derive(Copy, Clone, Debug, Default, PartialEq)]
 pub struct EntityState {
+    /// If the entity is colliding in -y direction.
     pub is_grounded: bool,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct EntityCapabilities {
+    /// Disables all collisions along x & z axis.
     pub wall_clip: bool,
+    /// Disables gravity and all collisions.
     pub flying: bool,
+    /// Constant acceleration in -y direction.
     pub gravity: f32,
+    /// Cap on how fast the entity can fall in -y direction due to gravity.
     pub max_fall_velocity: f32,
 }
 
@@ -104,6 +109,8 @@ impl Physics {
         Physics {}
     }
 
+    /// Simulates the next step for all `entities` for the given delta time. `raycaster` is used
+    /// to identify collisions.
     pub fn step(&self, delta_time: f32, raycaster: &impl Raycaster, entities: Vec<&mut Entity>) {
         let results = Physics::raycast_entities(raycaster, &entities);
         let mut entities = entities;
