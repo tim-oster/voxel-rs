@@ -71,8 +71,7 @@ pub struct RenderParams {
     pub fov_y_rad: f32,
     /// aspect_ratio is `width / height` of the screen's resolution.
     pub aspect_ratio: f32,
-    /// selected_voxel is the position, in SVO-space, of the voxel to be highlighted. It is
-    /// transformed using the `coord_space` passed in [`Svo::update`].
+    /// selected_voxel is the position of the voxel to be highlighted.
     pub selected_voxel: Option<Point3<f32>>,
 }
 

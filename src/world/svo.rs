@@ -20,9 +20,9 @@ pub trait SvoSerializable {
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct SerializationResult {
-    child_mask: u16,
-    leaf_mask: u16,
-    depth: u32,
+    pub child_mask: u16,
+    pub leaf_mask: u16,
+    pub depth: u32,
 }
 
 pub struct Svo<T: SvoSerializable> {
@@ -97,6 +97,15 @@ impl<T: SvoSerializable> Svo<T> {
             return None;
         }
         return octant.unwrap().content.as_ref();
+    }
+
+    // TODO should this be the normal get operation and the current one get_at_position instead?
+    pub fn get_at_pos(&self, pos: Position) -> Option<&T> {
+        self.octree.get_leaf(pos)
+    }
+
+    pub fn octant_count(&self) -> usize {
+        self.octree.octants.len() - self.octree.free_list.len()
     }
 
     pub fn serialize(&mut self) {
