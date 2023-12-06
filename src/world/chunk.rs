@@ -76,6 +76,18 @@ mod chunk_pos_test {
         let pos = ChunkPos::from_block_pos(15, -28, 35);
         assert_eq!(pos, ChunkPos { x: 0, y: -1, z: 1 });
         assert_eq!(pos.to_block_pos(), Point3::new(0, -32, 32));
+
+        let pos = ChunkPos::from_block_pos(10, 20, 30);
+        assert_eq!(pos, ChunkPos { x: 0, y: 0, z: 0 });
+
+        let pos = ChunkPos::from_block_pos(31, 32, 0);
+        assert_eq!(pos, ChunkPos { x: 0, y: 1, z: 0 });
+
+        let pos = ChunkPos::from_block_pos(-10, -20, -30);
+        assert_eq!(pos, ChunkPos { x: -1, y: -1, z: -1 });
+
+        let pos = ChunkPos::from_block_pos(-32, -33, 0);
+        assert_eq!(pos, ChunkPos { x: -1, y: -2, z: 0 });
     }
 
     #[test]

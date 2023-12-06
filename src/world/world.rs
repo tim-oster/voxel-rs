@@ -53,16 +53,28 @@ impl World {
         chunk::NO_BLOCK
     }
 
-    pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: chunk::BlockId) {
+    pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: chunk::BlockId) -> bool {
         let pos = ChunkPos::from_block_pos(x, y, z);
-        let chunk = self.chunks.get_mut(&pos).unwrap();
-        chunk.set_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32, block);
-        self.mark_chunk_as_changed(&pos);
+        if let Some(chunk) = self.chunks.get_mut(&pos) {
+            chunk.set_block((x & 31) as u32, (y & 31) as u32, (z & 31) as u32, block);
+            self.mark_chunk_as_changed(&pos);
+            return true;
+        }
+        false
     }
 
-    pub fn get_changed_chunks(&mut self) -> HashSet<ChunkPos> {
-        let changed = self.changed_chunks.drain(..).collect::<HashSet<ChunkPos>>();
-        self.changed_chunks_set.clear();
+    pub fn get_changed_chunks(&mut self, limit: u32) -> Vec<ChunkPos> {
+        let mut changed = Vec::new();
+        for _ in 0..limit {
+            let pos = self.changed_chunks.pop_front();
+            if pos.is_none() {
+                break;
+            }
+
+            let pos = pos.unwrap();
+            self.changed_chunks_set.remove(&pos);
+            changed.push(pos);
+        }
         changed
     }
 }
@@ -74,23 +86,6 @@ mod tests {
 
     use crate::world::allocator::Allocator;
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorage};
-
-    #[test]
-    fn chunk_pos_from_block_pos() {
-        use super::ChunkPos;
-
-        let pos = ChunkPos::from_block_pos(10, 20, 30);
-        assert_eq!(pos, ChunkPos { x: 0, y: 0, z: 0 });
-
-        let pos = ChunkPos::from_block_pos(31, 32, 0);
-        assert_eq!(pos, ChunkPos { x: 0, y: 1, z: 0 });
-
-        let pos = ChunkPos::from_block_pos(-10, -20, -30);
-        assert_eq!(pos, ChunkPos { x: -1, y: -1, z: -1 });
-
-        let pos = ChunkPos::from_block_pos(-32, -33, 0);
-        assert_eq!(pos, ChunkPos { x: -1, y: -2, z: 0 });
-    }
 
     #[test]
     fn world_get_and_set_block() {
@@ -136,8 +131,8 @@ mod tests {
 
         assert_eq!(world.changed_chunks, VecDeque::from(vec![ChunkPos::from_block_pos(0, 0, 0)]));
 
-        let changed = world.get_changed_chunks();
-        assert_eq!(changed, HashSet::from([ChunkPos::from_block_pos(0, 0, 0)]));
+        let changed = world.get_changed_chunks(10);
+        assert_eq!(changed, vec![ChunkPos::from_block_pos(0, 0, 0)]);
 
         assert_eq!(true, world.changed_chunks_set.is_empty());
         assert_eq!(true, world.changed_chunks.is_empty());

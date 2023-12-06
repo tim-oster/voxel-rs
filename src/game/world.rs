@@ -149,7 +149,7 @@ impl World {
                 self.world.set_chunk(chunk);
             }
         }
-        for pos in self.world.get_changed_chunks() {
+        for pos in self.world.get_changed_chunks(40) {
             if let Some(chunk) = self.world.get_chunk(&pos) {
                 self.world_svo.set_chunk(chunk);
             } else {
