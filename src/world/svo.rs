@@ -1,12 +1,11 @@
 #![allow(dead_code)]
 
-use std::collections::{HashMap, HashSet};
 use std::ptr;
-use std::sync::{Arc, RwLock};
+use std::collections::{HashMap, HashSet};
 
-use crate::world::allocator::Allocated;
-use crate::world::chunk::{BlockId, ChunkPos, ChunkStorage};
+use crate::world::chunk::{BlockId, ChunkPos};
 use crate::world::octree::{Octant, OctantId, Octree, Position};
+use crate::world::world::BorrowedChunk;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 enum OctantChange {
@@ -70,7 +69,7 @@ impl<T: SvoSerializable> Svo<T> {
             let id = self.octree.add_leaf(pos, leaf);
             self.change_set.insert(OctantChange::Add(id));
             return Some(id);
-        } else {
+        } else if self.octree.root.is_some() {
             if let Some(id) = self.octree.remove_leaf(pos) {
                 self.change_set.insert(OctantChange::Remove(id));
                 return Some(id);
@@ -252,19 +251,23 @@ impl SvoSerializable for Octree<BlockId> {
 pub struct SerializedChunk {
     pub pos: ChunkPos,
     pub lod: u8,
+    pub borrowed_chunk: Option<BorrowedChunk>,
     buffer: Option<Vec<u32>>,
     result: SerializationResult,
 }
 
 impl SerializedChunk {
-    pub fn new(pos: ChunkPos, storage: Arc<RwLock<Allocated<ChunkStorage>>>, lod: u8) -> SerializedChunk {
+    pub fn new(chunk: BorrowedChunk) -> SerializedChunk {
+        let pos = chunk.pos;
+        let lod = chunk.lod;
+
         // TODO use memory pool
         let mut buffer = Vec::with_capacity(56172); // size of a full chunk
-        let result = storage.read().unwrap().serialize(&mut buffer, lod);
+        let result = chunk.storage.as_ref().unwrap().serialize(&mut buffer, chunk.lod);
         if result.depth > 0 {
-            return SerializedChunk { pos, lod, buffer: Some(buffer), result };
+            return SerializedChunk { pos, lod, borrowed_chunk: Some(chunk), buffer: Some(buffer), result };
         }
-        SerializedChunk { pos, lod, buffer: None, result }
+        SerializedChunk { pos, lod, borrowed_chunk: Some(chunk), buffer: None, result }
     }
 }
 

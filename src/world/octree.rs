@@ -162,6 +162,10 @@ impl<T> Octree<T> {
     /// Removes the leaf at the given position if it exists. Empty parents are *not* removed from
     /// the tree. Look at [`Octree::compact`] for removing empty parents.
     pub fn remove_leaf(&mut self, pos: Position) -> Option<OctantId> {
+        if pos.required_depth() > self.depth {
+            return None;
+        }
+
         let mut it = self.root.unwrap();
         let mut pos = pos;
         let mut size = 2f32.pow(self.depth as i32) as u32;

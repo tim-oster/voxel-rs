@@ -1,17 +1,50 @@
-use std::ops::Sub;
-use std::sync::{Arc, RwLock};
+use std::ops::{Deref, Sub};
 
 use cgmath::{num_traits, Point3};
 
-use crate::world::allocator::{Allocated, Allocator};
+use crate::world::memory::Allocated;
 use crate::world::octree::{Octree, Position};
 
 pub type BlockId = u32;
+pub type ChunkStorage = Octree<BlockId>;
 
 pub const NO_BLOCK: BlockId = 0;
 
-pub type ChunkStorage = Octree<BlockId>;
+/// Chunk is a group of 32^3 voxels. It is the smallest voxel container. Many chunks make up the
+/// world.
+pub struct Chunk {
+    pub pos: ChunkPos,
+    /// Indicates the level of detail. Defined as the maximum depth to iterate inside the chunk's
+    /// octree. 5 = maximum depth/full level of detail (2^5=32 - chunk block size along each axis).
+    pub lod: u8,
+    pub storage: Option<Allocated<ChunkStorage>>,
+}
 
+impl Chunk {
+    pub fn new(pos: ChunkPos, lod: u8, storage: Allocated<ChunkStorage>) -> Chunk {
+        Chunk { pos, lod, storage: Some(storage) }
+    }
+
+    pub fn get_block(&self, x: u32, y: u32, z: u32) -> BlockId {
+        if self.storage.is_none() {
+            return NO_BLOCK;
+        }
+        *self.storage.as_ref().unwrap().get_leaf(Position(x, y, z)).unwrap_or(&NO_BLOCK)
+    }
+
+    pub fn set_block(&mut self, x: u32, y: u32, z: u32, block: BlockId) {
+        assert!(self.storage.is_some());
+
+        if block == NO_BLOCK {
+            self.storage.as_mut().unwrap().remove_leaf(Position(x, y, z));
+        } else {
+            self.storage.as_mut().unwrap().add_leaf(Position(x, y, z), block);
+        }
+    }
+}
+
+/// ChunkPos represents a chunk's position in world space. One increment in chunk coord space is
+/// equal to 32 increments in block coord space.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
 pub struct ChunkPos {
     pub x: i32,
@@ -114,6 +147,8 @@ mod chunk_pos_test {
     }
 }
 
+/// BlockPos represents a block's position relative to the chunk it is in. Negative coordinates are
+/// special because a block position of x=-1 is x=31 inside the actual chunk.
 #[derive(Debug, PartialEq)]
 pub struct BlockPos {
     pub chunk: ChunkPos,
@@ -218,48 +253,5 @@ mod block_pos_test {
             rel_z: 31.0,
         });
         assert_eq!(original, pos.to_point());
-    }
-}
-
-pub struct Chunk {
-    // TODO should this be exposed? it must be read-only
-    pub pos: ChunkPos,
-    pub lod: u8,
-
-    // TODO remove allocator once block placement is deferred by using a block change queue on system level
-    allocator: Arc<Allocator<ChunkStorage>>,
-    // TODO any other way?
-    storage: Option<Arc<RwLock<Allocated<ChunkStorage>>>>,
-}
-
-impl Chunk {
-    pub fn new(pos: ChunkPos, allocator: Arc<Allocator<ChunkStorage>>) -> Chunk {
-        Chunk { pos, lod: 0, allocator, storage: None }
-    }
-
-    pub fn get_block(&self, x: u32, y: u32, z: u32) -> BlockId {
-        if self.storage.is_none() {
-            return NO_BLOCK;
-        }
-        *self.storage.as_ref().unwrap().read().unwrap().get_leaf(Position(x, y, z)).unwrap_or(&NO_BLOCK)
-    }
-
-    pub fn set_block(&mut self, x: u32, y: u32, z: u32, block: BlockId) {
-        if block == NO_BLOCK && self.storage.is_none() {
-            return;
-        }
-        if self.storage.is_none() {
-            let octree = self.allocator.allocate();
-            self.storage = Some(Arc::new(RwLock::new(octree)));
-        }
-        if block == NO_BLOCK {
-            self.storage.as_ref().unwrap().write().unwrap().remove_leaf(Position(x, y, z));
-        } else {
-            self.storage.as_ref().unwrap().write().unwrap().add_leaf(Position(x, y, z), block);
-        }
-    }
-
-    pub fn get_storage(&self) -> Option<Arc<RwLock<Allocated<ChunkStorage>>>> {
-        self.storage.clone()
     }
 }

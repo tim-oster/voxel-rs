@@ -1,5 +1,6 @@
 use std::ops::{Add, Sub};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
 use imgui::{Condition, Id, TreeNodeFlags};
@@ -17,6 +18,7 @@ use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{Entity, Physics};
 use crate::systems::storage::Storage;
 use crate::world::chunk::ChunkPos;
+use crate::world::memory::ChunkStorageAllocator;
 use crate::world::world;
 
 /// World is the game system responsible for keeping all chunks in the voxel world loaded and
@@ -26,6 +28,7 @@ pub struct World {
     job_system: Rc<JobSystem>,
 
     chunk_loader: ChunkLoader,
+    pub chunk_storage_allocator: Arc<ChunkStorageAllocator>,
     pub storage: Storage,
 
     pub world: world::World,
@@ -66,16 +69,17 @@ impl World {
                 ],
             },
         };
+        let chunk_allocator = Arc::new(ChunkStorageAllocator::new());
         let chunk_generator = Generator::new(1, world_cfg.clone());
-
         let graphics_svo = graphics::Svo::new(blocks::new_registry());
 
         World {
             job_system: Rc::clone(&job_system),
             chunk_loader: ChunkLoader::new(loading_radius, 0, 8),
+            chunk_storage_allocator: chunk_allocator.clone(),
             storage: Storage::new(),
             world: world::World::new(),
-            world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_generator),
+            world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_allocator.clone(), chunk_generator),
             world_generator_cfg: world_cfg,
             world_svo: worldsvo::Svo::new(job_system, graphics_svo, loading_radius),
             physics: Physics::new(),
@@ -122,9 +126,7 @@ impl World {
                         let err = result.err().unwrap();
                         match err {
                             storage::LoadError::NotFound => {
-                                let mut chunk = self.storage.new_chunk(*pos);
-                                chunk.lod = *lod;
-                                self.world_generator.enqueue_chunk(chunk);
+                                self.world_generator.enqueue_chunk(*pos, *lod);
                                 generate_count += 1;
                             }
                         }
@@ -151,14 +153,20 @@ impl World {
         }
         for pos in self.world.get_changed_chunks(40) {
             if let Some(chunk) = self.world.get_chunk(&pos) {
-                self.world_svo.set_chunk(chunk);
+                if chunk.storage.is_some() {
+                    let chunk = self.world.borrow_chunk(&pos).unwrap();
+                    self.world_svo.set_chunk(chunk);
+                }
             } else {
                 self.world_svo.remove_chunk(&pos);
             }
         }
 
         let current_chunk_pos = ChunkPos::from(self.camera.position);
-        self.world_svo.update(&current_chunk_pos);
+        let chunks = self.world_svo.update(&current_chunk_pos);
+        for chunk in chunks {
+            self.world.return_chunk(chunk);
+        }
     }
 
     /// sort_chunks_by_view_frustum sorts the given chunk event to contain all chunks that are in
@@ -224,7 +232,7 @@ impl World {
                     self.chunk_loader = ChunkLoader::new(self.chunk_loader.get_radius(), 0, 8);
                     self.storage = Storage::new();
                     self.world = world::World::new();
-                    self.world_generator = systems::worldgen::Generator::new(Rc::clone(&self.job_system), chunk_generator);
+                    self.world_generator = systems::worldgen::Generator::new(Rc::clone(&self.job_system), self.chunk_storage_allocator.clone(), chunk_generator);
                     self.world_svo = worldsvo::Svo::new(Rc::clone(&self.job_system), graphics_svo, self.world_svo.get_render_distance());
                 }
 

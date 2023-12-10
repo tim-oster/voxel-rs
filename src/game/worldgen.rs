@@ -2,7 +2,7 @@ use noise::{NoiseFn, Perlin, Seedable};
 
 use crate::game::content::blocks;
 use crate::systems::worldgen::ChunkGenerator;
-use crate::world::chunk::Chunk;
+use crate::world::chunk::{Chunk, ChunkPos};
 
 #[derive(Clone)]
 pub struct Noise {
@@ -147,20 +147,44 @@ impl Generator {
     pub fn new(seed: u32, cfg: Config) -> Generator {
         let perlin = Perlin::new();
         let perlin = perlin.set_seed(seed);
+
         Generator { perlin, cfg }
+    }
+
+    fn get_height_at(&self, pos: &ChunkPos, x: i32, z: i32) -> i32 {
+        let noise_x = pos.x as f64 * 32.0 + x as f64;
+        let noise_z = pos.z as f64 * 32.0 + z as f64;
+
+        let height = self.cfg.continentalness.get(&self.perlin, noise_x, noise_z);
+        let height = height + self.cfg.erosion.get(&self.perlin, noise_x, noise_z);
+
+        height as i32
     }
 }
 
+// TODO calculate and cache heightmap per xz coord. get external notification form chunk loader when cache can be discarded
+
 impl ChunkGenerator for Generator {
+    fn is_interested_in(&self, pos: &ChunkPos) -> bool {
+        let mut min_y = i32::MAX;
+        let mut max_y = i32::MIN;
+
+        // TODO do not run this twice
+        for z in 0..32 {
+            for x in 0..32 {
+                let height = self.get_height_at(&pos, x, z);
+                min_y = min_y.min(height);
+                max_y = max_y.max(height);
+            }
+        }
+
+        min_y <= (pos.y + 1) * 32 && max_y >= pos.y * 32
+    }
+
     fn generate_chunk(&self, chunk: &mut Chunk) {
         for z in 0..32 {
             for x in 0..32 {
-                let noise_x = chunk.pos.x as f64 * 32.0 + x as f64;
-                let noise_z = chunk.pos.z as f64 * 32.0 + z as f64;
-
-                let height = self.cfg.continentalness.get(&self.perlin, noise_x, noise_z);
-                let height = height + self.cfg.erosion.get(&self.perlin, noise_x, noise_z);
-                let height = height as i32;
+                let height = self.get_height_at(&chunk.pos, x, z);
 
                 for y in 0..32 {
                     if chunk.pos.y * 32 + y <= height {

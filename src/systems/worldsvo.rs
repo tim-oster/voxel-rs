@@ -11,6 +11,7 @@ use crate::systems::physics::Raycaster;
 use crate::world;
 use crate::world::chunk::{BlockPos, Chunk, ChunkPos};
 use crate::world::svo::{SerializedChunk, SvoSerializable};
+use crate::world::world::BorrowedChunk;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`Chunk`]s. Adding chunks
 /// will serialize them in the background and attach them the the GPU SVO. Removing chunks will
@@ -48,14 +49,10 @@ impl Svo {
         }
     }
 
-    pub fn set_chunk(&mut self, chunk: &Chunk) {
-        self.processor.dequeue(&chunk.pos);
-
-        if let Some(storage) = chunk.get_storage() {
-            let pos = chunk.pos.clone();
-            let lod = chunk.lod;
-            self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(pos, storage, lod));
-        }
+    /// Enqueues the borrowed chunk to be serialized into the GPU SVO structure. All moved chunk
+    /// ownerships can be reclaimed by calling [`Svo::update`].
+    pub fn set_chunk(&mut self, chunk: BorrowedChunk) {
+        self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(chunk));
     }
 
     pub fn remove_chunk(&mut self, pos: &ChunkPos) {
@@ -79,7 +76,9 @@ impl Svo {
     /// Updates the internal reference world center and performs "chunk shifting", if necessary.
     /// Additionally, it uploads all serialized chunks to the GPU, that have finished since the
     /// last update. Position is in world space.
-    pub fn update(&mut self, world_center: &ChunkPos) {
+    ///
+    /// Returns borrowed chunk ownership from finished chunk jobs there were enqueued before.
+    pub fn update(&mut self, world_center: &ChunkPos) -> Vec<BorrowedChunk> {
         if self.svo_coord_space.center != *world_center {
             self.svo_coord_space.center = *world_center;
             self.has_changed = true;
@@ -88,16 +87,18 @@ impl Svo {
         }
 
         let results = self.processor.get_results(50);
-        self.process_serialized_chunks(results);
+        let chunks = self.process_serialized_chunks(results);
 
         if !self.has_changed {
-            return;
+            return chunks;
         }
 
         self.has_changed = false;
         self.world_svo.serialize();
         self.graphics_svo.update(&self.world_svo);
         self.world_svo.reset_changes();
+
+        chunks
     }
 
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
@@ -141,8 +142,13 @@ impl Svo {
         }
     }
 
-    fn process_serialized_chunks(&mut self, results: Vec<ChunkResult<SerializedChunk>>) {
-        for result in results {
+    fn process_serialized_chunks(&mut self, results: Vec<ChunkResult<SerializedChunk>>) -> Vec<BorrowedChunk> {
+        let mut chunks = Vec::new();
+
+        for mut result in results {
+            let chunk = result.value.borrowed_chunk.take().unwrap();
+            chunks.push(chunk);
+
             let svo_pos = self.svo_coord_space.cnv_chunk_pos(result.pos);
             if svo_pos.is_none() {
                 continue;
@@ -153,6 +159,8 @@ impl Svo {
                 self.has_changed = true;
             }
         }
+
+        chunks
     }
 }
 

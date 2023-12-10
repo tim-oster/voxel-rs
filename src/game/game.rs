@@ -181,10 +181,10 @@ impl State {
                     self.job_system.queue_len(),
                 ));
 
-                let mem_stats = self.world.storage.get_memory_stats();
                 frame.ui.text(format!(
                     "chunk allocs used: {}, total: {}",
-                    mem_stats.in_use, mem_stats.allocated,
+                    self.world.chunk_storage_allocator.used_count(),
+                    self.world.chunk_storage_allocator.allocated_count(),
                 ));
             });
     }
