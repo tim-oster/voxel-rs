@@ -1,18 +1,13 @@
-#![allow(dead_code)]
-
 use std::cmp::max;
 
 use cgmath::num_traits::Pow;
 
 pub type OctantId = usize;
 
-// TODO probably requires refactoring in the future
-
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Position(pub u32, pub u32, pub u32);
 
 impl Position {
-    #[inline]
     fn idx(&self) -> usize {
         (self.0 + self.1 * 2 + self.2 * 4) as usize
     }
@@ -23,17 +18,37 @@ impl Position {
     }
 }
 
+impl std::ops::Div<u32> for Position {
+    type Output = Position;
+
+    fn div(self, rhs: u32) -> Self::Output {
+        Position(
+            self.0 / rhs,
+            self.1 / rhs,
+            self.2 / rhs,
+        )
+    }
+}
+
+impl std::ops::RemAssign<u32> for Position {
+    fn rem_assign(&mut self, rhs: u32) {
+        self.0 %= rhs;
+        self.1 %= rhs;
+        self.2 %= rhs;
+    }
+}
+
 #[derive(Debug, PartialEq)]
 pub struct Octree<T> {
-    pub(super) octants: Vec<Octant<T>>,
-    pub(super) free_list: Vec<OctantId>,
     pub(super) root: Option<OctantId>,
-    pub(super) depth: u32,
+    pub(super) octants: Vec<Octant<T>>,
+    free_list: Vec<OctantId>,
+    depth: u32,
 }
 
 impl<T> Octree<T> {
     pub fn new() -> Octree<T> {
-        Octree { octants: Vec::new(), free_list: Vec::new(), root: None, depth: 0 }
+        Octree { root: None, octants: Vec::new(), free_list: Vec::new(), depth: 0 }
     }
 
     pub fn with_size(size: u32) -> Octree<T> {
@@ -43,9 +58,9 @@ impl<T> Octree<T> {
     }
 
     pub fn reset(&mut self) {
+        self.root = None;
         self.octants.clear();
         self.free_list.clear();
-        self.root = None;
         self.depth = 0;
     }
 
@@ -59,14 +74,10 @@ impl<T> Octree<T> {
         let mut pos = pos;
         let mut size = 2f32.pow(self.depth as i32) as u32;
 
-        while size > 0 {
+        while size >= 1 {
             size /= 2;
-
-            let idx = Position(pos.0 / size, pos.1 / size, pos.2 / size).idx();
-
-            pos.0 %= size;
-            pos.1 %= size;
-            pos.2 %= size;
+            let idx = (pos / size).idx();
+            pos %= size;
 
             if let Some(child) = self.octants[it].children[idx] {
                 it = child;
@@ -76,12 +87,6 @@ impl<T> Octree<T> {
                 if current.content.is_some() {
                     self.octants[child].content = None;
                 }
-
-                // if this is the end of the tree, insert the content
-                if size == 1 {
-                    self.octants[child].content = Some(leaf);
-                    return child;
-                }
             } else {
                 let prev_id = it;
                 let next_id = self.new_octant(Some(prev_id));
@@ -89,12 +94,11 @@ impl<T> Octree<T> {
 
                 let prev_octant = &mut self.octants[prev_id];
                 prev_octant.add_child(idx, next_id);
+            }
 
-                if size == 1 {
-                    let current = &mut self.octants[next_id];
-                    current.content = Some(leaf);
-                    return next_id;
-                }
+            if size == 1 {
+                self.octants[it].content = Some(leaf);
+                return it;
             }
         }
 
@@ -104,34 +108,34 @@ impl<T> Octree<T> {
     pub fn replace_leaf(&mut self, pos: Position, leaf: OctantId) -> Option<OctantId> {
         self.expand_to(pos.required_depth());
 
-        if let Some(old_parent_id) = self.octants[leaf].parent {
-            self.octants[old_parent_id].remove_child_by_octant_id(leaf);
-        }
-
         let mut it = self.root.unwrap();
         let mut pos = pos;
         let mut size = 2f32.pow(self.depth as i32) as u32;
 
-        while size > 0 {
+        while size >= 1 {
             size /= 2;
-
-            let idx = Position(pos.0 / size, pos.1 / size, pos.2 / size).idx();
-
-            pos.0 %= size;
-            pos.1 %= size;
-            pos.2 %= size;
+            let idx = (pos / size).idx();
+            pos %= size;
 
             if size == 1 {
+                // do nothing if leaf is replaced with itself
                 let previous_child = self.octants[it].children[idx];
                 if previous_child == Some(leaf) {
                     return None;
                 }
 
+                // if exists, detach previous child octant
                 if let Some(previous_child) = previous_child {
                     self.octants[it].remove_child(idx);
                     self.octants[previous_child].parent = None;
                 }
 
+                // make sure that the leaf is detached from any potential parent
+                if let Some(previous_parent) = self.octants[leaf].parent {
+                    self.octants[previous_parent].remove_child_by_octant_id(leaf);
+                }
+
+                // attach new leaf octant
                 self.octants[it].add_child(idx, leaf);
                 self.octants[leaf].parent = Some(it);
 
@@ -170,14 +174,10 @@ impl<T> Octree<T> {
         let mut pos = pos;
         let mut size = 2f32.pow(self.depth as i32) as u32;
 
-        while size > 0 {
+        while size >= 1 {
             size /= 2;
-
-            let idx = Position(pos.0 / size, pos.1 / size, pos.2 / size).idx();
-
-            pos.0 %= size;
-            pos.1 %= size;
-            pos.2 %= size;
+            let idx = (pos / size).idx();
+            pos %= size;
 
             let child = self.octants[it].children[idx];
             if child.is_none() {
@@ -206,12 +206,8 @@ impl<T> Octree<T> {
 
         while size > 0 {
             size /= 2;
-
-            let idx = Position(pos.0 / size, pos.1 / size, pos.2 / size).idx();
-
-            pos.0 %= size;
-            pos.1 %= size;
-            pos.2 %= size;
+            let idx = (pos / size).idx();
+            pos %= size;
 
             let child = self.octants[it].children[idx];
             if child.is_none() {
@@ -260,8 +256,14 @@ impl<T> Octree<T> {
         if self.root.is_none() {
             return;
         }
-        // TODO can it happen that the root is removed?
+
         self.compact_octant(self.root.unwrap());
+
+        if self.octants[self.root.unwrap()].children_count != 0 {
+            return;
+        }
+
+        self.reset();
     }
 
     fn compact_octant(&mut self, octant_id: OctantId) {
@@ -285,40 +287,45 @@ impl<T> Octree<T> {
     }
 
     fn new_octant(&mut self, parent: Option<OctantId>) -> OctantId {
-        let octant = Octant {
-            parent,
-            children: Default::default(),
-            children_count: 0,
-            content: None,
-        };
-
         if let Some(free_id) = self.free_list.pop() {
-            self.octants[free_id] = octant;
+            self.octants[free_id].parent = parent;
             return free_id;
         }
 
         let id = self.octants.len() as OctantId;
-        self.octants.push(octant);
+        self.octants.push(Octant {
+            parent,
+            children_count: 0,
+            children: Default::default(),
+            content: None,
+        });
         id
     }
 
     pub fn delete_octant(&mut self, id: OctantId) {
-        let octant = &self.octants[id];
-        if let Some(parent) = octant.parent {
+        if let Some(parent) = self.octants[id].parent {
             self.octants[parent].remove_child_by_octant_id(id);
-            self.octants[id].parent = None;
         }
+
+        let mut octant = &mut self.octants[id];
+        octant.parent = None;
+        octant.children_count = 0;
+        octant.children = Default::default();
+        octant.content = None;
+
         self.free_list.push(id);
+    }
+
+    pub fn octant_count(&self) -> usize {
+        self.octants.len() - self.free_list.len()
     }
 }
 
 #[derive(Debug, PartialEq)]
 pub(super) struct Octant<T> {
-    pub(super) parent: Option<OctantId>,
-
+    parent: Option<OctantId>,
+    children_count: u8,
     pub(super) children: [Option<OctantId>; 8],
-    pub(super) children_count: u8,
-
     pub(super) content: Option<T>,
 }
 
@@ -470,6 +477,11 @@ mod tests {
             root: Some(2),
             depth: 3,
         });
+
+        assert_eq!(octree.get_leaf(Position(6, 7, 5)), Some(&10));
+        assert_eq!(octree.get_leaf(Position(0, 0, 0)), Some(&20));
+        assert_eq!(octree.get_leaf(Position(1, 0, 6)), Some(&30));
+        assert_eq!(octree.get_leaf(Position(1, 1, 1)), None);
     }
 
     #[test]
@@ -553,7 +565,7 @@ mod tests {
                     parent: None,
                     children: [None, None, None, None, None, None, None, None],
                     children_count: 0,
-                    content: Some(10),
+                    content: None,
                 },
             ],
             free_list: vec![1],
@@ -745,6 +757,7 @@ mod tests {
     fn octree_compact() {
         let mut octree = Octree::new();
 
+        octree.add_leaf(Position(0, 1, 3), 10);
         octree.add_leaf(Position(1, 1, 3), 20);
         octree.compact();
 
@@ -764,9 +777,15 @@ mod tests {
                 },
                 Octant {
                     parent: Some(1),
-                    children: [None, None, None, None, None, None, None, Some(3)],
-                    children_count: 1,
+                    children: [None, None, None, None, None, None, Some(3), Some(4)],
+                    children_count: 2,
                     content: None,
+                },
+                Octant {
+                    parent: Some(2),
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: Some(10),
                 },
                 Octant {
                     parent: Some(2),
@@ -778,6 +797,57 @@ mod tests {
             free_list: vec![0],
             root: Some(1),
             depth: 2,
+        });
+
+        octree.remove_leaf(Position(0, 1, 3));
+        octree.compact();
+
+        assert_eq!(octree, Octree {
+            octants: vec![
+                Octant {
+                    parent: None,
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: None,
+                },
+                Octant {
+                    parent: None,
+                    children: [None, None, None, None, Some(2), None, None, None],
+                    children_count: 1,
+                    content: None,
+                },
+                Octant {
+                    parent: Some(1),
+                    children: [None, None, None, None, None, None, None, Some(4)],
+                    children_count: 1,
+                    content: None,
+                },
+                Octant {
+                    parent: None,
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: None,
+                },
+                Octant {
+                    parent: Some(2),
+                    children: [None, None, None, None, None, None, None, None],
+                    children_count: 0,
+                    content: Some(20),
+                },
+            ],
+            free_list: vec![0, 3],
+            root: Some(1),
+            depth: 2,
+        });
+
+        octree.remove_leaf(Position(1, 1, 3));
+        octree.compact();
+
+        assert_eq!(octree, Octree {
+            octants: vec![],
+            free_list: vec![],
+            root: None,
+            depth: 0,
         });
     }
 }

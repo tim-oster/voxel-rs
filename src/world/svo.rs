@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
-use std::ptr;
 use std::collections::{HashMap, HashSet};
+use std::ptr;
 
 use crate::world::chunk::{BlockId, ChunkPos};
 use crate::world::octree::{Octant, OctantId, Octree, Position};
@@ -69,11 +69,10 @@ impl<T: SvoSerializable> Svo<T> {
             let id = self.octree.add_leaf(pos, leaf);
             self.change_set.insert(OctantChange::Add(id));
             return Some(id);
-        } else if self.octree.root.is_some() {
-            if let Some(id) = self.octree.remove_leaf(pos) {
-                self.change_set.insert(OctantChange::Remove(id));
-                return Some(id);
-            }
+        }
+        if let Some(id) = self.octree.remove_leaf(pos) {
+            self.change_set.insert(OctantChange::Remove(id));
+            return Some(id);
         }
         return None;
     }
@@ -90,21 +89,13 @@ impl<T: SvoSerializable> Svo<T> {
         self.octree.delete_octant(octant_id);
     }
 
-    pub fn get(&self, octant_id: OctantId) -> Option<&T> {
-        let octant = self.octree.octants.get(octant_id);
-        if octant.is_none() {
-            return None;
-        }
-        return octant.unwrap().content.as_ref();
-    }
-
     // TODO should this be the normal get operation and the current one get_at_position instead?
     pub fn get_at_pos(&self, pos: Position) -> Option<&T> {
         self.octree.get_leaf(pos)
     }
 
     pub fn octant_count(&self) -> usize {
-        self.octree.octants.len() - self.octree.free_list.len()
+        self.octree.octant_count()
     }
 
     pub fn serialize(&mut self) {
