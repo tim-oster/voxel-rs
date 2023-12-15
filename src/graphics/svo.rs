@@ -226,7 +226,7 @@ mod svo_tests {
 
         let chunk = SerializedChunk::new(BorrowedChunk::from(chunk));
         let mut svo = world::svo::Svo::<SerializedChunk>::new();
-        svo.set(Position(0, 0, 0), Some(chunk));
+        svo.set(Position(0, 0, 0), chunk);
         svo.serialize();
         svo
     }

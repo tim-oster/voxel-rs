@@ -65,7 +65,7 @@ mod tests {
 
         let chunk = SerializedChunk::new(BorrowedChunk::from(chunk));
         let mut svo = Svo::<SerializedChunk>::new();
-        svo.set(svo_pos, Some(chunk));
+        svo.set(svo_pos, chunk);
         svo.serialize();
 
         let world_buffer = MappedBuffer::<u32>::new(1000 * 1024 * 1024 / 4);

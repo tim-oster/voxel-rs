@@ -1,35 +1,41 @@
 #![allow(dead_code)]
 
 use std::collections::{HashMap, HashSet};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::ptr;
 
 use crate::world::chunk::{BlockId, ChunkPos};
-use crate::world::octree::{Octant, OctantId, Octree, Position};
+use crate::world::octree::{LeafId, Octant, OctantId, Octree, Position};
 use crate::world::world::BorrowedChunk;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 enum OctantChange {
-    Add(OctantId),
-    Remove(OctantId),
+    Add(u64, LeafId),
+    Remove(u64),
 }
 
 pub trait SvoSerializable {
+    fn unique_id(&self) -> u64;
     fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct SerializationResult {
+    // TODO why are they u16 and not u8?
     pub child_mask: u16,
     pub leaf_mask: u16,
     pub depth: u32,
 }
 
 pub struct Svo<T: SvoSerializable> {
-    octree: Octree<T>,
+    // TODO should not be pub?
+    pub octree: Octree<T>,
     change_set: HashSet<OctantChange>,
 
     buffer: SvoBuffer,
-    octant_info: HashMap<OctantId, OctantInfo>,
+    // TODO rename
+    leaf_info: HashMap<u64, OctantInfo>,
     root_octant_info: Option<OctantInfo>,
 }
 
@@ -51,7 +57,7 @@ impl<T: SvoSerializable> Svo<T> {
             octree: Octree::new(),
             change_set: HashSet::new(),
             buffer: SvoBuffer::new(capacity),
-            octant_info: HashMap::new(),
+            leaf_info: HashMap::new(),
             root_octant_info: None,
         }
     }
@@ -60,42 +66,38 @@ impl<T: SvoSerializable> Svo<T> {
         self.octree.reset();
         self.change_set.clear();
         self.buffer.clear();
-        self.octant_info.clear();
+        self.leaf_info.clear();
         self.root_octant_info = None;
     }
 
-    pub fn set(&mut self, pos: Position, leaf: Option<T>) -> Option<OctantId> {
-        if let Some(leaf) = leaf {
-            let id = self.octree.add_leaf(pos, leaf);
-            self.change_set.insert(OctantChange::Add(id));
-            return Some(id);
-        }
-        if let Some(id) = self.octree.remove_leaf(pos) {
-            self.change_set.insert(OctantChange::Remove(id));
-            return Some(id);
-        }
-        return None;
+    pub fn set(&mut self, pos: Position, leaf: T) -> (LeafId, Option<T>) {
+        let uid = leaf.unique_id();
+        let (leaf_id, prev_leaf) = self.octree.set_leaf(pos, leaf);
+
+        self.change_set.insert(OctantChange::Add(uid, leaf_id));
+
+        (leaf_id, prev_leaf)
     }
 
-    /// replace sets the leaf octant at the given position and returns the previously present leaf
-    /// octant id.
-    pub fn replace(&mut self, pos: Position, leaf: OctantId) -> Option<OctantId> {
+    pub fn replace(&mut self, pos: Position, leaf: LeafId) -> (LeafId, Option<T>) {
         // TODO should this be marked in change_set?
-        self.octree.replace_leaf(pos, leaf)
+        let (new_leaf_id, old_value) = self.octree.move_leaf(leaf, pos);
+        (new_leaf_id, old_value)
     }
 
-    pub fn remove_octant(&mut self, octant_id: OctantId) {
+    pub fn remove(&mut self, leaf: LeafId) -> Option<T> {
         // TODO should this be marked in change_set?
-        self.octree.delete_octant(octant_id);
+        let value = self.octree.remove_leaf_by_id(leaf);
+        if let Some(value) = &value {
+            let uid = value.unique_id();
+            self.change_set.insert(OctantChange::Remove(uid));
+        }
+        value
     }
 
     // TODO should this be the normal get operation and the current one get_at_position instead?
     pub fn get_at_pos(&self, pos: Position) -> Option<&T> {
         self.octree.get_leaf(pos)
-    }
-
-    pub fn octant_count(&self) -> usize {
-        self.octree.octant_count()
     }
 
     pub fn serialize(&mut self) {
@@ -104,38 +106,43 @@ impl<T: SvoSerializable> Svo<T> {
         }
 
         // rebuild & remove all changed leaf octants
+        // TODO reuse? calculate accurate size
         let mut octant_buffer = Vec::with_capacity(56172); // size of a full chunk
-        for change in self.change_set.drain() {
+        let mut changes = self.change_set.drain().collect::<Vec<OctantChange>>();
+        changes.sort(); // TODO necessary?
+        for change in changes {
             match change {
-                OctantChange::Add(id) => {
-                    let octant = self.octree.octants[id].content.as_ref().unwrap();
-                    let result = octant.serialize(&mut octant_buffer, 0);
+                OctantChange::Add(id, leaf_id) => {
+                    let child = &self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
+                    let content = child.get_leaf_value().unwrap();
+                    let result = content.serialize(&mut octant_buffer, 0);
                     if result.depth > 0 {
                         let offset = self.buffer.insert(id, &octant_buffer);
                         octant_buffer.clear();
 
-                        self.octant_info.insert(id, OctantInfo { buf_offset: offset, serialization: result });
+                        self.leaf_info.insert(id, OctantInfo { buf_offset: offset, serialization: result });
                     }
                 }
                 OctantChange::Remove(id) => {
                     self.buffer.remove(id);
-                    self.octant_info.remove(&id);
+                    self.leaf_info.remove(&id);
                 }
             }
         }
 
         // rebuild root octree
         let result = self.serialize_root(&mut octant_buffer);
-        let offset = self.buffer.insert(usize::MAX, &octant_buffer);
+        let offset = self.buffer.insert(u64::MAX, &octant_buffer);
         self.root_octant_info = Some(OctantInfo { buf_offset: offset, serialization: result });
     }
 
     fn serialize_root(&self, dst: &mut Vec<u32>) -> SerializationResult {
         let root_id = self.octree.root.unwrap();
-        let root = &self.octree.octants[root_id];
+        let root = &self.octree.octants[root_id as usize];
 
-        serialize_octant(&self.octree, root, dst, 0, &|params| {
-            let info = self.octant_info.get(&params.id);
+        serialize_octant(&self.octree, root_id, root, dst, 0, &|params| {
+            let uid = params.content.unique_id();
+            let info = self.leaf_info.get(&uid);
             if info.is_none() {
                 return;
             }
@@ -146,7 +153,7 @@ impl<T: SvoSerializable> Svo<T> {
                 mask <<= 16;
             }
 
-            params.dst[(params.idx / 2) as usize] |= mask;
+            params.dst[params.idx / 2] |= mask;
             params.dst[4 + params.idx] = info.buf_offset as u32 + Self::PREAMBLE_LENGTH;
             params.result.depth = params.result.depth.max(info.serialization.depth + 1);
         })
@@ -213,6 +220,13 @@ impl<T: SvoSerializable> Svo<T> {
 }
 
 impl SvoSerializable for SerializedChunk {
+    fn unique_id(&self) -> u64 {
+        // TODO performant?
+        let mut hasher = DefaultHasher::new();
+        self.pos.hash(&mut hasher);
+        hasher.finish()
+    }
+
     fn serialize(&self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
         if self.buffer.is_some() {
             // TODO is this fast enough?
@@ -223,15 +237,15 @@ impl SvoSerializable for SerializedChunk {
     }
 }
 
-impl SvoSerializable for Octree<BlockId> {
+impl Octree<BlockId> {
     fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult {
         if self.root.is_none() {
             return SerializationResult { child_mask: 0, leaf_mask: 0, depth: 0 };
         }
 
         let root_id = self.root.unwrap();
-        let root = &self.octants[root_id];
-        serialize_octant(self, root, dst, lod, &|params| {
+        let root = &self.octants[root_id as usize];
+        serialize_octant(self, root_id, root, dst, lod, &|params| {
             params.result.leaf_mask |= 1 << params.idx;
             params.dst[4 + params.idx] = *params.content as u32;
             params.result.depth = 1;
@@ -263,14 +277,15 @@ impl SerializedChunk {
 }
 
 struct ChildEncodeParams<'a, T> {
-    id: OctantId,
+    parent_id: OctantId,
     idx: usize,
     result: &'a mut SerializationResult,
     dst: &'a mut [u32],
     content: &'a T,
 }
 
-fn serialize_octant<T, F>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<u32>, lod: u8, child_encoder: &F) -> SerializationResult
+// TODO pass both octant and octant_id ?
+fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, octant: &Octant<T>, dst: &mut Vec<u32>, lod: u8, child_encoder: &F) -> SerializationResult
     where F: Fn(ChildEncodeParams<T>) {
     let start_offset = dst.len();
 
@@ -290,13 +305,11 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<
 
         result.child_mask |= 1 << idx;
 
-        let child_id = child.unwrap();
-        let child = &octree.octants[child_id];
-
-        if child.content.is_some() || lod == 1 {
-            let mut content = child.content.as_ref();
-            if content.is_none() {
-                content = breadth_first(&octree, &child);
+        if child.is_leaf() || lod == 1 {
+            let mut content = child.get_leaf_value();
+            if child.is_octant() {
+                let child_id = child.get_octant_value().unwrap();
+                content = breadth_first(&octree, &octree.octants[child_id as usize]);
             }
             if content.is_none() {
                 continue;
@@ -304,22 +317,23 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant: &Octant<T>, dst: &mut Vec<
 
             let content = content.unwrap();
             child_encoder(ChildEncodeParams {
-                id: child_id,
+                parent_id: octant_id,
                 idx,
                 result: &mut result,
                 dst: &mut dst[start_offset..],
                 content,
             });
         } else {
+            let child_id = child.get_octant_value().unwrap();
             let child_lod = if lod > 0 { lod - 1 } else { 0 };
             let child_offset = (dst.len() - start_offset) as u32;
-            let child_result = serialize_octant(octree, &octree.octants[child_id], dst, child_lod, child_encoder);
+            let child_result = serialize_octant(octree, child_id, &octree.octants[child_id as usize], dst, child_lod, child_encoder);
 
             let mut mask = ((child_result.child_mask as u32) << 8) | child_result.leaf_mask as u32;
             if (idx % 2) != 0 {
                 mask <<= 16;
             }
-            dst[start_offset + (idx / 2) as usize] |= mask;
+            dst[start_offset + (idx / 2)] |= mask;
 
             dst[start_offset + 4 + idx] = child_offset - 4 - idx as u32; // offset from pointer to start of next block
             dst[start_offset + 4 + idx] |= 1 << 31; // flag as relative pointer
@@ -336,16 +350,16 @@ fn breadth_first<'a, T>(octree: &'a Octree<T>, parent: &'a Octant<T>) -> Option<
         if child.is_none() {
             continue;
         }
-        let child = &octree.octants[child.unwrap()];
-        if child.content.is_some() {
-            return child.content.as_ref();
-        }
+        let content = child.get_leaf_value();
+        return content;
     }
     for child in parent.children.iter() {
-        if child.is_none() {
+        if !child.is_octant() {
             continue;
         }
-        let child = &octree.octants[child.unwrap()];
+
+        let child_id = child.get_octant_value().unwrap();
+        let child = &octree.octants[child_id as usize];
         let result = breadth_first(octree, child);
         if result.is_some() {
             return result;
@@ -358,21 +372,31 @@ fn breadth_first<'a, T>(octree: &'a Octree<T>, parent: &'a Octant<T>) -> Option<
 mod svo_tests {
     use std::collections::HashMap;
 
-    use crate::world::chunk::BlockId;
-    use crate::world::octree::{Octree, Position};
-    use crate::world::svo::{OctantInfo, Range, SerializationResult, Svo, SvoBuffer};
+    use crate::world::chunk::{BlockId, ChunkPos};
+    use crate::world::octree::{LeafId, Octree, Position};
+    use crate::world::svo::{OctantInfo, Range, SerializationResult, SerializedChunk, Svo, SvoBuffer};
 
     #[test]
-    fn svo_serialize() {
+    fn serialize() {
         let mut octree = Octree::new();
-        octree.add_leaf(Position(31, 0, 0), 1 as BlockId);
-        octree.add_leaf(Position(0, 31, 0), 2 as BlockId);
-        octree.add_leaf(Position(0, 0, 31), 3 as BlockId);
+        octree.set_leaf(Position(31, 0, 0), 1 as BlockId);
+        octree.set_leaf(Position(0, 31, 0), 2 as BlockId);
+        octree.set_leaf(Position(0, 0, 31), 3 as BlockId);
         octree.expand_to(5);
         octree.compact();
 
+        let mut buffer = Vec::new();
+        let result = octree.serialize(&mut buffer, 0);
+        let sc = SerializedChunk {
+            pos: ChunkPos::new(1, 0, 0),
+            lod: 0,
+            borrowed_chunk: None,
+            buffer: Some(buffer),
+            result,
+        };
+
         let mut svo = Svo::new();
-        svo.set(Position(1, 0, 0), Some(octree));
+        svo.set(Position(1, 0, 0), sc);
         svo.serialize();
 
         assert_eq!(svo.root_octant_info, Some(OctantInfo {
@@ -511,8 +535,8 @@ mod svo_tests {
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 168 }],
             octant_to_range: HashMap::from([
-                (1, Range { start: 0, length: 156 }),
-                (usize::MAX, Range { start: 156, length: 12 }),
+                (9307533986124549581, Range { start: 0, length: 156 }),
+                (u64::MAX, Range { start: 156, length: 12 }),
             ]),
         });
 
@@ -531,6 +555,117 @@ mod svo_tests {
             expected,
         ].concat());
     }
+
+    #[test]
+    fn serialize_with_replace() {
+        let mut svo = Svo::new();
+        svo.set(Position(0, 0, 0), 10);
+        svo.set(Position(1, 0, 0), 20);
+        svo.serialize();
+
+        assert_eq!(svo.root_octant_info, Some(OctantInfo {
+            buf_offset: 2,
+            serialization: SerializationResult {
+                child_mask: 2 | 1,
+                leaf_mask: 0,
+                depth: 2,
+            },
+        }));
+
+        let preamble_length = 5;
+        let expected = vec![
+            // values
+            10,
+            20,
+            // root octant
+            (((1 << 8) | 1) << 16) | ((1 << 8) | 1),
+            0,
+            0,
+            0,
+            5, 6, 0, 0, // absolute positions take preamble length into account
+            0, 0, 0, 0,
+        ];
+        assert_eq!(svo.buffer, SvoBuffer {
+            bytes: expected.clone(),
+            free_ranges: vec![],
+            updated_ranges: vec![Range { start: 0, length: 14 }],
+            octant_to_range: HashMap::from([
+                (10, Range { start: 0, length: 1 }),
+                (20, Range { start: 1, length: 1 }),
+                (u64::MAX, Range { start: 2, length: 12 }),
+            ]),
+        });
+
+        let mut buffer = Vec::new();
+        buffer.resize(200, 0);
+        let size = unsafe { svo.write_to(buffer.as_mut_ptr()) };
+        assert_eq!(buffer[..size], [
+            vec![
+                // preamble
+                (2 | 1) << 8,
+                0,
+                0,
+                0,
+                2 + preamble_length,
+            ],
+            expected,
+        ].concat());
+
+        // TODO reset changed range somehow?
+
+        let (new_leaf_id, old_value) = svo.replace(Position(1, 1, 1), LeafId { parent: 0, idx: 1 });
+        assert_eq!(new_leaf_id, LeafId { parent: 0, idx: 7 });
+        assert_eq!(old_value, None);
+        svo.serialize();
+
+        assert_eq!(svo.root_octant_info, Some(OctantInfo {
+            buf_offset: 2,
+            serialization: SerializationResult {
+                child_mask: (1 << 7) | 1,
+                leaf_mask: 0,
+                depth: 2,
+            },
+        }));
+
+        let preamble_length = 5;
+        let expected = vec![
+            // values
+            10,
+            20,
+            // root octant
+            (1 << 8) | 1,
+            0,
+            0,
+            ((1 << 8) | 1) << 16,
+            5, 0, 0, 0, // absolute positions take preamble length into account
+            0, 0, 0, 6,
+        ];
+        assert_eq!(svo.buffer, SvoBuffer {
+            bytes: expected.clone(),
+            free_ranges: vec![],
+            updated_ranges: vec![Range { start: 0, length: 14 }],
+            octant_to_range: HashMap::from([
+                (10, Range { start: 0, length: 1 }),
+                (20, Range { start: 1, length: 1 }),
+                (u64::MAX, Range { start: 2, length: 12 }),
+            ]),
+        });
+
+        let mut buffer = Vec::new();
+        buffer.resize(200, 0);
+        let size = unsafe { svo.write_to(buffer.as_mut_ptr()) };
+        assert_eq!(buffer[..size], [
+            vec![
+                // preamble
+                ((1 << 7) | 1) << 8,
+                0,
+                0,
+                (1 << 8) << 8 << 16,
+                2 + preamble_length,
+            ],
+            expected,
+        ].concat());
+    }
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
@@ -544,7 +679,7 @@ pub struct SvoBuffer {
     bytes: Vec<u32>,
     free_ranges: Vec<Range>,
     updated_ranges: Vec<Range>,
-    octant_to_range: HashMap<OctantId, Range>,
+    octant_to_range: HashMap<u64, Range>,
 }
 
 impl SvoBuffer {
@@ -571,7 +706,7 @@ impl SvoBuffer {
         self.octant_to_range.clear();
     }
 
-    fn insert(&mut self, id: OctantId, buf: &Vec<u32>) -> usize {
+    fn insert(&mut self, id: u64, buf: &Vec<u32>) -> usize {
         self.remove(id);
 
         let mut ptr = self.bytes.len();
@@ -604,7 +739,7 @@ impl SvoBuffer {
         ptr
     }
 
-    fn remove(&mut self, id: OctantId) {
+    fn remove(&mut self, id: u64) {
         let range = self.octant_to_range.remove(&id);
         if range.is_none() {
             return;

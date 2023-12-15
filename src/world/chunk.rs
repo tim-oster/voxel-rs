@@ -38,7 +38,7 @@ impl Chunk {
         if block == NO_BLOCK {
             self.storage.as_mut().unwrap().remove_leaf(Position(x, y, z));
         } else {
-            self.storage.as_mut().unwrap().add_leaf(Position(x, y, z), block);
+            self.storage.as_mut().unwrap().set_leaf(Position(x, y, z), block);
         }
     }
 }
