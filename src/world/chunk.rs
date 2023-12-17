@@ -62,6 +62,7 @@ impl ChunkPos {
         ChunkPos { x: x >> 5, y: y >> 5, z: z >> 5 }
     }
 
+    /// Returns the squared distance between this and the other chunk position.
     pub fn dst_sq(&self, other: &ChunkPos) -> f32 {
         let dx = (other.x - self.x) as f32;
         let dy = (other.y - self.y) as f32;
@@ -69,6 +70,8 @@ impl ChunkPos {
         dx * dx + dy * dy + dz * dz
     }
 
+    /// Returns the squared distance between this and the other chunk position, but ignores the difference on the
+    /// y-axis.
     pub fn dst_2d_sq(&self, other: &ChunkPos) -> f32 {
         let dx = (other.x - self.x) as f32;
         let dz = (other.z - self.z) as f32;
@@ -104,6 +107,7 @@ mod chunk_pos_test {
 
     use crate::world::chunk::ChunkPos;
 
+    /// Tests that conversion from block positions works for both positive and negative coordinates.
     #[test]
     fn from_block_pos() {
         let pos = ChunkPos::from_block_pos(15, -28, 35);
@@ -123,6 +127,7 @@ mod chunk_pos_test {
         assert_eq!(pos, ChunkPos { x: -1, y: -2, z: 0 });
     }
 
+    /// Tests distance calculation.
     #[test]
     fn dst_sq() {
         let pos = ChunkPos { x: 0, y: -1, z: 1 };
@@ -131,6 +136,7 @@ mod chunk_pos_test {
         assert_eq!(other.dst_sq(&pos), 11.0);
     }
 
+    /// Tests distance calculation without y axis.
     #[test]
     fn dst_2d_sq() {
         let pos = ChunkPos { x: 0, y: -1, z: 1 };
@@ -139,6 +145,7 @@ mod chunk_pos_test {
         assert_eq!(other.dst_2d_sq(&pos), 2.0);
     }
 
+    /// Tests subtraction of two chunk positions.
     #[test]
     fn sub() {
         let pos = ChunkPos { x: 0, y: -1, z: 1 };
@@ -204,6 +211,7 @@ mod block_pos_test {
 
     use crate::world::chunk::{BlockPos, ChunkPos};
 
+    /// Tests creation of block position and conversion back to a point.
     #[test]
     fn new() {
         let pos = BlockPos::new(15, -28, 35);
@@ -216,6 +224,7 @@ mod block_pos_test {
         assert_eq!(Point3::new(15.0, -28.0, 35.0), pos.to_point());
     }
 
+    /// Tests that positive coordinates work.
     #[test]
     fn from_positive() {
         let original = Point3::new(0.25, 32.75, 8.5);
@@ -229,6 +238,7 @@ mod block_pos_test {
         assert_eq!(original, pos.to_point());
     }
 
+    /// Tests that negative coordinates are wrapped correctly.
     #[test]
     fn from_negative() {
         let original = Point3::new(-0.25, -32.75, -8.5);
@@ -242,6 +252,7 @@ mod block_pos_test {
         assert_eq!(original, pos.to_point());
     }
 
+    /// Tests -1 edge case is calculated correctly.
     #[test]
     fn from_edge_case() {
         let original = Point3::new(-1.0, -1.0, -1.0);

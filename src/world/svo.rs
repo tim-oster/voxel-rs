@@ -9,7 +9,7 @@ use crate::world::memory::{Allocated, Allocator};
 use crate::world::octree::{LeafId, Octant, OctantId, Octree, Position};
 use crate::world::world::BorrowedChunk;
 
-// TODO remove
+/// ChunkBuffer abstracts the temporary storage used for serializing octants into the SVO format.
 pub struct ChunkBuffer {
     data: Vec<u32>,
 }

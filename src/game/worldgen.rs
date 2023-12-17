@@ -78,6 +78,7 @@ mod noise_tests {
     use crate::assert_float_eq;
     use crate::game::worldgen::{Noise, SplinePoint};
 
+    /// Tests that noise value is correctly calculated and interpolated using the spline points.
     #[test]
     fn get() {
         let noise = Noise {
