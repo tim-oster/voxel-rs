@@ -152,8 +152,11 @@ pub struct ChunkStorageAllocator {
 impl ChunkStorageAllocator {
     pub fn new() -> ChunkStorageAllocator {
         let allocator = Allocator::new(
-            Box::new(|| ChunkStorage::with_size(32f32.log2() as u8)),
-            Some(Box::new(|storage| storage.reset())),
+            Box::new(|| ChunkStorage::with_size(5)), // log2(32) = 5
+            Some(Box::new(|storage| {
+                storage.reset();
+                storage.expand_to(5);
+            })),
         );
         ChunkStorageAllocator { allocator }
     }
@@ -164,5 +167,29 @@ impl Deref for ChunkStorageAllocator {
 
     fn deref(&self) -> &Self::Target {
         &self.allocator
+    }
+}
+
+#[cfg(test)]
+mod chunk_storage_allocator_tests {
+    use crate::world::memory::ChunkStorageAllocator;
+
+    /// Tests that newly allocated and reused storage objects always have a depth of 5 blocks to prevent visual voxel
+    /// scale issues in the world.
+    #[test]
+    fn new() {
+        let alloc = ChunkStorageAllocator::new();
+
+        // new allocation
+        let storage = alloc.allocate();
+        assert_eq!(storage.depth(), 5);
+        assert_eq!(alloc.allocated_count(), 1);
+
+        drop(storage);
+
+        // reused allocation
+        let storage = alloc.allocate();
+        assert_eq!(storage.depth(), 5);
+        assert_eq!(alloc.allocated_count(), 1);
     }
 }

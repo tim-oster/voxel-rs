@@ -340,6 +340,11 @@ impl<T> Octree<T> {
 
         self.free_list.push(id);
     }
+
+    /// Returns the octree's depth.
+    pub fn depth(&self) -> u8 {
+        self.depth
+    }
 }
 
 /// Child represents possible states for an octant in the octree.
