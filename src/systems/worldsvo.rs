@@ -59,7 +59,7 @@ impl Svo {
         self.processor.dequeue(pos);
 
         if let Some(id) = self.leaf_ids.remove(pos) {
-            self.world_svo.remove(id);
+            self.world_svo.remove_leaf(id);
             self.has_changed = true;
         }
     }
@@ -112,7 +112,7 @@ impl Svo {
             let new_svo_pos = coord_space.cnv_chunk_pos(*chunk_pos);
             if new_svo_pos.is_none() {
                 if !overridden_leaves.contains_key(leaf_id) {
-                    world_svo.remove(*leaf_id);
+                    world_svo.remove_leaf(*leaf_id);
                 }
                 overridden_leaves.remove(leaf_id);
                 removed.insert(*chunk_pos);
@@ -122,9 +122,9 @@ impl Svo {
             let new_svo_pos = new_svo_pos.unwrap();
 
             let (new_leaf_id, old_value) = if let Some(value) = overridden_leaves.remove(leaf_id) {
-                world_svo.set(new_svo_pos, value)
+                world_svo.set_leaf(new_svo_pos, value)
             } else {
-                world_svo.replace(new_svo_pos, *leaf_id)
+                world_svo.move_leaf(*leaf_id, new_svo_pos)
             };
 
             *leaf_id = new_leaf_id;
@@ -150,7 +150,7 @@ impl Svo {
                 continue;
             }
 
-            let (id, _) = self.world_svo.set(svo_pos.unwrap(), result.value);
+            let (id, _) = self.world_svo.set_leaf(svo_pos.unwrap(), result.value);
             self.leaf_ids.insert(result.pos, id);
             self.has_changed = true;
         }
@@ -188,13 +188,13 @@ mod svo_tests {
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
-        let (c0, _) = world_svo.set(Position(0, 1, 1), 1u32);
+        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32);
         leaf_ids.insert(ChunkPos::new(-1, 0, 0), c0);
 
-        let (c1, _) = world_svo.set(Position(1, 1, 1), 2u32);
+        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32);
         leaf_ids.insert(ChunkPos::new(0, 0, 0), c1);
 
-        let (c2, _) = world_svo.set(Position(2, 1, 1), 3u32);
+        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
         assert_eq!(leaf_ids, HashMap::from([
@@ -202,9 +202,9 @@ mod svo_tests {
             (ChunkPos::new(0, 0, 0), c1),
             (ChunkPos::new(1, 0, 0), c2),
         ]));
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), Some(&1u32));
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), Some(&2u32));
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), Some(&3u32));
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), Some(&1u32));
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), Some(&2u32));
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), Some(&3u32));
 
         // shift one in x+
         let cs = SvoCoordSpace::new(ChunkPos::new(1, 0, 0), 1);
@@ -213,9 +213,9 @@ mod svo_tests {
             (ChunkPos::new(0, 0, 0), c0),
             (ChunkPos::new(1, 0, 0), c1),
         ]));
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), Some(&2u32));
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), Some(&3u32));
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), Some(&2u32));
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), Some(&3u32));
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), None);
 
         // shift one in x+
         let cs = SvoCoordSpace::new(ChunkPos::new(2, 0, 0), 1);
@@ -223,17 +223,17 @@ mod svo_tests {
         assert_eq!(leaf_ids, HashMap::from([
             (ChunkPos::new(1, 0, 0), c0),
         ]));
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), Some(&3u32));
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), Some(&3u32));
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), None);
 
         // shift one in x+
         let cs = SvoCoordSpace::new(ChunkPos::new(3, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
         assert_eq!(leaf_ids, HashMap::new());
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), None);
     }
 
     /// Tests that chunk shifting in negative x direction works.
@@ -243,13 +243,13 @@ mod svo_tests {
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
-        let (c0, _) = world_svo.set(Position(0, 1, 1), 1u32);
+        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32);
         leaf_ids.insert(ChunkPos::new(-1, 0, 0), c0);
 
-        let (c1, _) = world_svo.set(Position(1, 1, 1), 2u32);
+        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32);
         leaf_ids.insert(ChunkPos::new(0, 0, 0), c1);
 
-        let (c2, _) = world_svo.set(Position(2, 1, 1), 3u32);
+        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
         assert_eq!(leaf_ids, HashMap::from([
@@ -257,9 +257,9 @@ mod svo_tests {
             (ChunkPos::new(0, 0, 0), c1),
             (ChunkPos::new(1, 0, 0), c2),
         ]));
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), Some(&1u32));
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), Some(&2u32));
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), Some(&3u32));
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), Some(&1u32));
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), Some(&2u32));
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), Some(&3u32));
 
         // shift one in x-
         let cs = SvoCoordSpace::new(ChunkPos::new(-1, 0, 0), 1);
@@ -268,9 +268,9 @@ mod svo_tests {
             (ChunkPos::new(-1, 0, 0), c1),
             (ChunkPos::new(0, 0, 0), c2),
         ]));
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), Some(&1u32));
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), Some(&2u32));
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), Some(&1u32));
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), Some(&2u32));
 
         // shift one in x-
         let cs = SvoCoordSpace::new(ChunkPos::new(-2, 0, 0), 1);
@@ -278,17 +278,17 @@ mod svo_tests {
         assert_eq!(leaf_ids, HashMap::from([
             (ChunkPos::new(-1, 0, 0), c2),
         ]));
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), Some(&1u32));
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), Some(&1u32));
 
         // shift one in x-
         let cs = SvoCoordSpace::new(ChunkPos::new(-3, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
         assert_eq!(leaf_ids, HashMap::new());
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), None);
     }
 
     /// Tests that chunk shifting removes all out of bounds chunks, even if a larger leap in the
@@ -299,26 +299,26 @@ mod svo_tests {
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
-        let (c0, _) = world_svo.set(Position(0, 1, 1), 1u32);
+        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32);
         leaf_ids.insert(ChunkPos::new(-1, 0, 0), c0);
 
-        let (c1, _) = world_svo.set(Position(1, 1, 1), 2u32);
+        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32);
         leaf_ids.insert(ChunkPos::new(0, 0, 0), c1);
 
-        let (c2, _) = world_svo.set(Position(2, 1, 1), 3u32);
+        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), Some(&1u32));
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), Some(&2u32));
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), Some(&3u32));
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), Some(&1u32));
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), Some(&2u32));
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), Some(&3u32));
 
         // shift x out of range
         let cs = SvoCoordSpace::new(ChunkPos::new(3, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
         assert_eq!(leaf_ids, HashMap::new());
-        assert_eq!(world_svo.get_at_pos(Position(0, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(1, 1, 1)), None);
-        assert_eq!(world_svo.get_at_pos(Position(2, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), None);
+        assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), None);
     }
 }
 

@@ -19,9 +19,9 @@ impl Position {
         (self.0 + self.1 * 2 + self.2 * 4) as u8
     }
 
-    fn required_depth(&self) -> u32 {
+    fn required_depth(&self) -> u8 {
         let depth = max(1, max(self.0, max(self.1, self.2)));
-        (depth as f32).log2().floor() as u32 + 1
+        (depth as f32).log2().floor() as u8 + 1
     }
 }
 
@@ -54,7 +54,7 @@ pub struct Octree<T> {
     pub(super) root: Option<OctantId>,
     pub(super) octants: Vec<Octant<T>>,
     free_list: Vec<OctantId>,
-    depth: u32,
+    depth: u8,
 }
 
 impl<T> Octree<T> {
@@ -62,7 +62,7 @@ impl<T> Octree<T> {
         Octree { root: None, octants: Vec::new(), free_list: Vec::new(), depth: 0 }
     }
 
-    pub fn with_size(size: u32) -> Octree<T> {
+    pub fn with_size(size: u8) -> Octree<T> {
         let mut octree = Self::new();
         octree.expand_to(size);
         octree
@@ -241,7 +241,7 @@ impl<T> Octree<T> {
 
     /// Expands the octant's depth by the given value. If necessary, the existing root octant
     /// is wrapped in new parent octants.
-    pub fn expand(&mut self, by: u32) {
+    pub fn expand(&mut self, by: u8) {
         for _ in 0..by {
             let new_root_id = self.new_octant(None);
 
@@ -258,7 +258,7 @@ impl<T> Octree<T> {
 
     /// Expands the octant's depth to by equal to the given value. If the depth is already larger,
     /// nothing happens. For shrinking empty octant space, [`Octree::compact`] can be used.
-    pub fn expand_to(&mut self, to: u32) {
+    pub fn expand_to(&mut self, to: u8) {
         if self.depth > to {
             return;
         }

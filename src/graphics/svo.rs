@@ -53,7 +53,7 @@ pub struct Stats {
     /// size_bytes is the size of the CPU side SVO buffer that is synced to the GPU.
     pub size_bytes: usize,
     /// depth is the number of octant divisions the SVO has, until the leaf node is encoded.
-    pub depth: u32,
+    pub depth: u8,
 }
 
 pub struct RenderParams {
@@ -226,7 +226,7 @@ mod svo_tests {
 
         let chunk = SerializedChunk::new(BorrowedChunk::from(chunk));
         let mut svo = world::svo::Svo::<SerializedChunk>::new();
-        svo.set(Position(0, 0, 0), chunk);
+        svo.set_leaf(Position(0, 0, 0), chunk);
         svo.serialize();
         svo
     }

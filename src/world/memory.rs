@@ -152,7 +152,7 @@ pub struct ChunkStorageAllocator {
 impl ChunkStorageAllocator {
     pub fn new() -> ChunkStorageAllocator {
         let allocator = Allocator::new(
-            Box::new(|| ChunkStorage::with_size(32f32.log2() as u32)),
+            Box::new(|| ChunkStorage::with_size(32f32.log2() as u8)),
             Some(Box::new(|storage| storage.reset())),
         );
         ChunkStorageAllocator { allocator }
