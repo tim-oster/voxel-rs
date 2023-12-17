@@ -1,35 +1,16 @@
 # voxel-rs
 
-## Package Overview
-
-### Currently
+## Internal Module Dependencies
 
 ```mermaid
 flowchart LR
-    main(main.rs) --> core(core)
-    main --> graphics(graphics)
-    main --> systems(systems)
-    main --> world(world)
-
+    main(main.rs) --> game
+    game --> core
+    game --> graphics
+    game --> systems
+    game --> world
     graphics --> core
-
     graphics --> world
-
-    systems --> graphics
-    systems --> world
-```
-
-### Plan
-
-```mermaid
-flowchart LR
-    main(main.rs) --> systems
-    
-    graphics --> core
-    
-    graphics --> world
-    
-    systems --> core
     systems --> graphics
     systems --> world
 ```
