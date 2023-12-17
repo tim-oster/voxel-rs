@@ -128,14 +128,14 @@ impl Svo {
     }
 
     /// Writes all changes from the given `svo` to the GPU buffer.
-    pub fn update(&mut self, svo: &world::svo::Svo<SerializedChunk>) {
+    pub fn update(&mut self, svo: &mut world::svo::Svo<SerializedChunk>) {
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             self.world_buffer.write(max_depth_exp.to_bits());
 
             // wait for last draw call to finish so that updates and draws do not race and produce temporary "holes" in the world
             self.render_fence.borrow().wait();
-            svo.write_changes_to(self.world_buffer.offset(1));
+            svo.write_changes_to(self.world_buffer.offset(1), true);
 
             self.stats = Stats {
                 size_bytes: svo.size_in_bytes(),
@@ -258,7 +258,7 @@ mod svo_tests {
     fn render() {
         let (width, height) = (640, 490);
         let _context = GlContext::new_headless(width, height); // do not drop context
-        let world_svo = create_world_svo(|chunk| {
+        let mut world_svo = create_world_svo(|chunk| {
             for x in 0..5 {
                 for z in 0..5 {
                     chunk.set_block(x, 0, z, 1);
@@ -277,7 +277,7 @@ mod svo_tests {
         });
 
         let mut svo = Svo::new(create_voxel_registry());
-        svo.update(&world_svo);
+        svo.update(&mut world_svo);
 
         let fb = Framebuffer::new(width as i32, height as i32);
 
@@ -310,13 +310,13 @@ mod svo_tests {
     #[test]
     fn raycast() {
         let _context = GlContext::new_headless(1, 1); // do not drop context
-        let world_svo = create_world_svo(|chunk| {
+        let mut world_svo = create_world_svo(|chunk| {
             chunk.set_block(0, 0, 0, 1);
             chunk.set_block(1, 0, 0, 1);
         });
 
         let mut svo = Svo::new(create_voxel_registry());
-        svo.update(&world_svo);
+        svo.update(&mut world_svo);
 
         let mut batch = PickerBatch::new();
         batch.add_ray(Point3::new(0.5, 1.5, 0.5), Vector3::new(0.0, -1.0, 0.0), 1.0);

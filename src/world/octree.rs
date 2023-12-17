@@ -5,6 +5,7 @@ use cgmath::num_traits::Pow;
 
 pub type OctantId = u32;
 
+/// LeafId describes a leaf's position inside the octree by storing the child's `idx` inside its `parent` octant.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct LeafId {
     pub parent: OctantId,

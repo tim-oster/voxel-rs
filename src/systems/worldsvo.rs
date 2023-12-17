@@ -104,8 +104,7 @@ impl Svo {
 
         self.has_changed = false;
         self.world_svo.serialize();
-        self.graphics_svo.update(&self.world_svo);
-        self.world_svo.reset_changes();
+        self.graphics_svo.update(&mut self.world_svo);
 
         chunks
     }

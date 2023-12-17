@@ -76,8 +76,7 @@ mod tests {
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             world_buffer.write(max_depth_exp.to_bits());
-            svo.write_changes_to(world_buffer.offset(1));
-            svo.reset_changes();
+            svo.write_changes_to(world_buffer.offset(1), true);
         }
         world_buffer
     }
