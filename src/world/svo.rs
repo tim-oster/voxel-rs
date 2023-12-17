@@ -138,9 +138,8 @@ impl<T: SvoSerializable> Svo<T> {
 
     fn serialize_root(&self, dst: &mut Vec<u32>) -> SerializationResult {
         let root_id = self.octree.root.unwrap();
-        let root = &self.octree.octants[root_id as usize];
 
-        serialize_octant(&self.octree, root_id, root, dst, 0, &|params| {
+        serialize_octant(&self.octree, root_id, dst, 0, &|params| {
             let uid = params.content.unique_id();
             let info = self.leaf_info.get(&uid);
             if info.is_none() {
@@ -244,8 +243,7 @@ impl Octree<BlockId> {
         }
 
         let root_id = self.root.unwrap();
-        let root = &self.octants[root_id as usize];
-        serialize_octant(self, root_id, root, dst, lod, &|params| {
+        serialize_octant(self, root_id, dst, lod, &|params| {
             params.result.leaf_mask |= 1 << params.idx;
             params.dst[4 + params.idx] = *params.content as u32;
             params.result.depth = 1;
@@ -268,7 +266,7 @@ impl SerializedChunk {
 
         // TODO use memory pool
         let mut buffer = Vec::with_capacity(56172); // size of a full chunk
-        let result = chunk.storage.as_ref().unwrap().serialize(&mut buffer, chunk.lod);
+        let result = chunk.storage.as_ref().unwrap().serialize(&mut buffer, lod);
         if result.depth > 0 {
             return SerializedChunk { pos, lod, borrowed_chunk: Some(chunk), buffer: Some(buffer), result };
         }
@@ -284,8 +282,7 @@ struct ChildEncodeParams<'a, T> {
     content: &'a T,
 }
 
-// TODO pass both octant and octant_id ?
-fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, octant: &Octant<T>, dst: &mut Vec<u32>, lod: u8, child_encoder: &F) -> SerializationResult
+fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, dst: &mut Vec<u32>, lod: u8, child_encoder: &F) -> SerializationResult
     where F: Fn(ChildEncodeParams<T>) {
     let start_offset = dst.len();
 
@@ -298,6 +295,7 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, octant: &Octa
         depth: 0,
     };
 
+    let octant = &octree.octants[octant_id as usize];
     for (idx, child) in octant.children.iter().enumerate() {
         if child.is_none() {
             continue;
@@ -307,7 +305,7 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, octant: &Octa
 
         if child.is_leaf() || lod == 1 {
             let mut content = child.get_leaf_value();
-            if child.is_octant() {
+            if content.is_none() && child.is_octant() {
                 let child_id = child.get_octant_value().unwrap();
                 content = breadth_first(&octree, &octree.octants[child_id as usize]);
             }
@@ -327,7 +325,7 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, octant: &Octa
             let child_id = child.get_octant_value().unwrap();
             let child_lod = if lod > 0 { lod - 1 } else { 0 };
             let child_offset = (dst.len() - start_offset) as u32;
-            let child_result = serialize_octant(octree, child_id, &octree.octants[child_id as usize], dst, child_lod, child_encoder);
+            let child_result = serialize_octant(octree, child_id, dst, child_lod, child_encoder);
 
             let mut mask = ((child_result.child_mask as u32) << 8) | child_result.leaf_mask as u32;
             if (idx % 2) != 0 {
@@ -347,7 +345,7 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, octant: &Octa
 
 fn breadth_first<'a, T>(octree: &'a Octree<T>, parent: &'a Octant<T>) -> Option<&'a T> {
     for child in parent.children.iter() {
-        if child.is_none() {
+        if !child.is_leaf() {
             continue;
         }
         let content = child.get_leaf_value();
@@ -665,6 +663,375 @@ mod svo_tests {
             ],
             expected,
         ].concat());
+    }
+
+    #[test]
+    fn serialize_with_lod() {
+        let mut octree = Octree::new();
+        octree.set_leaf(Position(31, 0, 0), 1 as BlockId);
+        octree.set_leaf(Position(0, 31, 0), 2 as BlockId);
+        octree.set_leaf(Position(0, 0, 31), 3 as BlockId);
+        octree.expand_to(5);
+        octree.compact();
+
+        // LOD 5
+        let mut buffer = Vec::new();
+        let result = octree.serialize(&mut buffer, 5);
+        assert_eq!(buffer, vec![
+            // core octant header
+            (2 << 8) << 16,
+            4 << 8,
+            16 << 8,
+            0,
+            // core octant body
+            0, (1 << 31) | 7, (1 << 31) | (6 + 4 * 12), 0,
+            (1 << 31) | (4 + 8 * 12), 0, 0, 0,
+
+            // subtree for (1,0,0)
+            // header 1
+            2 << 8 << 16,
+            0,
+            0,
+            0,
+            // body 1
+            0, (1 << 31) | 7, 0, 0,
+            0, 0, 0, 0,
+            // header 2
+            2 << 8 << 16,
+            0,
+            0,
+            0,
+            // body 2
+            0, (1 << 31) | 7, 0, 0,
+            0, 0, 0, 0,
+            // header 3
+            ((2 << 8) | 2) << 16,
+            0,
+            0,
+            0,
+            // body 3
+            0, (1 << 31) | 7, 0, 0,
+            0, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 1, 0, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,1,0)
+            // header 1
+            0,
+            4 << 8,
+            0,
+            0,
+            // body 1
+            0, 0, (1 << 31) | 6, 0,
+            0, 0, 0, 0,
+            // header 2
+            0,
+            4 << 8,
+            0,
+            0,
+            // body 2
+            0, 0, (1 << 31) | 6, 0,
+            0, 0, 0, 0,
+            // header 3
+            0,
+            4 << 8 | 4,
+            0,
+            0,
+            // body 3
+            0, 0, (1 << 31) | 6, 0,
+            0, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 2, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,0,1)
+            // header 1
+            0,
+            0,
+            16 << 8,
+            0,
+            // body 1
+            0, 0, 0, 0,
+            (1 << 31) | 4, 0, 0, 0,
+            // header 2
+            0,
+            0,
+            16 << 8,
+            0,
+            // body 2
+            0, 0, 0, 0,
+            (1 << 31) | 4, 0, 0, 0,
+            // header 3
+            0,
+            0,
+            16 << 8 | 16,
+            0,
+            // body 3
+            0, 0, 0, 0,
+            (1 << 31) | 4, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 0, 0,
+            3, 0, 0, 0,
+        ]);
+        assert_eq!(result, SerializationResult {
+            child_mask: 2 | 4 | 16,
+            leaf_mask: 0,
+            depth: 5,
+        });
+
+        // LOD 4
+        let mut buffer = Vec::new();
+        let result = octree.serialize(&mut buffer, 4);
+        assert_eq!(buffer, vec![
+            // core octant header
+            (2 << 8) << 16,
+            4 << 8,
+            16 << 8,
+            0,
+            // core octant body
+            0, (1 << 31) | 7, (1 << 31) | (6 + 3 * 12), 0,
+            (1 << 31) | (4 + 6 * 12), 0, 0, 0,
+
+            // subtree for (1,0,0)
+            // header 1
+            2 << 8 << 16,
+            0,
+            0,
+            0,
+            // body 1
+            0, (1 << 31) | 7, 0, 0,
+            0, 0, 0, 0,
+            // header 2
+            ((2 << 8) | 2) << 16,
+            0,
+            0,
+            0,
+            // body 2
+            0, (1 << 31) | 7, 0, 0,
+            0, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 1, 0, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,1,0)
+            // header 1
+            0,
+            4 << 8,
+            0,
+            0,
+            // body 1
+            0, 0, (1 << 31) | 6, 0,
+            0, 0, 0, 0,
+            // header 2
+            0,
+            4 << 8 | 4,
+            0,
+            0,
+            // body 2
+            0, 0, (1 << 31) | 6, 0,
+            0, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 2, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,0,1)
+            // header 1
+            0,
+            0,
+            16 << 8,
+            0,
+            // body 1
+            0, 0, 0, 0,
+            (1 << 31) | 4, 0, 0, 0,
+            // header 2
+            0,
+            0,
+            16 << 8 | 16,
+            0,
+            // body 2
+            0, 0, 0, 0,
+            (1 << 31) | 4, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 0, 0,
+            3, 0, 0, 0,
+        ]);
+        assert_eq!(result, SerializationResult {
+            child_mask: 2 | 4 | 16,
+            leaf_mask: 0,
+            depth: 4,
+        });
+
+        // LOD 3
+        let mut buffer = Vec::new();
+        let result = octree.serialize(&mut buffer, 3);
+        assert_eq!(buffer, vec![
+            // core octant header
+            (2 << 8) << 16,
+            4 << 8,
+            16 << 8,
+            0,
+            // core octant body
+            0, (1 << 31) | 7, (1 << 31) | (6 + 2 * 12), 0,
+            (1 << 31) | (4 + 4 * 12), 0, 0, 0,
+
+            // subtree for (1,0,0)
+            // header 1
+            ((2 << 8) | 2) << 16,
+            0,
+            0,
+            0,
+            // body 1
+            0, (1 << 31) | 7, 0, 0,
+            0, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 1, 0, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,1,0)
+            // header 1
+            0,
+            4 << 8 | 4,
+            0,
+            0,
+            // body 1
+            0, 0, (1 << 31) | 6, 0,
+            0, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 2, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,0,1)
+            // header 1
+            0,
+            0,
+            16 << 8 | 16,
+            0,
+            // body 1
+            0, 0, 0, 0,
+            (1 << 31) | 4, 0, 0, 0,
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 0, 0,
+            3, 0, 0, 0,
+        ]);
+        assert_eq!(result, SerializationResult {
+            child_mask: 2 | 4 | 16,
+            leaf_mask: 0,
+            depth: 3,
+        });
+
+        // LOD 2
+        let mut buffer = Vec::new();
+        let result = octree.serialize(&mut buffer, 2);
+        assert_eq!(buffer, vec![
+            // core octant header
+            ((2 << 8) | 2) << 16,
+            4 << 8 | 4,
+            16 << 8 | 16,
+            0,
+            // core octant body
+            0, (1 << 31) | 7, (1 << 31) | (6 + 1 * 12), 0,
+            (1 << 31) | (4 + 2 * 12), 0, 0, 0,
+
+            // subtree for (1,0,0)
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 1, 0, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,1,0)
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 2, 0,
+            0, 0, 0, 0,
+
+            // subtree for (0,0,1)
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 0, 0, 0,
+            3, 0, 0, 0,
+        ]);
+        assert_eq!(result, SerializationResult {
+            child_mask: 2 | 4 | 16,
+            leaf_mask: 0,
+            depth: 2,
+        });
+
+        // LOD 1
+        let mut buffer = Vec::new();
+        let result = octree.serialize(&mut buffer, 1);
+        assert_eq!(buffer, vec![
+            // leaf header
+            0,
+            0,
+            0,
+            0,
+            // leaf body
+            0, 1, 2, 0,
+            3, 0, 0, 0,
+        ]);
+        assert_eq!(result, SerializationResult {
+            child_mask: 2 | 4 | 16,
+            leaf_mask: 2 | 4 | 16,
+            depth: 1,
+        });
     }
 }
 
