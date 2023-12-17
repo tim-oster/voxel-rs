@@ -2,10 +2,30 @@ use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ptr;
+use std::sync::Arc;
 
 use crate::world::chunk::{BlockId, ChunkPos};
+use crate::world::memory::{Allocated, Allocator};
 use crate::world::octree::{LeafId, Octant, OctantId, Octree, Position};
 use crate::world::world::BorrowedChunk;
+
+pub struct ChunkBuffer {
+    data: Vec<u32>,
+}
+
+impl ChunkBuffer {
+    pub fn new() -> ChunkBuffer {
+        // It is difficult to pre-allocate memory here as chunk sizes are random/depend heavily on the world generation
+        // mechanism. The naive approach is to allocate the maximum amount of memory, but that is too wasteful. Hence,
+        // the memory will be expanded a couple times until it is sufficient for most chunks and performance can
+        // stabilise.
+        ChunkBuffer { data: Vec::new() }
+    }
+
+    pub fn reset(&mut self) {
+        self.data.clear();
+    }
+}
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 enum OctantChange {
@@ -32,6 +52,9 @@ pub struct Svo<T: SvoSerializable> {
     buffer: SvoBuffer,
     leaf_info: HashMap<u64, LeafInfo>,
     root_octant_info: Option<LeafInfo>,
+
+    /// Reusable buffer for serializing octants data to be copied into actual SvoBuffer.
+    tmp_octant_buffer: Option<ChunkBuffer>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -54,6 +77,7 @@ impl<T: SvoSerializable> Svo<T> {
             buffer: SvoBuffer::new(capacity),
             leaf_info: HashMap::new(),
             root_octant_info: None,
+            tmp_octant_buffer: Some(ChunkBuffer::new()),
         }
     }
 
@@ -97,19 +121,20 @@ impl<T: SvoSerializable> Svo<T> {
             return;
         }
 
+        // move tmp buffer into scope
+        let mut tmp_buffer = self.tmp_octant_buffer.take().unwrap();
+
         // rebuild & remove all changed leaf octants
-        // TODO reuse? calculate accurate size
-        let mut octant_buffer = Vec::with_capacity(56172); // size of a full chunk
         let mut changes = self.change_set.drain().collect::<Vec<OctantChange>>();
         for change in changes {
             match change {
                 OctantChange::Add(id, leaf_id) => {
                     let child = &self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
                     let content = child.get_leaf_value().unwrap();
-                    let result = content.serialize(&mut octant_buffer, 0);
+                    let result = content.serialize(&mut tmp_buffer.data, 0);
                     if result.depth > 0 {
-                        let offset = self.buffer.insert(id, &octant_buffer);
-                        octant_buffer.clear();
+                        let offset = self.buffer.insert(id, &tmp_buffer);
+                        tmp_buffer.reset();
 
                         self.leaf_info.insert(id, LeafInfo { buf_offset: offset, serialization: result });
                     }
@@ -122,15 +147,19 @@ impl<T: SvoSerializable> Svo<T> {
         }
 
         // rebuild root octree
-        let result = self.serialize_root(&mut octant_buffer);
-        let offset = self.buffer.insert(u64::MAX, &octant_buffer);
+        let result = self.serialize_root(&mut tmp_buffer);
+        let offset = self.buffer.insert(u64::MAX, &tmp_buffer);
+        tmp_buffer.reset();
         self.root_octant_info = Some(LeafInfo { buf_offset: offset, serialization: result });
+
+        // return tmp buffer for reuse
+        self.tmp_octant_buffer = Some(tmp_buffer);
     }
 
-    fn serialize_root(&self, dst: &mut Vec<u32>) -> SerializationResult {
+    fn serialize_root(&self, dst: &mut ChunkBuffer) -> SerializationResult {
         let root_id = self.octree.root.unwrap();
 
-        serialize_octant(&self.octree, root_id, dst, 0, &|params| {
+        serialize_octant(&self.octree, root_id, &mut dst.data, 0, &|params| {
             let uid = params.content.unique_id();
             let info = self.leaf_info.get(&uid);
             if info.is_none() {
@@ -212,13 +241,13 @@ pub struct SerializedChunk {
     pub pos: ChunkPos,
     pub lod: u8,
     pub borrowed_chunk: Option<BorrowedChunk>,
-    buffer: Option<Vec<u32>>,
+    buffer: Option<Allocated<ChunkBuffer>>,
     result: SerializationResult,
     pos_hash: u64,
 }
 
 impl SerializedChunk {
-    pub fn new(chunk: BorrowedChunk) -> SerializedChunk {
+    pub fn new(chunk: BorrowedChunk, alloc: Arc<Allocator<ChunkBuffer>>) -> SerializedChunk {
         let pos = chunk.pos;
         let lod = chunk.lod;
 
@@ -226,9 +255,8 @@ impl SerializedChunk {
         pos.hash(&mut hasher);
         let pos_hash = hasher.finish();
 
-        // TODO use memory pool
-        let mut buffer = Vec::with_capacity(56172); // size of a full chunk
-        let result = chunk.storage.as_ref().unwrap().serialize(&mut buffer, lod);
+        let mut buffer = alloc.allocate();
+        let result = chunk.storage.as_ref().unwrap().serialize(&mut buffer.data, lod);
         if result.depth > 0 {
             return SerializedChunk { pos, lod, borrowed_chunk: Some(chunk), buffer: Some(buffer), result, pos_hash };
         }
@@ -243,9 +271,8 @@ impl SvoSerializable for SerializedChunk {
 
     fn serialize(&self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
         if self.buffer.is_some() {
-            // TODO is this fast enough?
-            // TODO how to free memory after swap
-            dst.extend(self.buffer.as_ref().unwrap());
+            let buffer = self.buffer.as_ref().unwrap();
+            dst.extend(buffer.data.iter());
         }
         self.result
     }
@@ -363,8 +390,9 @@ mod svo_tests {
     use std::collections::HashMap;
 
     use crate::world::chunk::{BlockId, ChunkPos};
+    use crate::world::memory::Allocator;
     use crate::world::octree::{LeafId, Octree, Position};
-    use crate::world::svo::{LeafInfo, Range, SerializationResult, SerializedChunk, Svo, SvoBuffer};
+    use crate::world::svo::{ChunkBuffer, LeafInfo, Range, SerializationResult, SerializedChunk, Svo, SvoBuffer};
 
     #[test]
     fn serialize() {
@@ -375,8 +403,9 @@ mod svo_tests {
         octree.expand_to(5);
         octree.compact();
 
-        let mut buffer = Vec::new();
-        let result = octree.serialize(&mut buffer, 0);
+        let alloc = Allocator::new(Box::new(|| ChunkBuffer::new()), None);
+        let mut buffer = alloc.allocate();
+        let result = octree.serialize(&mut buffer.data, 0);
         let sc = SerializedChunk {
             pos: ChunkPos::new(1, 0, 0),
             lod: 0,
@@ -1039,7 +1068,7 @@ pub struct Range {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct SvoBuffer {
+struct SvoBuffer {
     bytes: Vec<u32>,
     free_ranges: Vec<Range>,
     updated_ranges: Vec<Range>,
@@ -1070,11 +1099,11 @@ impl SvoBuffer {
         self.octant_to_range.clear();
     }
 
-    fn insert(&mut self, id: u64, buf: &Vec<u32>) -> usize {
+    fn insert(&mut self, id: u64, buf: &ChunkBuffer) -> usize {
         self.remove(id);
 
         let mut ptr = self.bytes.len();
-        let length = buf.len();
+        let length = buf.data.len();
 
         if let Some(pos) = self.free_ranges.iter().position(|x| length <= x.length) {
             let range = &mut self.free_ranges[pos];
@@ -1089,10 +1118,10 @@ impl SvoBuffer {
             }
 
             unsafe {
-                ptr::copy(buf.as_ptr(), self.bytes.as_mut_ptr().offset(ptr as isize), length);
+                ptr::copy(buf.data.as_ptr(), self.bytes.as_mut_ptr().offset(ptr as isize), length);
             }
         } else {
-            self.bytes.extend(buf);
+            self.bytes.extend(buf.data.iter());
         }
 
         self.octant_to_range.insert(id, Range { start: ptr, length });
@@ -1139,7 +1168,7 @@ impl SvoBuffer {
 mod svo_buffer_tests {
     use std::collections::HashMap;
 
-    use crate::world::svo::{Range, SvoBuffer};
+    use crate::world::svo::{ChunkBuffer, Range, SvoBuffer};
 
     #[test]
     fn buffer_insert_remove() {
@@ -1154,9 +1183,9 @@ mod svo_buffer_tests {
         });
 
         // insert data until initial capacity is full
-        buffer.insert(1, &vec![0, 1, 2, 3, 4]);
-        buffer.insert(2, &vec![5, 6]);
-        buffer.insert(3, &vec![7, 8, 9]);
+        buffer.insert(1, &ChunkBuffer { data: vec![0, 1, 2, 3, 4] });
+        buffer.insert(2, &ChunkBuffer { data: vec![5, 6] });
+        buffer.insert(3, &ChunkBuffer { data: vec![7, 8, 9] });
 
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
@@ -1170,7 +1199,7 @@ mod svo_buffer_tests {
         });
 
         // exceed initial capacity
-        buffer.insert(4, &vec![10]);
+        buffer.insert(4, &ChunkBuffer { data: vec![10] });
 
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
@@ -1185,7 +1214,7 @@ mod svo_buffer_tests {
         });
 
         // replace already existing data
-        buffer.insert(3, &vec![11]);
+        buffer.insert(3, &ChunkBuffer { data: vec![11] });
 
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 11, 8, 9, 10],
@@ -1214,7 +1243,7 @@ mod svo_buffer_tests {
         });
 
         // insert into free space
-        buffer.insert(5, &vec![12, 13, 14]);
+        buffer.insert(5, &ChunkBuffer { data: vec![12, 13, 14] });
 
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 1, 2, 3, 4, 12, 13, 14, 8, 9, 10],

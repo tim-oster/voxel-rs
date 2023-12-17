@@ -204,6 +204,8 @@ impl Svo {
 
 #[cfg(test)]
 mod svo_tests {
+    use std::sync::Arc;
+
     use cgmath::{InnerSpace, Point3, Vector3};
 
     use crate::{assert_float_eq, gl_assert_no_error, world};
@@ -213,18 +215,20 @@ mod svo_tests {
     use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
     use crate::world::chunk::{Chunk, ChunkPos};
-    use crate::world::memory::ChunkStorageAllocator;
+    use crate::world::memory::{Allocator, ChunkStorageAllocator};
     use crate::world::octree::Position;
-    use crate::world::svo::SerializedChunk;
+    use crate::world::svo::{ChunkBuffer, SerializedChunk};
     use crate::world::world::BorrowedChunk;
 
     fn create_world_svo<F>(builder: F) -> world::svo::Svo<SerializedChunk>
         where F: FnOnce(&mut Chunk) {
-        let alloc = ChunkStorageAllocator::new();
-        let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, alloc.allocate());
+        let storage_alloc = ChunkStorageAllocator::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, storage_alloc.allocate());
         builder(&mut chunk);
 
-        let chunk = SerializedChunk::new(BorrowedChunk::from(chunk));
+        let buffer_alloc = Allocator::new(Box::new(|| ChunkBuffer::new()), None);
+
+        let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), Arc::new(buffer_alloc));
         let mut svo = world::svo::Svo::<SerializedChunk>::new();
         svo.set_leaf(Position(0, 0, 0), chunk);
         svo.serialize();

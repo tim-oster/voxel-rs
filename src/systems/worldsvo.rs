@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::Arc;
 
 use cgmath::Point3;
 
@@ -9,8 +10,9 @@ use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
 use crate::systems::physics::Raycaster;
 use crate::world;
 use crate::world::chunk::{BlockPos, ChunkPos};
+use crate::world::memory::Allocator;
 use crate::world::octree::LeafId;
-use crate::world::svo::{SerializedChunk, SvoSerializable};
+use crate::world::svo::{ChunkBuffer, SerializedChunk, SvoSerializable};
 use crate::world::world::BorrowedChunk;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`world::chunk::Chunk`]s.
@@ -28,6 +30,7 @@ pub struct Svo {
 
     world_svo: world::Svo<SerializedChunk>,
     graphics_svo: graphics::Svo,
+    chunk_buffer_allocator: Arc<Allocator<ChunkBuffer>>,
 
     leaf_ids: HashMap<ChunkPos, LeafId>,
     has_changed: bool,
@@ -36,10 +39,15 @@ pub struct Svo {
 
 impl Svo {
     pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo, render_distance: u32) -> Svo {
+        let chunk_buffer_alloc = Allocator::new(
+            Box::new(|| ChunkBuffer::new()),
+            Some(Box::new(|buffer| buffer.reset())),
+        );
         Svo {
             processor: ChunkProcessor::new(job_system),
             world_svo: world::Svo::new(),
             graphics_svo,
+            chunk_buffer_allocator: Arc::new(chunk_buffer_alloc),
             leaf_ids: HashMap::new(),
             has_changed: false,
             svo_coord_space: SvoCoordSpace {
@@ -52,7 +60,8 @@ impl Svo {
     /// Enqueues the borrowed chunk to be serialized into the GPU SVO structure. All moved chunk
     /// ownerships can be reclaimed by calling [`Svo::update`].
     pub fn set_chunk(&mut self, chunk: BorrowedChunk) {
-        self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(chunk));
+        let alloc = self.chunk_buffer_allocator.clone();
+        self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(chunk, alloc));
     }
 
     pub fn remove_chunk(&mut self, pos: &ChunkPos) {

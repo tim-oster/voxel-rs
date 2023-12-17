@@ -1,5 +1,7 @@
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use cgmath::{InnerSpace, Point2, Point3, Vector3, Vector4};
 
     use crate::assert_float_eq;
@@ -13,9 +15,9 @@ mod tests {
     use crate::graphics::svo_registry::MaterialInstance;
     use crate::graphics::texture_array::{TextureArray, TextureArrayBuilder, TextureArrayError};
     use crate::world::chunk::{Chunk, ChunkPos};
-    use crate::world::memory::ChunkStorageAllocator;
+    use crate::world::memory::{Allocator, ChunkStorageAllocator};
     use crate::world::octree::Position;
-    use crate::world::svo::{SerializedChunk, Svo};
+    use crate::world::svo::{ChunkBuffer, SerializedChunk, Svo};
     use crate::world::world::BorrowedChunk;
 
     #[repr(C)]
@@ -59,11 +61,13 @@ mod tests {
 
     fn create_test_world<F>(svo_pos: Position, builder: F) -> MappedBuffer<u32>
         where F: FnOnce(&mut Chunk) {
-        let alloc = ChunkStorageAllocator::new();
-        let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, alloc.allocate());
+        let storage_alloc = ChunkStorageAllocator::new();
+        let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, storage_alloc.allocate());
         builder(&mut chunk);
 
-        let chunk = SerializedChunk::new(BorrowedChunk::from(chunk));
+        let buffer_alloc = Allocator::new(Box::new(|| ChunkBuffer::new()), None);
+
+        let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), Arc::new(buffer_alloc));
         let mut svo = Svo::<SerializedChunk>::new();
         svo.set_leaf(svo_pos, chunk);
         svo.serialize();
