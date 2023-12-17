@@ -233,7 +233,7 @@ mod job_system_tests {
         wait(signal);
 
         let counter = Arc::new(AtomicI32::new(0));
-        for i in 0..5 {
+        for _ in 0..5 {
             let c = counter.clone();
             js.push(false, move || { c.fetch_add(1, Ordering::Relaxed); });
         }

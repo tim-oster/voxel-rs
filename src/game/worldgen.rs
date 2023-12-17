@@ -73,7 +73,7 @@ impl Noise {
 
 #[cfg(test)]
 mod noise_tests {
-    use noise::{NoiseFn, Perlin, Seedable};
+    use noise::{Perlin, Seedable};
 
     use crate::assert_float_eq;
     use crate::game::worldgen::{Noise, SplinePoint};

@@ -1,8 +1,7 @@
 use std::cmp;
 use std::collections::HashMap;
-use std::ops::Add;
 
-use cgmath::{InnerSpace, Point3};
+use cgmath::Point3;
 
 use crate::world::chunk::ChunkPos;
 

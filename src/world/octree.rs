@@ -332,7 +332,7 @@ impl<T> Octree<T> {
             }
         }
 
-        let mut octant = &mut self.octants[id as usize];
+        let octant = &mut self.octants[id as usize];
         octant.parent = None;
         octant.children_count = 0;
         for ch in &mut octant.children {

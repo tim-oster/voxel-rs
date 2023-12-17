@@ -123,7 +123,7 @@ mod allocator_tests {
         );
 
         // assert constructor
-        let mut instance = alloc.allocate();
+        let instance = alloc.allocate();
         *instance.borrow_mut() = 5;
         assert_eq!(*instance.borrow(), 5);
         assert_eq!(alloc.allocated_count(), 1);
@@ -135,7 +135,7 @@ mod allocator_tests {
         assert_eq!(alloc.used_count(), 0);
 
         // assert reuse and reset function
-        let mut instance = alloc.allocate();
+        let instance = alloc.allocate();
         assert_eq!(*instance.borrow(), 0);
         assert_eq!(alloc.allocated_count(), 1);
         assert_eq!(alloc.used_count(), 1);

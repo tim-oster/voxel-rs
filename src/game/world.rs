@@ -286,7 +286,7 @@ impl World {
                             }
                         }
 
-                        let mut sp = &mut noise.spline_points[i];
+                        let sp = &mut noise.spline_points[i];
                         let mut values: [f32; 2] = [sp.x, sp.y];
                         frame.ui.input_float2("x, y", &mut values).build();
                         sp.x = values[0];
@@ -307,6 +307,7 @@ impl World {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use std::rc::Rc;
 

@@ -183,7 +183,7 @@ mod svo_tests {
             *self as u64
         }
 
-        fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult {
+        fn serialize(&self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
             dst.push(*self);
             SerializationResult { child_mask: 1, leaf_mask: 1, depth: 1 }
         }

@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(true, world.changed_chunks.is_empty());
 
         // modify world
-        let mut mut_chunk = world.get_chunk_mut(&ChunkPos::new(2, 0, 0));
+        let mut_chunk = world.get_chunk_mut(&ChunkPos::new(2, 0, 0));
         mut_chunk.unwrap().set_block(0, 0, 0, 1);
 
         world.remove_chunk(&ChunkPos::new(1, 0, 0));

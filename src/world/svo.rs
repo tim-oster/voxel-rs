@@ -148,7 +148,7 @@ impl<T: SvoSerializable> Svo<T> {
         let mut tmp_buffer = self.tmp_octant_buffer.take().unwrap();
 
         // rebuild & remove all changed leaf octants
-        let mut changes = self.change_set.drain().collect::<Vec<OctantChange>>();
+        let changes = self.change_set.drain().collect::<Vec<OctantChange>>();
         for change in changes {
             match change {
                 OctantChange::Add(id, leaf_id) => {

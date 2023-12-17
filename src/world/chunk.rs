@@ -1,4 +1,4 @@
-use std::ops::{Deref, Sub};
+use std::ops::Sub;
 
 use cgmath::{num_traits, Point3};
 

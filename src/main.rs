@@ -1,3 +1,5 @@
+#![allow(dead_code, unused_variables)]
+
 extern crate gl;
 #[macro_use]
 extern crate memoffset;

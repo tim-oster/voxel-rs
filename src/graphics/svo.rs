@@ -163,7 +163,7 @@ impl Svo {
         self.world_shader.set_texture("u_texture", 0, &self.tex_array);
 
         let mut selected_block = Vector3::new(f32::NAN, f32::NAN, f32::NAN);
-        if let Some(mut pos) = params.selected_voxel {
+        if let Some(pos) = params.selected_voxel {
             selected_block = pos.to_vec();
         }
         self.world_shader.set_f32vec3("u_highlight_pos", &selected_block);
