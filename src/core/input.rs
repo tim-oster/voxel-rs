@@ -1,36 +1,35 @@
-use std::collections::HashSet;
-
 use cgmath::MetricSpace;
+use rustc_hash::FxHashSet;
 
 pub struct Input {
-    pressed_keys: HashSet<glfw::Key>,
-    released_keys: HashSet<glfw::Key>,
+    pressed_keys: FxHashSet<glfw::Key>,
+    released_keys: FxHashSet<glfw::Key>,
     last_key_modifiers: glfw::Modifiers,
     char_input_buffer: Vec<char>,
 
     last_mouse_pos: cgmath::Point2<f32>,
     mouse_delta: cgmath::Vector2<f32>,
     mouse_wheel_delta: f32,
-    pressed_buttons: HashSet<glfw::MouseButton>,
-    released_buttons: HashSet<glfw::MouseButton>,
-    last_button_state: HashSet<glfw::MouseButton>,
+    pressed_buttons: FxHashSet<glfw::MouseButton>,
+    released_buttons: FxHashSet<glfw::MouseButton>,
+    last_button_state: FxHashSet<glfw::MouseButton>,
 }
 
 #[allow(dead_code)]
 impl Input {
     pub(super) fn new() -> Input {
         Input {
-            pressed_keys: HashSet::new(),
-            released_keys: HashSet::new(),
+            pressed_keys: FxHashSet::default(),
+            released_keys: FxHashSet::default(),
             last_key_modifiers: glfw::Modifiers::empty(),
             char_input_buffer: Vec::new(),
 
             last_mouse_pos: cgmath::Point2::new(0.0, 0.0),
             mouse_delta: cgmath::Vector2::new(0.0, 0.0),
             mouse_wheel_delta: 0.0,
-            pressed_buttons: HashSet::new(),
-            released_buttons: HashSet::new(),
-            last_button_state: HashSet::new(),
+            pressed_buttons: FxHashSet::default(),
+            released_buttons: FxHashSet::default(),
+            last_button_state: FxHashSet::default(),
         }
     }
 

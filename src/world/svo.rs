@@ -1,8 +1,9 @@
-use std::collections::{HashMap, HashSet};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ptr;
 use std::sync::Arc;
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::world::chunk::{BlockId, ChunkPos};
 use crate::world::memory::{Allocated, Allocator};
@@ -116,10 +117,10 @@ pub struct SerializationResult {
 /// ```
 pub struct Svo<T: SvoSerializable> {
     octree: Octree<T>,
-    change_set: HashSet<OctantChange>,
+    change_set: FxHashSet<OctantChange>,
 
     buffer: SvoBuffer,
-    leaf_info: HashMap<u64, LeafInfo>,
+    leaf_info: FxHashMap<u64, LeafInfo>,
     root_info: Option<LeafInfo>,
 
     /// Reusable buffer for serializing octants data to be copied into actual SvoBuffer.
@@ -145,9 +146,9 @@ impl<T: SvoSerializable> Svo<T> {
     pub fn with_capacity(capacity: usize) -> Svo<T> {
         Svo {
             octree: Octree::new(),
-            change_set: HashSet::new(),
+            change_set: FxHashSet::default(),
             buffer: SvoBuffer::new(capacity),
-            leaf_info: HashMap::new(),
+            leaf_info: FxHashMap::default(),
             root_info: None,
             tmp_octant_buffer: Some(ChunkBuffer::new()),
         }
@@ -287,7 +288,7 @@ impl<T: SvoSerializable> Svo<T> {
         let len = self.buffer.bytes.len();
         ptr::copy(self.buffer.bytes.as_ptr(), dst, len);
 
-        let dst = dst.offset(len as isize);
+        let dst = dst.add(len);
         ((dst as usize) - start) / 4
     }
 
@@ -367,7 +368,7 @@ impl SerializedChunk {
             // apply leaf mask, child mask is already applied
             params.result.leaf_mask |= 1 << params.idx;
             // write actual value to target position
-            params.dst[(4 + params.idx) as usize] = *params.content as u32;
+            params.dst[(4 + params.idx) as usize] = *params.content;
             // leaf values have a static depth of 1
             params.result.depth = 1;
         })
@@ -444,7 +445,7 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, dst: &mut Vec
             // if NONE, find the first child if the child is an octant
             if content.is_none() && child.is_octant() {
                 let child_id = child.get_octant_value().unwrap();
-                content = breadth_first(&octree, &octree.octants[child_id as usize]);
+                content = breadth_first(octree, &octree.octants[child_id as usize]);
             }
             // if nothing was found, skip
             if content.is_none() {
@@ -509,12 +510,14 @@ fn breadth_first<'a, T>(octree: &'a Octree<T>, parent: &'a Octant<T>) -> Option<
             return result;
         }
     }
-    return None;
+    None
 }
 
 #[cfg(test)]
 mod svo_tests {
-    use std::collections::HashMap;
+    use std::iter::FromIterator;
+
+    use rustc_hash::FxHashMap;
 
     use crate::world::chunk::{BlockId, ChunkPos};
     use crate::world::memory::Allocator;
@@ -682,7 +685,7 @@ mod svo_tests {
             bytes: expected.clone(),
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 168 }],
-            octant_to_range: HashMap::from([
+            octant_to_range: FxHashMap::from_iter([
                 (100, Range { start: 0, length: 156 }),
                 (u64::MAX, Range { start: 156, length: 12 }),
             ]),
@@ -742,7 +745,7 @@ mod svo_tests {
             bytes: expected.clone(),
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 14 }],
-            octant_to_range: HashMap::from([
+            octant_to_range: FxHashMap::from_iter([
                 (10, Range { start: 0, length: 1 }),
                 (20, Range { start: 13, length: 1 }),
                 (u64::MAX, Range { start: 1, length: 12 }),
@@ -800,7 +803,7 @@ mod svo_tests {
             bytes: expected.clone(),
             free_ranges: vec![Range { start: 12, length: 1 }],
             updated_ranges: vec![Range { start: 0, length: 12 }],
-            octant_to_range: HashMap::from([
+            octant_to_range: FxHashMap::from_iter([
                 (20, Range { start: 13, length: 1 }),
                 (u64::MAX, Range { start: 0, length: 12 }),
             ]),
@@ -1208,19 +1211,16 @@ struct SvoBuffer {
     bytes: Vec<u32>,
     free_ranges: Vec<Range>,
     updated_ranges: Vec<Range>,
-    octant_to_range: HashMap<u64, Range>,
+    octant_to_range: FxHashMap<u64, Range>,
 }
 
 impl SvoBuffer {
     fn new(initial_capacity: usize) -> SvoBuffer {
-        let mut bytes = Vec::new();
-        bytes.resize(initial_capacity, 0);
-
         let mut buffer = SvoBuffer {
-            bytes,
+            bytes: vec![0; initial_capacity],
             free_ranges: Vec::new(),
             updated_ranges: Vec::new(),
-            octant_to_range: HashMap::new(),
+            octant_to_range: FxHashMap::default(),
         };
         if initial_capacity > 0 {
             buffer.free_ranges.push(Range { start: 0, length: initial_capacity })
@@ -1256,7 +1256,7 @@ impl SvoBuffer {
             }
 
             unsafe {
-                ptr::copy(buf.data.as_ptr(), self.bytes.as_mut_ptr().offset(ptr as isize), length);
+                ptr::copy(buf.data.as_ptr(), self.bytes.as_mut_ptr().add(ptr), length);
             }
         } else {
             // otherwise, extend at the end
@@ -1307,7 +1307,9 @@ impl SvoBuffer {
 
 #[cfg(test)]
 mod svo_buffer_tests {
-    use std::collections::HashMap;
+    use std::iter::FromIterator;
+
+    use rustc_hash::FxHashMap;
 
     use crate::world::svo::{ChunkBuffer, Range, SvoBuffer};
 
@@ -1333,7 +1335,7 @@ mod svo_buffer_tests {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 10 }],
-            octant_to_range: HashMap::from([
+            octant_to_range: FxHashMap::from_iter([
                 (1, Range { start: 0, length: 5 }),
                 (2, Range { start: 5, length: 2 }),
                 (3, Range { start: 7, length: 3 }),
@@ -1347,7 +1349,7 @@ mod svo_buffer_tests {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: HashMap::from([
+            octant_to_range: FxHashMap::from_iter([
                 (1, Range { start: 0, length: 5 }),
                 (2, Range { start: 5, length: 2 }),
                 (3, Range { start: 7, length: 3 }),
@@ -1362,7 +1364,7 @@ mod svo_buffer_tests {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 11, 8, 9, 10],
             free_ranges: vec![Range { start: 8, length: 2 }],
             updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: HashMap::from([
+            octant_to_range: FxHashMap::from_iter([
                 (1, Range { start: 0, length: 5 }),
                 (2, Range { start: 5, length: 2 }),
                 (3, Range { start: 7, length: 1 }),
@@ -1378,7 +1380,7 @@ mod svo_buffer_tests {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 11, 8, 9, 10],
             free_ranges: vec![Range { start: 5, length: 5 }],
             updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: HashMap::from([
+            octant_to_range: FxHashMap::from_iter([
                 (1, Range { start: 0, length: 5 }),
                 (4, Range { start: 10, length: 1 }),
             ]),
@@ -1391,7 +1393,7 @@ mod svo_buffer_tests {
             bytes: vec![0, 1, 2, 3, 4, 12, 13, 14, 8, 9, 10],
             free_ranges: vec![Range { start: 8, length: 2 }],
             updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: HashMap::from([
+            octant_to_range: FxHashMap::from_iter([
                 (1, Range { start: 0, length: 5 }),
                 (4, Range { start: 10, length: 1 }),
                 (5, Range { start: 5, length: 3 }),
@@ -1407,7 +1409,7 @@ mod svo_buffer_tests {
             bytes: vec![0, 1, 2, 3, 4, 12, 13, 14, 8, 9, 10],
             free_ranges: vec![Range { start: 0, length: 11 }],
             updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: Default::default(),
+            octant_to_range: FxHashMap::default(),
         });
     }
 

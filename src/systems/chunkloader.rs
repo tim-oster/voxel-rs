@@ -1,7 +1,7 @@
 use std::cmp;
-use std::collections::HashMap;
 
 use cgmath::Point3;
+use rustc_hash::FxHashMap;
 
 use crate::world::chunk::ChunkPos;
 
@@ -11,7 +11,7 @@ pub struct ChunkLoader {
     end_y: i32,
 
     last_pos: Option<ChunkPos>,
-    loaded_chunks: HashMap<ChunkPos, u8>,
+    loaded_chunks: FxHashMap<ChunkPos, u8>,
 }
 
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
@@ -40,7 +40,7 @@ impl ChunkLoader {
             end_y,
 
             last_pos: None,
-            loaded_chunks: HashMap::new(),
+            loaded_chunks: FxHashMap::default(),
         }
     }
 

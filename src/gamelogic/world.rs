@@ -7,9 +7,9 @@ use imgui::{Condition, Id, TreeNodeFlags};
 
 use crate::{graphics, systems};
 use crate::core::Frame;
-use crate::game::content::blocks;
-use crate::game::worldgen;
-use crate::game::worldgen::{Generator, Noise, SplinePoint};
+use crate::gamelogic::content::blocks;
+use crate::gamelogic::worldgen;
+use crate::gamelogic::worldgen::{Generator, Noise, SplinePoint};
 use crate::graphics::camera::Camera;
 use crate::graphics::svo::RenderParams;
 use crate::systems::{storage, worldsvo};
@@ -176,7 +176,7 @@ impl World {
         let mut visible_chunks = Vec::new();
         let mut other_chunks = Vec::new();
         for evt in events {
-            let pos = evt.get_pos().to_block_pos().add(Vector3::new(16, 16, 16));
+            let pos = evt.get_pos().as_block_pos().add(Vector3::new(16, 16, 16));
             if camera.is_in_frustum(pos.cast().unwrap(), 32.0) {
                 visible_chunks.push(evt);
             } else {
@@ -185,8 +185,8 @@ impl World {
         }
 
         other_chunks.sort_by(|lhs, rhs| {
-            let lhs: Vector3<f32> = lhs.get_pos().to_block_pos().to_vec().cast().unwrap();
-            let rhs: Vector3<f32> = rhs.get_pos().to_block_pos().to_vec().cast().unwrap();
+            let lhs: Vector3<f32> = lhs.get_pos().as_block_pos().to_vec().cast().unwrap();
+            let rhs: Vector3<f32> = rhs.get_pos().as_block_pos().to_vec().cast().unwrap();
 
             let tl = lhs.sub(camera.position.to_vec()).normalize();
             let tr = rhs.sub(camera.position.to_vec()).normalize();
@@ -266,9 +266,7 @@ impl World {
                         frame.ui.same_line();
                         if frame.ui.small_button("del") {
                             noise.spline_points.remove(i);
-                            if i > 0 {
-                                i -= 1;
-                            }
+                            i = i.saturating_sub(1);
                             continue;
                         }
 
@@ -314,7 +312,7 @@ mod tests {
     use cgmath::{Point3, Vector3};
 
     use crate::core::GlContext;
-    use crate::game::world::World;
+    use crate::gamelogic::world::World;
     use crate::gl_assert_no_error;
     use crate::graphics::framebuffer::{diff_images, Framebuffer};
     use crate::systems::jobs::JobSystem;

@@ -144,6 +144,7 @@ impl<T> MappedBuffer<T> {
         }
     }
 
+    #[allow(clippy::mut_from_ref)]
     pub fn as_slice_mut(&self) -> &mut [T] {
         unsafe { std::slice::from_raw_parts_mut(self.mapped_ptr, self.size) }
     }

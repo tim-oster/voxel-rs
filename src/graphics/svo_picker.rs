@@ -5,7 +5,7 @@ use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
 #[derive(Debug, PartialEq)]
 pub struct PickerBatch {
     pub rays: Vec<Ray>,
-    pub aabbs: Vec<AABB>,
+    pub aabbs: Vec<Aabb>,
 }
 
 #[repr(C)]
@@ -40,7 +40,7 @@ impl PickerBatch {
         self.rays.push(Ray { pos, dir, max_dst });
     }
 
-    pub fn add_aabb(&mut self, aabb: AABB) {
+    pub fn add_aabb(&mut self, aabb: Aabb) {
         self.aabbs.push(aabb);
     }
 
@@ -99,7 +99,7 @@ impl PickerBatch {
 #[derive(Debug, PartialEq)]
 pub struct PickerBatchResult {
     pub rays: Vec<RayResult>,
-    pub aabbs: Vec<AABBResult>,
+    pub aabbs: Vec<AabbResult>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -127,39 +127,39 @@ impl RayResult {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct AABB {
+pub struct Aabb {
     pub pos: Point3<f32>,
     pub offset: Vector3<f32>,
     pub extents: Vector3<f32>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct AABBResult {
+pub struct AabbResult {
     pub neg: Vector3<f32>,
     pub pos: Vector3<f32>,
 }
 
-impl Default for AABBResult {
+impl Default for AabbResult {
     fn default() -> Self {
-        AABBResult {
+        AabbResult {
             neg: Vector3::new(-1.0, -1.0, -1.0),
             pos: Vector3::new(-1.0, -1.0, -1.0),
         }
     }
 }
 
-impl AABB {
-    pub fn new(pos: Point3<f32>, offset: Vector3<f32>, extents: Vector3<f32>) -> AABB {
-        AABB { pos, offset, extents }
+impl Aabb {
+    pub fn new(pos: Point3<f32>, offset: Vector3<f32>, extents: Vector3<f32>) -> Aabb {
+        Aabb { pos, offset, extents }
     }
 
     fn generate_picker_tasks(&self) -> Vec<PickerTask> {
-        let blocks_per_axis = vec![
+        let blocks_per_axis = [
             self.extents.x.ceil() as i32,
             self.extents.y.ceil() as i32,
             self.extents.z.ceil() as i32,
         ];
-        let step_size_per_axis = vec![
+        let step_size_per_axis = [
             self.extents.x / blocks_per_axis[0] as f32,
             self.extents.y / blocks_per_axis[1] as f32,
             self.extents.z / blocks_per_axis[2] as f32,
@@ -207,15 +207,15 @@ impl AABB {
         tasks
     }
 
-    fn parse_picker_results(&self, data: &[PickerResult]) -> (AABBResult, usize) {
-        let blocks_per_axis = vec![
+    fn parse_picker_results(&self, data: &[PickerResult]) -> (AabbResult, usize) {
+        let blocks_per_axis = [
             self.extents.x.ceil() as i32,
             self.extents.y.ceil() as i32,
             self.extents.z.ceil() as i32,
         ];
 
-        let mut result = AABBResult::default();
-        let mut references = vec![
+        let mut result = AabbResult::default();
+        let references = [
             &mut result.pos.x, &mut result.neg.x,
             &mut result.pos.y, &mut result.neg.y,
             &mut result.pos.z, &mut result.neg.z,
@@ -259,7 +259,7 @@ mod tests {
     use cgmath::{Point3, Vector3};
 
     use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
-    use crate::graphics::svo_picker::{AABB, AABBResult, PickerBatch, PickerBatchResult, PickerResult, PickerTask, RayResult};
+    use crate::graphics::svo_picker::{Aabb, AabbResult, PickerBatch, PickerBatchResult, PickerResult, PickerTask, RayResult};
 
     /// Tests if task serialization works as expected.
     #[test]
@@ -267,12 +267,12 @@ mod tests {
         let mut batch = PickerBatch::new();
         batch.add_ray(Point3::new(1.0, 0.0, 1.0), Vector3::new(0.0, 1.0, 0.0), 20.0);
         batch.add_ray(Point3::new(2.0, 0.0, 2.0), Vector3::new(1.0, 0.0, 0.0), 40.0);
-        batch.add_aabb(AABB {
+        batch.add_aabb(Aabb {
             pos: Point3::new(0.5, 0.0, 0.5),
             offset: Vector3::new(-0.5, 0.0, -0.5),
             extents: Vector3::new(1.0, 1.0, 1.0),
         });
-        batch.add_aabb(AABB {
+        batch.add_aabb(Aabb {
             pos: Point3::new(0.0, 0.0, 0.0),
             offset: Vector3::new(0.0, 0.0, 0.0),
             extents: Vector3::new(1.5, 1.5, 1.5),
@@ -378,12 +378,12 @@ mod tests {
         let mut batch = PickerBatch::new();
         batch.add_ray(Point3::new(0.0, 0.0, 0.0), Vector3::new(-1.0, 0.0, 0.0), 20.0);
         batch.add_ray(Point3::new(0.0, 0.0, 0.0), Vector3::new(1.0, 0.0, 0.0), 20.0);
-        batch.add_aabb(AABB {
+        batch.add_aabb(Aabb {
             pos: Point3::new(0.5, 0.0, 0.5),
             offset: Vector3::new(-0.5, 0.0, -0.5),
             extents: Vector3::new(1.0, 1.0, 1.0),
         });
-        batch.add_aabb(AABB {
+        batch.add_aabb(Aabb {
             pos: Point3::new(0.0, 0.0, 0.0),
             offset: Vector3::new(0.0, 0.0, 0.0),
             extents: Vector3::new(1.5, 1.5, 1.5),
@@ -483,8 +483,8 @@ mod tests {
                 RayResult { dst: 10.0, inside_block: true, pos: Point3::new(-1.0, 0.0, 0.0), normal: Vector3::new(10.0, 0.0, 0.0) },
             ],
             aabbs: vec![
-                AABBResult { neg: Vector3::new(8.0, 7.0, 8.0), pos: Vector3::new(2.0, 4.0, 1.0) },
-                AABBResult { neg: Vector3::new(9.0, 8.0, 7.0), pos: Vector3::new(1.0, 4.0, 3.0) },
+                AabbResult { neg: Vector3::new(8.0, 7.0, 8.0), pos: Vector3::new(2.0, 4.0, 1.0) },
+                AabbResult { neg: Vector3::new(9.0, 8.0, 7.0), pos: Vector3::new(1.0, 4.0, 3.0) },
             ],
         });
     }

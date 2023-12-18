@@ -48,7 +48,7 @@ impl GlContext {
         context.window_hint(glfw::WindowHint::Resizable(cfg.resizable));
 
         let (mut window, events) = context
-            .create_window(cfg.width, cfg.height, &cfg.title, glfw::WindowMode::Windowed)
+            .create_window(cfg.width, cfg.height, cfg.title, glfw::WindowMode::Windowed)
             .expect("failed to create window");
 
         window.make_current();

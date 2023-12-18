@@ -93,7 +93,7 @@ impl<T> Octree<T> {
 
             if size == 1 {
                 let prev = self.octants[it as usize].set_child(idx, Child::Leaf(leaf));
-                return (LeafId { parent: it, idx }, prev.to_leaf_value());
+                return (LeafId { parent: it, idx }, prev.into_leaf_value());
             }
 
             it = self.step_into_or_create_octant_at(it, idx);
@@ -206,9 +206,9 @@ impl<T> Octree<T> {
             Child::Octant(_) => None,
             Child::Leaf(_) => {
                 match self.octants[leaf_id.parent as usize].set_child(leaf_id.idx, Child::None) {
-                    Child::None => return None,
+                    Child::None => None,
                     Child::Octant(_) => panic!("found unexpected octant"),
-                    Child::Leaf(value) => return Some(value),
+                    Child::Leaf(value) => Some(value),
                 }
             }
         }
@@ -349,8 +349,9 @@ impl<T> Octree<T> {
 }
 
 /// Child represents possible states for an octant in the octree.
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(super) enum Child<T> {
+    #[default]
     None,
     Octant(OctantId),
     Leaf(T),
@@ -358,17 +359,11 @@ pub(super) enum Child<T> {
 
 impl<T> Child<T> {
     pub fn is_none(&self) -> bool {
-        match self {
-            Child::None => true,
-            _ => false,
-        }
+        matches!(self, Child::None)
     }
 
     pub fn is_octant(&self) -> bool {
-        match self {
-            Child::Octant(_) => true,
-            _ => false,
-        }
+        matches!(self, Child::Octant(_))
     }
 
     pub fn get_octant_value(&self) -> Option<OctantId> {
@@ -379,10 +374,7 @@ impl<T> Child<T> {
     }
 
     pub fn is_leaf(&self) -> bool {
-        match self {
-            Child::Leaf(_) => true,
-            _ => false,
-        }
+        matches!(self, Child::Leaf(_))
     }
 
     pub fn get_leaf_value(&self) -> Option<&T> {
@@ -392,17 +384,11 @@ impl<T> Child<T> {
         }
     }
 
-    pub fn to_leaf_value(self) -> Option<T> {
+    pub fn into_leaf_value(self) -> Option<T> {
         match self {
             Child::Leaf(value) => Some(value),
             _ => None,
         }
-    }
-}
-
-impl<T> Default for Child<T> {
-    fn default() -> Self {
-        Child::None
     }
 }
 

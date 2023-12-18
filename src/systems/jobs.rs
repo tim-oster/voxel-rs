@@ -1,6 +1,5 @@
 use std::{panic, thread};
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
 use std::panic::AssertUnwindSafe;
 use std::rc::Rc;
 use std::sync::{Arc, mpsc};
@@ -10,12 +9,13 @@ use std::thread::{JoinHandle, ThreadId};
 use std::time::{Duration, Instant};
 
 use crossbeam_queue::SegQueue;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::world::chunk::ChunkPos;
 
 /// JobSystem manages a configurable amount of worker threads to distribute jobs to.
 pub struct JobSystem {
-    worker_handles: HashMap<ThreadId, JoinHandle<()>>,
+    worker_handles: FxHashMap<ThreadId, JoinHandle<()>>,
     is_running: Arc<AtomicBool>,
     currently_executing: Arc<AtomicU8>,
 
@@ -43,7 +43,7 @@ impl JobHandle {
 impl JobSystem {
     pub fn new(worker_count: usize) -> JobSystem {
         let mut system = JobSystem {
-            worker_handles: HashMap::new(),
+            worker_handles: FxHashMap::default(),
             is_running: Arc::new(AtomicBool::new(true)),
             currently_executing: Arc::new(AtomicU8::new(0)),
             queue: Arc::new(SegQueue::<Job>::new()),
@@ -103,10 +103,8 @@ impl JobSystem {
         while !self.prio_queue.is_empty() {
             handles.push(self.prio_queue.pop());
         }
-        for h in handles {
-            if let Some(h) = h {
-                h.cancelled.store(true, Ordering::Relaxed);
-            }
+        for h in handles.into_iter().flatten() {
+            h.cancelled.store(true, Ordering::Relaxed);
         }
     }
 
@@ -292,7 +290,7 @@ pub struct ChunkProcessor<T> {
     job_system: Rc<JobSystem>,
     tx: Sender<ChunkResult<T>>,
     rx: Receiver<ChunkResult<T>>,
-    chunk_jobs: RefCell<HashMap<ChunkPos, JobHandle>>,
+    chunk_jobs: RefCell<FxHashMap<ChunkPos, JobHandle>>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -304,7 +302,7 @@ pub struct ChunkResult<T> {
 impl<T: Send + 'static> ChunkProcessor<T> {
     pub fn new(job_system: Rc<JobSystem>) -> ChunkProcessor<T> {
         let (tx, rx) = mpsc::channel();
-        ChunkProcessor { job_system, tx, rx, chunk_jobs: RefCell::new(HashMap::new()) }
+        ChunkProcessor { job_system, tx, rx, chunk_jobs: RefCell::new(FxHashMap::default()) }
     }
 
     /// Enqueues a new chunk job in either the prioritized or normal queue. If there is already
@@ -365,7 +363,7 @@ impl<T: Send + 'static> ChunkProcessor<T> {
         // If not empty: iterate through all jobs and check if they have been cancelled. Interrupt
         // at the first non-cancelled job as that indicates that there is at least one pending job
         // in the queue for either processing or consuming.
-        let mut set = HashSet::new();
+        let mut set = FxHashSet::default();
         for (pos, handle) in self.chunk_jobs.borrow().iter() {
             let cancelled = handle.cancelled.load(Ordering::Relaxed);
             if !cancelled {

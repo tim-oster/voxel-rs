@@ -68,12 +68,6 @@ impl_deref!(AlignedPoint3, cgmath::Point3);
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub struct AlignedBool(pub u32);
 
-impl Into<bool> for AlignedBool {
-    fn into(self) -> bool {
-        self.0 != 0
-    }
-}
-
 impl From<bool> for AlignedBool {
     fn from(value: bool) -> Self {
         AlignedBool(value as u32)
@@ -97,13 +91,13 @@ macro_rules! assert_float_eq {
 #[macro_export]
 macro_rules! gl_check_error {
     () => {
-        crate::graphics::macros::gl_check_error_(file!(), line!())
+        $crate::graphics::macros::gl_check_error_(file!(), line!())
     };
 }
 #[macro_export]
 macro_rules! gl_assert_no_error {
     () => {
-        assert!(!crate::graphics::macros::gl_check_error_(file!(), line!()))
+        assert!(!$crate::graphics::macros::gl_check_error_(file!(), line!()))
     };
 }
 pub fn gl_check_error_(file: &str, line: u32) -> bool {

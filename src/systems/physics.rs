@@ -3,7 +3,7 @@ use cgmath::{InnerSpace, Point3, Vector3};
 use mockall::automock;
 
 use crate::graphics::svo::Svo;
-use crate::graphics::svo_picker::{AABB, AABBResult, PickerBatch, PickerBatchResult};
+use crate::graphics::svo_picker::{Aabb, AabbResult, PickerBatch, PickerBatchResult};
 
 const EPSILON: f32 = 0.0005;
 
@@ -100,8 +100,8 @@ pub struct Physics {}
 
 #[allow(dead_code)]
 struct RaycastData {
-    aabb: AABB,
-    aabb_result: AABBResult,
+    aabb: Aabb,
+    aabb_result: AabbResult,
 }
 
 impl Physics {
@@ -126,11 +126,11 @@ impl Physics {
         let mut results = Vec::with_capacity(entities.len());
 
         for entity in entities.iter() {
-            let aabb = AABB::new(entity.position, entity.aabb_def.offset, entity.aabb_def.extents);
+            let aabb = Aabb::new(entity.position, entity.aabb_def.offset, entity.aabb_def.extents);
             batch.add_aabb(aabb);
             results.push(RaycastData {
                 aabb,
-                aabb_result: AABBResult::default(),
+                aabb_result: AabbResult::default(),
             });
         }
 
@@ -142,7 +142,7 @@ impl Physics {
         results
     }
 
-    fn update_entity(entity: &mut Entity, result: &AABBResult, delta_time: f32) {
+    fn update_entity(entity: &mut Entity, result: &AabbResult, delta_time: f32) {
         let mut v = entity.velocity * delta_time;
 
         if !entity.caps.flying {
@@ -190,7 +190,7 @@ mod tests {
     use cgmath::{Point3, Vector3, Zero};
     use mockall::predicate::eq;
 
-    use crate::graphics::svo_picker::{AABB, AABBResult, PickerBatch, PickerBatchResult};
+    use crate::graphics::svo_picker::{Aabb, AabbResult, PickerBatch, PickerBatchResult};
     use crate::systems::physics::{AABBDef, Entity, EntityCapabilities, EntityState, MockRaycaster, Physics};
 
     /// Asserts that all entities are raycasted and updated. The test contains different entities
@@ -204,7 +204,7 @@ mod tests {
             aabb_def: Option<AABBDef>,
             caps: Option<EntityCapabilities>,
 
-            aabb_result: AABBResult,
+            aabb_result: AabbResult,
 
             expected_position: Point3<f32>,
             expected_velocity: Vector3<f32>,
@@ -218,7 +218,7 @@ mod tests {
                 velocity: None,
                 aabb_def: None,
                 caps: None,
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, 1.0, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, 1.0, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(0.0, -0.008, 0.0),
                 expected_velocity: Vector3::new(0.0, -0.008, 0.0),
                 expected_state: None,
@@ -229,7 +229,7 @@ mod tests {
                 velocity: Some(Vector3::new(0.0, -0.008, 0.0)),
                 aabb_def: None,
                 caps: None,
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, 1.0, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, 1.0, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(0.0, -0.024, 0.0),
                 expected_velocity: Vector3::new(0.0, -0.016, 0.0),
                 expected_state: None,
@@ -240,7 +240,7 @@ mod tests {
                 velocity: Some(Vector3::new(0.0, -0.016, 0.0)),
                 aabb_def: None,
                 caps: None,
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, 0.01, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, 0.01, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(0.0, -0.0335, 0.0), // should be -0.034 but epsilon value prevents them from getting close
                 expected_velocity: Vector3::new(0.0, -0.0095, 0.0),
                 expected_state: Some(EntityState { is_grounded: true }),
@@ -251,7 +251,7 @@ mod tests {
                 velocity: Some(Vector3::new(0.0, -0.016, 0.0)),
                 aabb_def: None,
                 caps: Some(EntityCapabilities { wall_clip: true, flying: false, gravity: 0.008, max_fall_velocity: 3.0 }),
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, 0.01, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, 0.01, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(0.0, -0.0335, 0.0), // should be -0.034 but epsilon value prevents them from getting close
                 expected_velocity: Vector3::new(0.0, -0.0095, 0.0),
                 expected_state: Some(EntityState { is_grounded: true }),
@@ -262,7 +262,7 @@ mod tests {
                 velocity: Some(Vector3::new(0.0, -4.0, 0.0)),
                 aabb_def: None,
                 caps: None,
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, 10.0, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, 10.0, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(0.0, -3.0, 0.0),
                 expected_velocity: Vector3::new(0.0, -3.0, 0.0),
                 expected_state: None,
@@ -273,7 +273,7 @@ mod tests {
                 velocity: Some(Vector3::new(0.0, 5.0, 0.0)),
                 aabb_def: None,
                 caps: None,
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(0.0, 4.992, 0.0),
                 expected_velocity: Vector3::new(0.0, 4.992, 0.0),
                 expected_state: None,
@@ -284,7 +284,7 @@ mod tests {
                 velocity: Some(Vector3::new(0.0, 5.0, 0.0)),
                 aabb_def: None,
                 caps: None,
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 2.0, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 2.0, -1.0) },
                 expected_position: Point3::new(0.0, 1.9995, 0.0),
                 expected_velocity: Vector3::new(0.0, 1.9995, 0.0), // will be reset on the next iteration
                 expected_state: None,
@@ -295,7 +295,7 @@ mod tests {
                 velocity: Some(Vector3::new(0.0, 1.9995, 0.0)),
                 aabb_def: None,
                 caps: None,
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 0.0005, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 0.0005, -1.0) },
                 expected_position: Point3::new(0.0, 1.9995, 0.0),
                 expected_velocity: Vector3::new(0.0, 0.0, 0.0), // this is reset now
                 expected_state: None,
@@ -306,7 +306,7 @@ mod tests {
                 velocity: Some(Vector3::new(0.0, 5.0, 0.0)),
                 aabb_def: None,
                 caps: Some(EntityCapabilities { wall_clip: true, flying: false, gravity: 0.008, max_fall_velocity: 3.0 }),
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 2.0, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 2.0, -1.0) },
                 expected_position: Point3::new(0.0, 1.9995, 0.0),
                 expected_velocity: Vector3::new(0.0, 1.9995, 0.0), // would be reset on the next iteration
                 expected_state: None,
@@ -317,7 +317,7 @@ mod tests {
                 velocity: Some(Vector3::new(3.0, -5.0, 3.0)),
                 aabb_def: None,
                 caps: Some(EntityCapabilities { wall_clip: false, flying: true, gravity: 0.008, max_fall_velocity: 3.0 }),
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, 5.0, -1.0), pos: Vector3::new(2.0, -1.0, 2.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, 5.0, -1.0), pos: Vector3::new(2.0, -1.0, 2.0) },
                 expected_position: Point3::new(3.0, 0.0, 3.0),
                 expected_velocity: Vector3::new(0.0, 0.0, 0.0),
                 expected_state: Some(EntityState { is_grounded: false }),
@@ -328,7 +328,7 @@ mod tests {
                 velocity: Some(Vector3::new(2.0, 0.0, 2.0)),
                 aabb_def: None,
                 caps: None,
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, 0.0, -1.0), pos: Vector3::new(1.0, -1.0, 1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, 0.0, -1.0), pos: Vector3::new(1.0, -1.0, 1.0) },
                 expected_position: Point3::new(0.9995, 0.0, 0.9995),
                 expected_velocity: Vector3::new(0.0, 0.0, 0.0),
                 expected_state: Some(EntityState { is_grounded: true }),
@@ -339,7 +339,7 @@ mod tests {
                 velocity: Some(Vector3::new(-2.0, 0.0, -2.0)),
                 aabb_def: None,
                 caps: None,
-                aabb_result: AABBResult { neg: Vector3::new(1.0, 0.0, 1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(1.0, 0.0, 1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(-0.9995, 0.0, -0.9995),
                 expected_velocity: Vector3::new(0.0, 0.0, 0.0),
                 expected_state: Some(EntityState { is_grounded: true }),
@@ -350,7 +350,7 @@ mod tests {
                 velocity: Some(Vector3::new(2.0, 0.0, 2.0)),
                 aabb_def: None,
                 caps: Some(EntityCapabilities { wall_clip: true, flying: false, gravity: 0.008, max_fall_velocity: 3.0 }),
-                aabb_result: AABBResult { neg: Vector3::new(-1.0, 0.0, -1.0), pos: Vector3::new(1.0, -1.0, 1.0) },
+                aabb_result: AabbResult { neg: Vector3::new(-1.0, 0.0, -1.0), pos: Vector3::new(1.0, -1.0, 1.0) },
                 expected_position: Point3::new(2.0, 0.0, 2.0),
                 expected_velocity: Vector3::new(0.0, 0.0, 0.0),
                 expected_state: Some(EntityState { is_grounded: true }),
@@ -385,7 +385,7 @@ mod tests {
                 state: c.expected_state.unwrap_or_default(),
             });
 
-            expected_batch.add_aabb(AABB::new(c.position, e.aabb_def.offset, e.aabb_def.extents));
+            expected_batch.add_aabb(Aabb::new(c.position, e.aabb_def.offset, e.aabb_def.extents));
             aabb_results.push(c.aabb_result);
 
             entities.push(e);

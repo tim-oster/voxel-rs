@@ -28,7 +28,7 @@ impl<T, E> Resource<T, E> {
             self.content = content;
             return Ok(());
         }
-        return Err(result.err().unwrap());
+        Err(result.err().unwrap())
     }
 }
 

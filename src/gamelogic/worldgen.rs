@@ -1,6 +1,6 @@
 use noise::{NoiseFn, Perlin, Seedable};
 
-use crate::game::content::blocks;
+use crate::gamelogic::content::blocks;
 use crate::systems::worldgen::ChunkGenerator;
 use crate::world::chunk::{Chunk, ChunkPos};
 
@@ -76,7 +76,7 @@ mod noise_tests {
     use noise::{Perlin, Seedable};
 
     use crate::assert_float_eq;
-    use crate::game::worldgen::{Noise, SplinePoint};
+    use crate::gamelogic::worldgen::{Noise, SplinePoint};
 
     /// Tests that noise value is correctly calculated and interpolated using the spline points.
     #[test]
@@ -173,7 +173,7 @@ impl ChunkGenerator for Generator {
         // TODO do not run this twice
         for z in 0..32 {
             for x in 0..32 {
-                let height = self.get_height_at(&pos, x, z);
+                let height = self.get_height_at(pos, x, z);
                 min_y = min_y.min(height);
                 max_y = max_y.max(height);
             }

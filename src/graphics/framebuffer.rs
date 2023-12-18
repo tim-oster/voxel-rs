@@ -106,6 +106,5 @@ pub fn diff_images(lhs: &DynamicImage, rhs: &DynamicImage) -> f64 {
     for (pixel1, pixel2) in zipper {
         accum += diff_rgba3(pixel1.2, pixel2.2);
     }
-    let diff_percent = accum as f64 / (255.0 * 3.0 * (lhs.width() * lhs.height()) as f64);
-    diff_percent
+    accum as f64 / (255.0 * 3.0 * (lhs.width() * lhs.height()) as f64)
 }

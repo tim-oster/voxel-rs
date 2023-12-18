@@ -78,7 +78,7 @@ impl ChunkPos {
         dx * dx + dz * dz
     }
 
-    pub fn to_block_pos(&self) -> Point3<i32> {
+    pub fn as_block_pos(&self) -> Point3<i32> {
         Point3::new(self.x << 5, self.y << 5, self.z << 5)
     }
 }
@@ -112,7 +112,7 @@ mod chunk_pos_test {
     fn from_block_pos() {
         let pos = ChunkPos::from_block_pos(15, -28, 35);
         assert_eq!(pos, ChunkPos { x: 0, y: -1, z: 1 });
-        assert_eq!(pos.to_block_pos(), Point3::new(0, -32, 32));
+        assert_eq!(pos.as_block_pos(), Point3::new(0, -32, 32));
 
         let pos = ChunkPos::from_block_pos(10, 20, 30);
         assert_eq!(pos, ChunkPos { x: 0, y: 0, z: 0 });
@@ -192,7 +192,7 @@ impl BlockPos {
     }
 
     pub fn to_point(&self) -> Point3<f32> {
-        let mut pos = self.chunk.to_block_pos();
+        let mut pos = self.chunk.as_block_pos();
         pos.x |= (self.rel_x as i32) & 31;
         pos.y |= (self.rel_y as i32) & 31;
         pos.z |= (self.rel_z as i32) & 31;

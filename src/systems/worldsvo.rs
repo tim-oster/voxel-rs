@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::Arc;
 
 use cgmath::Point3;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::graphics;
 use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult};
@@ -32,7 +32,7 @@ pub struct Svo {
     graphics_svo: graphics::Svo,
     chunk_buffer_allocator: Arc<Allocator<ChunkBuffer>>,
 
-    leaf_ids: HashMap<ChunkPos, LeafId>,
+    leaf_ids: FxHashMap<ChunkPos, LeafId>,
     has_changed: bool,
     svo_coord_space: SvoCoordSpace,
 }
@@ -40,7 +40,7 @@ pub struct Svo {
 impl Svo {
     pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo, render_distance: u32) -> Svo {
         let chunk_buffer_alloc = Allocator::new(
-            Box::new(|| ChunkBuffer::new()),
+            Box::new(ChunkBuffer::new),
             Some(Box::new(|buffer| buffer.reset())),
         );
         Svo {
@@ -48,7 +48,7 @@ impl Svo {
             world_svo: world::Svo::new(),
             graphics_svo,
             chunk_buffer_allocator: Arc::new(chunk_buffer_alloc),
-            leaf_ids: HashMap::new(),
+            leaf_ids: FxHashMap::default(),
             has_changed: false,
             svo_coord_space: SvoCoordSpace {
                 center: ChunkPos::new(0, 0, 0),
@@ -112,9 +112,9 @@ impl Svo {
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
     /// space by replacing the previous chunk in the new position. Also removes all chunks, that
     /// are out of SVO bounds.
-    fn shift_chunks<T: SvoSerializable>(coord_space: &SvoCoordSpace, leaf_ids: &mut HashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T>) {
-        let mut overridden_leaves = HashMap::new();
-        let mut removed = HashSet::new();
+    fn shift_chunks<T: SvoSerializable>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T>) {
+        let mut overridden_leaves = FxHashMap::default();
+        let mut removed = FxHashSet::default();
 
         for (chunk_pos, leaf_id) in leaf_ids.iter_mut() {
             let new_svo_pos = coord_space.cnv_chunk_pos(*chunk_pos);
@@ -170,7 +170,9 @@ impl Svo {
 //noinspection DuplicatedCode
 #[cfg(test)]
 mod svo_tests {
-    use std::collections::HashMap;
+    use std::iter::FromIterator;
+
+    use rustc_hash::FxHashMap;
 
     use crate::systems::worldsvo::{Svo, SvoCoordSpace};
     use crate::world;
@@ -192,7 +194,7 @@ mod svo_tests {
     /// Tests that chunk shifting in positive x direction works.
     #[test]
     fn shift_chunks_x_positive() {
-        let mut leaf_ids = HashMap::new();
+        let mut leaf_ids = FxHashMap::default();
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
@@ -205,7 +207,7 @@ mod svo_tests {
         let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
-        assert_eq!(leaf_ids, HashMap::from([
+        assert_eq!(leaf_ids, FxHashMap::from_iter([
             (ChunkPos::new(-1, 0, 0), c0),
             (ChunkPos::new(0, 0, 0), c1),
             (ChunkPos::new(1, 0, 0), c2),
@@ -217,7 +219,7 @@ mod svo_tests {
         // shift one in x+
         let cs = SvoCoordSpace::new(ChunkPos::new(1, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
-        assert_eq!(leaf_ids, HashMap::from([
+        assert_eq!(leaf_ids, FxHashMap::from_iter([
             (ChunkPos::new(0, 0, 0), c0),
             (ChunkPos::new(1, 0, 0), c1),
         ]));
@@ -228,7 +230,7 @@ mod svo_tests {
         // shift one in x+
         let cs = SvoCoordSpace::new(ChunkPos::new(2, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
-        assert_eq!(leaf_ids, HashMap::from([
+        assert_eq!(leaf_ids, FxHashMap::from_iter([
             (ChunkPos::new(1, 0, 0), c0),
         ]));
         assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), Some(&3u32));
@@ -238,7 +240,7 @@ mod svo_tests {
         // shift one in x+
         let cs = SvoCoordSpace::new(ChunkPos::new(3, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
-        assert_eq!(leaf_ids, HashMap::new());
+        assert_eq!(leaf_ids, FxHashMap::default());
         assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), None);
         assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), None);
         assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), None);
@@ -247,7 +249,7 @@ mod svo_tests {
     /// Tests that chunk shifting in negative x direction works.
     #[test]
     fn shift_chunks_x_negative() {
-        let mut leaf_ids = HashMap::new();
+        let mut leaf_ids = FxHashMap::default();
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
@@ -260,7 +262,7 @@ mod svo_tests {
         let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
-        assert_eq!(leaf_ids, HashMap::from([
+        assert_eq!(leaf_ids, FxHashMap::from_iter([
             (ChunkPos::new(-1, 0, 0), c0),
             (ChunkPos::new(0, 0, 0), c1),
             (ChunkPos::new(1, 0, 0), c2),
@@ -272,7 +274,7 @@ mod svo_tests {
         // shift one in x-
         let cs = SvoCoordSpace::new(ChunkPos::new(-1, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
-        assert_eq!(leaf_ids, HashMap::from([
+        assert_eq!(leaf_ids, FxHashMap::from_iter([
             (ChunkPos::new(-1, 0, 0), c1),
             (ChunkPos::new(0, 0, 0), c2),
         ]));
@@ -283,7 +285,7 @@ mod svo_tests {
         // shift one in x-
         let cs = SvoCoordSpace::new(ChunkPos::new(-2, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
-        assert_eq!(leaf_ids, HashMap::from([
+        assert_eq!(leaf_ids, FxHashMap::from_iter([
             (ChunkPos::new(-1, 0, 0), c2),
         ]));
         assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), None);
@@ -293,7 +295,7 @@ mod svo_tests {
         // shift one in x-
         let cs = SvoCoordSpace::new(ChunkPos::new(-3, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
-        assert_eq!(leaf_ids, HashMap::new());
+        assert_eq!(leaf_ids, FxHashMap::default());
         assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), None);
         assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), None);
         assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), None);
@@ -303,7 +305,7 @@ mod svo_tests {
     /// world center happens.
     #[test]
     fn shift_chunks_x_out_of_range() {
-        let mut leaf_ids = HashMap::new();
+        let mut leaf_ids = FxHashMap::default();
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
@@ -323,7 +325,7 @@ mod svo_tests {
         // shift x out of range
         let cs = SvoCoordSpace::new(ChunkPos::new(3, 0, 0), 1);
         Svo::shift_chunks(&cs, &mut leaf_ids, &mut world_svo);
-        assert_eq!(leaf_ids, HashMap::new());
+        assert_eq!(leaf_ids, FxHashMap::default());
         assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), None);
         assert_eq!(world_svo.get_leaf(Position(1, 1, 1)), None);
         assert_eq!(world_svo.get_leaf(Position(2, 1, 1)), None);
@@ -430,7 +432,7 @@ impl SvoCoordSpace {
     fn cnv_chunk_pos(&self, pos: ChunkPos) -> Option<world::octree::Position> {
         let r = self.dst as f32;
 
-        let pos = pos.to_block_pos();
+        let pos = pos.as_block_pos();
         let pos = self.cnv_block_pos(pos.cast().unwrap());
         let pos = pos / 32.0;
 

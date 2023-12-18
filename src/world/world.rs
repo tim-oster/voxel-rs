@@ -1,7 +1,9 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::world::chunk;
 use crate::world::chunk::{Chunk, ChunkPos};
@@ -51,24 +53,24 @@ pub struct BorrowedChunkRef {
 
 /// World is a collection of chunks, where each chunk can be identified by its position.
 pub struct World {
-    chunks: HashMap<ChunkPos, Chunk>,
-    changed_chunks_set: HashSet<ChunkPos>,
+    chunks: FxHashMap<ChunkPos, Chunk>,
+    changed_chunks_set: FxHashSet<ChunkPos>,
     changed_chunks: VecDeque<ChunkPos>,
-    borrowed_chunks: HashMap<ChunkPos, BorrowedChunkRef>,
+    borrowed_chunks: FxHashMap<ChunkPos, BorrowedChunkRef>,
 }
 
 impl World {
     pub fn new() -> World {
         World {
-            chunks: HashMap::new(),
-            changed_chunks_set: HashSet::new(),
+            chunks: FxHashMap::default(),
+            changed_chunks_set: FxHashSet::default(),
             changed_chunks: VecDeque::new(),
-            borrowed_chunks: HashMap::new(),
+            borrowed_chunks: FxHashMap::default(),
         }
     }
 
     fn mark_chunk_as_changed(&mut self, pos: &ChunkPos) {
-        if !self.changed_chunks_set.contains(&pos) {
+        if !self.changed_chunks_set.contains(pos) {
             self.changed_chunks_set.insert(*pos);
             self.changed_chunks.push_back(*pos);
         }
@@ -91,10 +93,10 @@ impl World {
     /// that position was borrowed, it is also removed.
     pub fn remove_chunk(&mut self, pos: &ChunkPos) {
         // remove it from borrowed chunks to prevent a previously borrowed chunk from being returned
-        self.borrowed_chunks.remove(&pos);
+        self.borrowed_chunks.remove(pos);
 
         self.chunks.remove(pos);
-        self.mark_chunk_as_changed(&pos);
+        self.mark_chunk_as_changed(pos);
     }
 
     pub fn get_chunk(&self, pos: &ChunkPos) -> Option<&Chunk> {
@@ -112,11 +114,8 @@ impl World {
     /// to return the ownership. Returns `None` if the chunk does not exist or was already borrowed.
     pub fn borrow_chunk(&mut self, pos: &ChunkPos) -> Option<BorrowedChunk> {
         let chunk = self.chunks.remove(pos);
-        if chunk.is_none() {
-            return None;
-        }
 
-        let borrowed = BorrowedChunk::from(chunk.unwrap());
+        let borrowed = BorrowedChunk::from(chunk?);
         self.borrowed_chunks.insert(*pos, BorrowedChunkRef {
             was_dropped: borrowed.was_dropped.clone(),
         });
@@ -186,9 +185,12 @@ impl World {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashSet, VecDeque};
+    use std::collections::VecDeque;
+    use std::iter::FromIterator;
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
+
+    use rustc_hash::FxHashSet;
 
     use crate::world::chunk;
     use crate::world::chunk::{Chunk, ChunkPos};
@@ -223,7 +225,7 @@ mod tests {
         world.set_chunk(Chunk::new(ChunkPos::new(2, 0, 0), 5, alloc.allocate()));
 
         // check for initial chunk add changes
-        assert_eq!(world.changed_chunks_set, HashSet::from([
+        assert_eq!(world.changed_chunks_set, FxHashSet::from_iter([
             ChunkPos::new(0, 0, 0),
             ChunkPos::new(1, 0, 0),
             ChunkPos::new(2, 0, 0),

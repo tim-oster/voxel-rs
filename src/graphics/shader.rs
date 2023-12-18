@@ -2,7 +2,6 @@
 
 use std::{io, ptr};
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::ffi::CString;
 use std::fmt::Write;
 use std::path::Path;
@@ -10,6 +9,7 @@ use std::path::Path;
 use cgmath::{Array, Matrix};
 use gl::types::*;
 use regex::Regex;
+use rustc_hash::FxHashMap;
 
 use crate::graphics::resource::Bind;
 
@@ -56,15 +56,15 @@ impl GlError {
 /// ShaderProgramBuilder allows for loading multiple GLSL source files and compiling them into one
 /// OpenGL shader program.
 pub struct ShaderProgramBuilder {
-    shaders: HashMap<ShaderType, Shader>,
-    include_cache: HashMap<String, String>,
+    shaders: FxHashMap<ShaderType, Shader>,
+    include_cache: FxHashMap<String, String>,
 }
 
 impl ShaderProgramBuilder {
     pub fn new() -> ShaderProgramBuilder {
         ShaderProgramBuilder {
-            shaders: HashMap::new(),
-            include_cache: HashMap::new(),
+            shaders: FxHashMap::default(),
+            include_cache: FxHashMap::default(),
         }
     }
 
@@ -101,26 +101,26 @@ impl ShaderProgramBuilder {
         Ok(self)
     }
 
-    fn load_file(&mut self, path: &str) -> Result<HashMap<String, String>, ShaderError> {
+    fn load_file(&mut self, path: &str) -> Result<FxHashMap<String, String>, ShaderError> {
         let re_include = Regex::new("^#include\\s\"(.*)\"$").unwrap();
 
         let mut current_type = String::from("");
-        let mut shader_types = HashMap::new();
+        let mut shader_types = FxHashMap::default();
 
         let source = std::fs::read_to_string(path)?;
-        for line in source.split("\n") {
+        for line in source.split('\n') {
             let line = line.trim_end();
 
             // handle shader type directives
             if line.starts_with("#shader_type") {
-                let parts: Vec<_> = line.split(" ").collect();
+                let parts: Vec<_> = line.split(' ').collect();
                 if parts.len() != 2 {
                     return Err(ShaderError::Other(format!(
                         "invalid shader type directive: {}", line,
                     )));
                 }
 
-                current_type = String::from(parts[1].to_lowercase());
+                current_type = parts[1].to_lowercase();
                 if shader_types.contains_key(&current_type) {
                     return Err(ShaderError::Other(format!(
                         "same shader type used a second time: {}", line,
@@ -162,7 +162,7 @@ impl ShaderProgramBuilder {
 
         // use cache and prevent cyclic includes
         if let Some(ok) = include_src {
-            if ok.len() == 0 {
+            if ok.is_empty() {
                 return Err(ShaderError::Other(
                     format!("cyclic include of {}", path),
                 ));
@@ -217,7 +217,7 @@ impl ShaderProgramBuilder {
     pub fn build(&self) -> Result<ShaderProgram, ShaderError> {
         let program = ShaderProgram {
             gl_id: unsafe { gl::CreateProgram() },
-            uniform_location_cache: RefCell::new(HashMap::new()),
+            uniform_location_cache: RefCell::new(FxHashMap::default()),
         };
         for shader in self.shaders.values() {
             unsafe { gl::AttachShader(program.gl_id, shader.gl_id) }
@@ -234,10 +234,11 @@ impl ShaderProgramBuilder {
 
 #[cfg(test)]
 mod shader_program_builder_tests {
-    use std::collections::HashMap;
     use std::io::Write;
+    use std::iter::FromIterator;
 
     use indoc::{formatdoc, indoc};
+    use rustc_hash::FxHashMap;
     use tempfile::NamedTempFile;
 
     use crate::graphics::shader::ShaderProgramBuilder;
@@ -266,11 +267,11 @@ mod shader_program_builder_tests {
         let shader_path = shader_file.path().as_os_str().to_str().unwrap();
         let result = builder.load_file(shader_path).unwrap();
 
-        assert_eq!(result, HashMap::from([
+        assert_eq!(result, FxHashMap::from_iter([
             ("vertex".to_string(), "// test include\n\n\nvoid main() { gl_Position = vec4(position, 1.0); }\n\n".to_string()),
             ("fragment".to_string(), "void main() { }\n\n".to_string()),
         ]));
-        assert_eq!(builder.include_cache, HashMap::from([
+        assert_eq!(builder.include_cache, FxHashMap::from_iter([
             (include_path.to_string(), "// test include\n\n".to_string()),
         ]));
 
@@ -281,7 +282,7 @@ mod shader_program_builder_tests {
 
 pub struct ShaderProgram {
     gl_id: GLuint,
-    uniform_location_cache: RefCell<HashMap<&'static str, GLint>>,
+    uniform_location_cache: RefCell<FxHashMap<&'static str, GLint>>,
 }
 
 impl Drop for ShaderProgram {

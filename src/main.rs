@@ -4,10 +4,10 @@ extern crate gl;
 #[macro_use]
 extern crate memoffset;
 
-use crate::game::game::Game;
+use crate::gamelogic::game::Game;
 
 mod core;
-mod game;
+mod gamelogic;
 mod graphics;
 mod systems;
 mod world;

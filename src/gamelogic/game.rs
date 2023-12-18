@@ -4,8 +4,8 @@ use cgmath::{Point3, Vector3};
 use imgui::Condition;
 
 use crate::core::{Config, Frame, Window};
-use crate::game::gameplay::Gameplay;
-use crate::game::world::World;
+use crate::gamelogic::gameplay::Gameplay;
+use crate::gamelogic::world::World;
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{AABBDef, Entity};
 use crate::world::chunk::ChunkPos;

@@ -4,11 +4,11 @@
 
 ```mermaid
 flowchart LR
-    main(main.rs) --> game
-    game --> core
-    game --> graphics
-    game --> systems
-    game --> world
+    main(main.rs) --> gamelogic
+    gamelogic --> core
+    gamelogic --> graphics
+    gamelogic --> systems
+    gamelogic --> world
     graphics --> core
     graphics --> world
     systems --> graphics

@@ -5,7 +5,7 @@ use std::ops::Add;
 use cgmath::{ElementWise, InnerSpace, Matrix4, SquareMatrix, Vector2, Vector3};
 
 use crate::core::Frame;
-use crate::game::content::blocks;
+use crate::gamelogic::content::blocks;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
@@ -161,7 +161,7 @@ impl Gameplay {
             self.looking_at_block = None;
         }
 
-        let hot_bar = vec![blocks::GRASS, blocks::DIRT, blocks::STONE, blocks::STONE_BRICKS, blocks::GLASS];
+        let hot_bar = [blocks::GRASS, blocks::DIRT, blocks::STONE, blocks::STONE_BRICKS, blocks::GLASS];
         for i in 1..=hot_bar.len() {
             let key = glfw::Key::Num1 as c_int + (i - 1) as c_int;
             let key = &key as *const c_int as *const glfw::Key;
@@ -173,48 +173,42 @@ impl Gameplay {
         }
 
         // removing blocks
-        if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) {
-            if block_result.did_hit() {
-                let x = block_result.pos.x.floor() as i32;
-                let y = block_result.pos.y.floor() as i32;
-                let z = block_result.pos.z.floor() as i32;
-                world.set_block(x, y, z, blocks::AIR);
-            }
+        if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) && block_result.did_hit() {
+            let x = block_result.pos.x.floor() as i32;
+            let y = block_result.pos.y.floor() as i32;
+            let z = block_result.pos.z.floor() as i32;
+            world.set_block(x, y, z, blocks::AIR);
         }
 
         // block picking
-        if frame.input.is_button_pressed_once(&glfw::MouseButton::Button3) {
-            if block_result.did_hit() {
-                let x = block_result.pos.x.floor() as i32;
-                let y = block_result.pos.y.floor() as i32;
-                let z = block_result.pos.z.floor() as i32;
-                self.selected_block = world.get_block(x, y, z);
-            }
+        if frame.input.is_button_pressed_once(&glfw::MouseButton::Button3) && block_result.did_hit() {
+            let x = block_result.pos.x.floor() as i32;
+            let y = block_result.pos.y.floor() as i32;
+            let z = block_result.pos.z.floor() as i32;
+            self.selected_block = world.get_block(x, y, z);
         }
 
         // adding blocks
-        if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) {
-            if block_result.did_hit() {
-                let block_normal = block_result.normal;
-                let block_pos = block_result.pos.add(block_normal);
-                let x = block_pos.x.floor() as i32 as f32;
-                let y = block_pos.y.floor() as i32 as f32;
-                let z = block_pos.z.floor() as i32 as f32;
+        if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) && block_result.did_hit() {
+            let block_normal = block_result.normal;
+            let block_pos = block_result.pos.add(block_normal);
+            let x = block_pos.x.floor() as i32 as f32;
+            let y = block_pos.y.floor() as i32 as f32;
+            let z = block_pos.z.floor() as i32 as f32;
 
-                let aabb = &player.aabb_def;
-                let player_min_x = player.position.x + aabb.offset.x;
-                let player_min_y = player.position.y + aabb.offset.y - 0.1; // add offset to prevent physics glitches
-                let player_min_z = player.position.z + aabb.offset.z;
-                let player_max_x = player.position.x + aabb.offset.x + aabb.extents.x;
-                let player_max_y = player.position.y + aabb.offset.y + aabb.extents.y;
-                let player_max_z = player.position.z + aabb.offset.z + aabb.extents.z;
+            let aabb = &player.aabb_def;
+            let player_min_x = player.position.x + aabb.offset.x;
+            let player_min_y = player.position.y + aabb.offset.y - 0.1; // add offset to prevent physics glitches
+            let player_min_z = player.position.z + aabb.offset.z;
+            let player_max_x = player.position.x + aabb.offset.x + aabb.extents.x;
+            let player_max_y = player.position.y + aabb.offset.y + aabb.extents.y;
+            let player_max_z = player.position.z + aabb.offset.z + aabb.extents.z;
 
-                if (player_max_x < x || player_min_x > x + 1.0) ||
-                    (player_max_y < y || player_min_y > y + 1.0) ||
-                    (player_max_z < z || player_min_z > z + 1.0) ||
-                    player.caps.flying {
-                    world.set_block(x as i32, y as i32, z as i32, self.selected_block);
-                }
+            if (player_max_x < x || player_min_x > x + 1.0) ||
+                (player_max_y < y || player_min_y > y + 1.0) ||
+                (player_max_z < z || player_min_z > z + 1.0) ||
+                player.caps.flying {
+                world.set_block(x as i32, y as i32, z as i32, self.selected_block);
             }
         }
     }

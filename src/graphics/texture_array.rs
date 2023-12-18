@@ -1,11 +1,11 @@
 #![allow(dead_code)]
 
-use std::collections::HashMap;
 use std::ffi::c_void;
 use std::path::Path;
 
 use gl::types::*;
 use image::{GenericImageView, ImageError};
+use rustc_hash::FxHashMap;
 
 use crate::gl_assert_no_error;
 use crate::graphics::resource::Bind;
@@ -35,7 +35,7 @@ enum ImageContent {
 /// can later be used, to lookup the texture's index in the array.
 pub struct TextureArrayBuilder {
     mip_levels: u8,
-    textures: HashMap<String, u32>,
+    textures: FxHashMap<String, u32>,
     content: Vec<ImageContent>,
 }
 
@@ -43,14 +43,14 @@ impl TextureArrayBuilder {
     pub fn new(mip_levels: u8) -> TextureArrayBuilder {
         TextureArrayBuilder {
             mip_levels,
-            textures: Default::default(),
+            textures: FxHashMap::default(),
             content: Vec::new(),
         }
     }
 
-    pub fn add_file(&mut self, name: &String, path: &String) -> Result<&mut TextureArrayBuilder, TextureArrayError> {
-        self.register_texture(name.clone())?;
-        self.content.push(ImageContent::File(path.clone()));
+    pub fn add_file(&mut self, name: &str, path: &str) -> Result<&mut TextureArrayBuilder, TextureArrayError> {
+        self.register_texture(name.to_owned())?;
+        self.content.push(ImageContent::File(path.to_owned()));
         Ok(self)
     }
 
@@ -79,7 +79,7 @@ impl TextureArrayBuilder {
         match &self.content[0] {
             ImageContent::File(path) => {
                 let path = Path::new(&path);
-                image = Some(image::open(&path)?);
+                image = Some(image::open(path)?);
                 width = image.as_ref().unwrap().width();
                 height = image.as_ref().unwrap().height();
             }
@@ -108,7 +108,7 @@ impl TextureArrayBuilder {
                 ImageContent::File(path) => {
                     if i > 0 {
                         // the first image was already loaded to fetch the dimensions of the array
-                        image = Some(image::open(&path)?.flipv());
+                        image = Some(image::open(path)?.flipv());
                     }
 
                     let image = image.as_ref().unwrap();
@@ -126,7 +126,7 @@ impl TextureArrayBuilder {
             assert!(iw == width && ih == height, "image does not match base dimensions: got: {}x{}, base: {}x{}", iw, ih, width, height);
             assert_eq!(data.len(), (iw * ih * 4) as usize);
 
-            texture.sub_image_3d(i as u32, iw, ih, &data);
+            texture.sub_image_3d(i as u32, iw, ih, data);
             gl_assert_no_error!();
         }
         if self.mip_levels > 1 {
@@ -163,7 +163,7 @@ impl TextureArrayBuilder {
 
 pub struct TextureArray {
     gl_id: GLuint,
-    textures: HashMap<String, u32>,
+    textures: FxHashMap<String, u32>,
 }
 
 impl Drop for TextureArray {
@@ -173,7 +173,7 @@ impl Drop for TextureArray {
 }
 
 impl TextureArray {
-    fn new(width: u32, height: u32, depth: u32, mip_levels: u8, textures: HashMap<String, u32>) -> TextureArray {
+    fn new(width: u32, height: u32, depth: u32, mip_levels: u8, textures: FxHashMap<String, u32>) -> TextureArray {
         let mut id = 0;
 
         unsafe {
@@ -200,7 +200,7 @@ impl TextureArray {
         TextureArray { gl_id: id, textures }
     }
 
-    pub fn sub_image_3d(&mut self, depth: u32, width: u32, height: u32, data: &Vec<u8>) {
+    pub fn sub_image_3d(&mut self, depth: u32, width: u32, height: u32, data: &[u8]) {
         unsafe {
             gl::TexSubImage3D(
                 gl::TEXTURE_2D_ARRAY,

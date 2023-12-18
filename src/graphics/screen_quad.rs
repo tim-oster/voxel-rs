@@ -28,7 +28,7 @@ impl ScreenQuad {
             Vertex { position: AlignedPoint3::new(-1.0, -1.0, -1.0), uv: AlignedPoint2::new(0.0, 0.0), normal: AlignedVec3::new(0.0, 0.0, 1.0) },
             Vertex { position: AlignedPoint3::new(1.0, -1.0, -1.0), uv: AlignedPoint2::new(1.0, 0.0), normal: AlignedVec3::new(0.0, 0.0, 1.0) },
         ];
-        let indices = vec![0i32, 1, 3, 1, 2, 3];
+        let indices = [0i32, 1, 3, 1, 2, 3];
 
         unsafe {
             let (mut vao, mut vbo, mut ebo) = (0, 0, 0);
