@@ -58,7 +58,62 @@ pub struct SerializationResult {
     pub depth: u8,
 }
 
-// TODO write doc
+/// SVO (Sparse Voxel Octree) is decorator for a normal octree that can serialize into a binary format useful for
+/// space-efficient, quick traversal on the GPU. Depending on how `T` serializes, it is possible to have nested
+/// octrees.
+///
+/// ### Terminology
+///
+/// - **Octree** = defined by one octant as the root of the tree
+/// - **Octant** = a cube that can be subdivided into 8 equal sub-cubes/child octants, each containing more octants or
+/// one leaf value
+/// - **Leaf** = end nodes of the tree - they contain the actual value
+/// - **Absolute Pointer** = SVOs use a linear byte buffer to encode their data. For one octant to be able to reference
+/// a child octant, pointers are required. Absolute pointers contain the absolute position inside the buffer. This is
+/// used at the boundaries of the root octree and leaf values in this implementation.
+/// - **Relative Pointer** = in contrast to absolute pointers, relative pointers encode the target index relative to
+/// their own position. This makes encoding of coherent data efficient as it is not required to keep track of all
+/// absolute positions.
+///
+/// ### Optimisations
+///
+/// - On [`Svo::serialize`], the root octree is always fully serialized and all its octants have relative pointers
+/// to each other. Leaves however are only serialized once. The root octree uses absolute pointers to index them. This
+/// allows for efficient "leaf moving" by swapping the pointers in the root octree.
+/// - Removing leaves frees up already allocated space. The implementation keeps track of that space and reuses it
+/// efficiently for new leaves.
+/// - [`Svo::write_to`] can be used to copy the whole serialized buffer to a target buffer. This only needs to be done
+/// once, after that a call to [`Svo::write_changes_to`] with the same buffer suffices and only copies the changed
+/// buffer ranges.
+///
+/// ### Binary format
+///
+/// Each octant is encoded as 12 `u32`s or 48 bytes - 16 bytes for the header and 32 bytes for the body. The header
+/// contains child & leaf masks for every octant. If the child mask is set for an octant, than depending on the state
+/// of the leaf mask at that bit, the body either contains a absolute/relative pointer to a child octant or to the
+/// encoded leaf value.
+///
+/// **Example:**
+/// ```
+/// // octant child order [ 000, 100, 010, 011, 100, 101, 110, 111 ]
+///
+/// // header -------------------------------
+/// [0]  00000000 00000000  00000010 00000010
+/// //                     `-----------------`---> leaf | child mask (each one byte) for octant (0,0,0)
+/// [1]  00000000 00000000  00000000 00000000
+/// [2]  00000000 10000000  00000000 00000000
+/// //  `-----------------`----------------------> leaf | child mask for octant (1,0,0)
+/// [3]  00000000 00000000  00000000 00000000
+/// // body ---------------------------------
+/// [4]  00000000 00000000  00000000 11111111 // leaf value for octant (0,0,0) = 255
+/// [5]  00000000 00000000  00000000 00000000
+/// [6]  00000000 00000000  00000000 00000000
+/// [7]  00000000 00000000  00000000 00000000
+/// [8]  00000000 00000000  00000000 00000000
+/// [9]  10000000 00000000  00000000 00000100 // relative pointer to octant (1,0,0) = 4 (+ 32nd bit)
+/// [10] 00000000 00000000  00000000 00000000
+/// [11] 00000000 00000000  00000000 00000000
+/// ```
 pub struct Svo<T: SvoSerializable> {
     octree: Octree<T>,
     change_set: HashSet<OctantChange>,
@@ -138,7 +193,8 @@ impl<T: SvoSerializable> Svo<T> {
         self.octree.get_leaf(pos)
     }
 
-    /// Serializes the root octant and adds/removes all changed leaves.
+    /// Serializes the root octant and adds/removes all changed leaves. Must be called before [`Svo::write_to`] or
+    /// [`Svo::write_changes_to`] for them to have any effect.
     pub fn serialize(&mut self) {
         if self.octree.root.is_none() {
             return;
@@ -217,7 +273,8 @@ impl<T: SvoSerializable> Svo<T> {
         self.root_info.unwrap().serialization.depth
     }
 
-    /// Writes the full serialized SVO buffer to the `dst` pointer. Returns the number of elements written.
+    /// Writes the full serialized SVO buffer to the `dst` pointer. Returns the number of elements written. Must be
+    /// called after [`Svo::serialize`].
     pub unsafe fn write_to(&self, dst: *mut u32) -> usize {
         if self.root_info.is_none() {
             return 0;
@@ -236,7 +293,7 @@ impl<T: SvoSerializable> Svo<T> {
 
     /// Writes all changes after the last reset to the given buffer. The implementation assumes that the same buffer,
     /// that was used in the initial call to [`Svo::write_to`] and previous calls to this method, is reused. If `reset`
-    /// is true, the change tracker is reset.
+    /// is true, the change tracker is reset. Must be called after [`Svo::serialize`].
     pub unsafe fn write_changes_to(&mut self, dst: *mut u32, reset: bool) {
         if self.root_info.is_none() {
             return;
@@ -293,10 +350,27 @@ impl SerializedChunk {
         pos.hash(&mut hasher);
         let pos_hash = hasher.finish();
 
+        let storage = chunk.storage.as_ref().unwrap();
         let mut buffer = alloc.allocate();
-        let result = chunk.storage.as_ref().unwrap().serialize(&mut buffer.data, lod);
+        let result = Self::serialize(storage, &mut buffer.data, lod);
         let buffer = if result.depth > 0 { Some(buffer) } else { None };
         SerializedChunk { pos, pos_hash, lod, borrowed_chunk: Some(chunk), buffer, result }
+    }
+
+    fn serialize(octree: &Octree<BlockId>, dst: &mut Vec<u32>, lod: u8) -> SerializationResult {
+        if octree.root.is_none() {
+            return SerializationResult { child_mask: 0, leaf_mask: 0, depth: 0 };
+        }
+
+        let root_id = octree.root.unwrap();
+        serialize_octant(octree, root_id, dst, lod, &|params| {
+            // apply leaf mask, child mask is already applied
+            params.result.leaf_mask |= 1 << params.idx;
+            // write actual value to target position
+            params.dst[(4 + params.idx) as usize] = *params.content as u32;
+            // leaf values have a static depth of 1
+            params.result.depth = 1;
+        })
     }
 }
 
@@ -313,24 +387,6 @@ impl SvoSerializable for SerializedChunk {
             dst.extend(buffer.data.iter());
         }
         self.result
-    }
-}
-
-impl Octree<BlockId> {
-    fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult {
-        if self.root.is_none() {
-            return SerializationResult { child_mask: 0, leaf_mask: 0, depth: 0 };
-        }
-
-        let root_id = self.root.unwrap();
-        serialize_octant(self, root_id, dst, lod, &|params| {
-            // apply leaf mask, child mask is already applied
-            params.result.leaf_mask |= 1 << params.idx;
-            // write actual value to target position
-            params.dst[(4 + params.idx) as usize] = *params.content as u32;
-            // leaf values have a static depth of 1
-            params.result.depth = 1;
-        })
     }
 }
 
@@ -477,7 +533,7 @@ mod svo_tests {
 
         let alloc = Allocator::new(Box::new(|| ChunkBuffer::new()), None);
         let mut buffer = alloc.allocate();
-        let result = octree.serialize(&mut buffer.data, 0);
+        let result = SerializedChunk::serialize(&octree, &mut buffer.data, 0);
         let sc = SerializedChunk {
             pos: ChunkPos::new(1, 0, 0),
             lod: 0,
@@ -776,7 +832,7 @@ mod svo_tests {
 
         // LOD 5
         let mut buffer = Vec::new();
-        let result = octree.serialize(&mut buffer, 5);
+        let result = SerializedChunk::serialize(&octree, &mut buffer, 5);
         assert_eq!(buffer, vec![
             // core octant header
             (2 << 8) << 16,
@@ -897,7 +953,7 @@ mod svo_tests {
 
         // LOD 4
         let mut buffer = Vec::new();
-        let result = octree.serialize(&mut buffer, 4);
+        let result = SerializedChunk::serialize(&octree, &mut buffer, 4);
         assert_eq!(buffer, vec![
             // core octant header
             (2 << 8) << 16,
@@ -994,7 +1050,7 @@ mod svo_tests {
 
         // LOD 3
         let mut buffer = Vec::new();
-        let result = octree.serialize(&mut buffer, 3);
+        let result = SerializedChunk::serialize(&octree, &mut buffer, 3);
         assert_eq!(buffer, vec![
             // core octant header
             (2 << 8) << 16,
@@ -1067,7 +1123,7 @@ mod svo_tests {
 
         // LOD 2
         let mut buffer = Vec::new();
-        let result = octree.serialize(&mut buffer, 2);
+        let result = SerializedChunk::serialize(&octree, &mut buffer, 2);
         assert_eq!(buffer, vec![
             // core octant header
             ((2 << 8) | 2) << 16,
@@ -1116,7 +1172,7 @@ mod svo_tests {
 
         // LOD 1
         let mut buffer = Vec::new();
-        let result = octree.serialize(&mut buffer, 1);
+        let result = SerializedChunk::serialize(&octree, &mut buffer, 1);
         assert_eq!(buffer, vec![
             // leaf header
             0,
