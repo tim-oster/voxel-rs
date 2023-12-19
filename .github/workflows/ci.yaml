@@ -10,6 +10,14 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
+      - name: Cache apt packages
+        uses: actions/cache@v2
+        with:
+          path: |
+            /var/cache/apt/archives
+            /etc/apt/
+          key: apt-v1
+
       - name: Cache Rust dependencies
         uses: actions/cache@v2
         with:
@@ -19,7 +27,7 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
             target/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          key: cargo-${{ hashFiles('**/Cargo.lock') }}
 
       - name: Install Rust
         uses: actions-rs/toolchain@v1
