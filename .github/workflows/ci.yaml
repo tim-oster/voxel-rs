@@ -31,8 +31,12 @@ jobs:
       - name: Install OpenGL
         run: |
           sudo apt-get update
+          # opengl dependencies
           sudo apt-get install libglu1-mesa-dev freeglut3-dev mesa-common-dev
-          sudo apt-get install libglfw3-dev libglfw3 libxrandr-dev
+          # glfw dependencies
+          sudo apt-get install libglfw3-dev libglfw3
+          # imgui dependencies
+          sudo apt-get install libxrandr-dev libxinerama-dev
 
       - name: Run tests
         uses: actions-rs/cargo@v1
