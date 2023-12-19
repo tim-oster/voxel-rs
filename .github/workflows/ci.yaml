@@ -31,14 +31,11 @@ jobs:
       - name: Install OpenGL
         run: |
           sudo apt-get update
-          # headless opengl dependencies
-          #sudo apt-get install libosmesa6-dev
-          sudo apt-get install mesa-utils xvfb
-          # glfw dependencies
-          sudo apt-get install xorg-dev
+          sudo apt-get install mesa-utils xvfb xorg-dev
 
       - name: Run tests
         run: |
+          glxinfo
           xvfb-run --auto-servernum cargo test
 
 #      - name: Run tests
