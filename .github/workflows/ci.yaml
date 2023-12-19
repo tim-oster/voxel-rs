@@ -32,14 +32,19 @@ jobs:
         run: |
           sudo apt-get update
           # headless opengl dependencies
-          sudo apt-get install libosmesa6-dev
+          #sudo apt-get install libosmesa6-dev
+          sudo apt-get install mesa-utils xvfb
           # glfw dependencies
           sudo apt-get install xorg-dev
 
       - name: Run tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
+        run: |
+          xvfb-run --auto-servernum cargo test
+
+#      - name: Run tests
+#        uses: actions-rs/cargo@v1
+#        with:
+#          command: test
 
       - name: Run linter
         uses: actions-rs/cargo@v1
