@@ -559,7 +559,12 @@ mod tests {
                 assert_float_eq!(buffer_out.result.uv.x, case.expected_uv.x),
                 assert_float_eq!(buffer_out.result.uv.y, case.expected_uv.y),
             ), "{}", case_name);
-            assert_eq!(buffer_out.result.color.0, case.expected_color, "{}", case_name);
+            assert_eq!(buffer_out.result.color.0, Vector4::new(
+                assert_float_eq!(buffer_out.result.color.x, case.expected_color.x),
+                assert_float_eq!(buffer_out.result.color.y, case.expected_color.y),
+                assert_float_eq!(buffer_out.result.color.z, case.expected_color.z),
+                assert_float_eq!(buffer_out.result.color.w, case.expected_color.w),
+            ), "{}", case_name);
         }
     }
 

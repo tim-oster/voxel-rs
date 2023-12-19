@@ -43,8 +43,21 @@ jobs:
 
       - name: Run tests
         run: |
+          echo "OpenGL Version Info:"
           xvfb-run --auto-servernum glxinfo | grep OpenGL | grep -v extensions
+          
+          echo ""
+          echo "Run tests:"
           xvfb-run --auto-servernum cargo test
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: render-tests
+          path: assets/tests/*.png
+          if-no-files-found: error
+          retention-days: 1
 
       - name: Run linter
         uses: actions-rs/cargo@v1
