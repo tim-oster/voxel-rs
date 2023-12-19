@@ -35,13 +35,8 @@ jobs:
 
       - name: Run tests
         run: |
-          xvfb-run --auto-servernum glxinfo
+          xvfb-run --auto-servernum glxinfo | grep OpenGL | grep -v extensions
           xvfb-run --auto-servernum cargo test
-
-#      - name: Run tests
-#        uses: actions-rs/cargo@v1
-#        with:
-#          command: test
 
       - name: Run linter
         uses: actions-rs/cargo@v1

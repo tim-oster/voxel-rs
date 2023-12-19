@@ -31,7 +31,7 @@ pub struct GlContext {
 // on top of rust's inbuilt one.
 static GLFW_CONTEXT: Lazy<Mutex<glfw::Glfw>> = Lazy::new(|| {
     let mut context = glfw::init(glfw::FAIL_ON_ERRORS).unwrap();
-    context.window_hint(glfw::WindowHint::ContextVersion(4, 6));
+    context.window_hint(glfw::WindowHint::ContextVersion(4, 5));
     context.window_hint(glfw::WindowHint::OpenGlProfile(glfw::OpenGlProfileHint::Core));
     Mutex::new(context)
 });
