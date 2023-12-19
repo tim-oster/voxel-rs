@@ -1,5 +1,5 @@
 #shader_type compute
-#version 460
+#version 450
 
 layout (local_size_x = 1) in;
 

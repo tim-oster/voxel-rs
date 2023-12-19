@@ -1,5 +1,5 @@
 #shader_type vertex
-#version 460
+#version 450
 
 layout (location = 0) in vec3 position;
 layout (location = 1) in vec2 uv;
@@ -14,7 +14,7 @@ void main() {
 // ------------------------------------------------------------
 
 #shader_type fragment
-#version 460
+#version 450
 
 #include "svo.glsl"
 

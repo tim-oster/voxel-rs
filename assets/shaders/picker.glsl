@@ -1,5 +1,5 @@
 #shader_type compute
-#version 460
+#version 450
 
 #include "svo.glsl"
 
