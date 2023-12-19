@@ -174,6 +174,8 @@ impl Drop for TextureArray {
 
 impl TextureArray {
     fn new(width: u32, height: u32, depth: u32, mip_levels: u8, textures: FxHashMap<String, u32>) -> TextureArray {
+        assert!(mip_levels > 0, "mip_levels must at least be 1, but is {}", mip_levels);
+
         let mut id = 0;
 
         unsafe {
