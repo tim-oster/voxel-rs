@@ -46,7 +46,7 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
         vec2 local = abs(res.uv - 0.5) * 2;
         float lmax = max(local.x, local.y);
         if (lmax > 1.0 - thickness) {
-            return vec4(1-color.rgb, 1);
+            return vec4(1);
         }
     }
 
