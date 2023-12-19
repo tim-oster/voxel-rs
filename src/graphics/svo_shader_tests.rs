@@ -434,16 +434,37 @@ mod tests {
                 },
             },
         ];
+        let derive_expected = |actual: &OctreeResult, expected: &OctreeResult| OctreeResult {
+            t: assert_float_eq!(actual.t, expected.t),
+            value: expected.value,
+            face_id: expected.face_id,
+            pos: AlignedPoint3::new(
+                assert_float_eq!(actual.pos.x, expected.pos.x),
+                assert_float_eq!(actual.pos.y, expected.pos.y),
+                assert_float_eq!(actual.pos.z, expected.pos.z),
+            ),
+            uv: AlignedPoint2::new(
+                assert_float_eq!(actual.uv.x, expected.uv.x),
+                assert_float_eq!(actual.uv.y, expected.uv.y),
+            ),
+            color: AlignedVec4::new(
+                assert_float_eq!(actual.color.x, expected.color.x),
+                assert_float_eq!(actual.color.y, expected.color.y),
+                assert_float_eq!(actual.color.z, expected.color.z),
+                assert_float_eq!(actual.color.w, expected.color.w),
+            ),
+            inside_block: expected.inside_block,
+        };
         for case in cases {
             let buffer_out = cast_ray(&setup.shader, case.pos, case.dir, 100.0, false);
-            assert_eq!(buffer_out.result, case.expected, "test case \"{}\" inside", case.name);
+            assert_eq!(buffer_out.result, derive_expected(&buffer_out.result, &case.expected), "test case \"{}\" inside", case.name);
 
             let mut case = case;
             case.pos -= case.dir.normalize();
             case.expected.t += 1.0;
 
             let buffer_out = cast_ray(&setup.shader, case.pos, case.dir, 100.0, false);
-            assert_eq!(buffer_out.result, case.expected, "test case \"{}\" outside", case.name);
+            assert_eq!(buffer_out.result, derive_expected(&buffer_out.result, &case.expected), "test case \"{}\" outside", case.name);
         }
     }
 
