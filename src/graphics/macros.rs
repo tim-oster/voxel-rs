@@ -17,6 +17,7 @@ macro_rules! impl_assert_eq {
             };
         }
 
+        #[allow(unused_imports)]
         pub(crate) use $macro_name;
     };
 }
