@@ -35,7 +35,7 @@ jobs:
 
       - name: Run tests
         run: |
-          glxinfo
+          xvfb-run --auto-servernum glxinfo
           xvfb-run --auto-servernum cargo test
 
 #      - name: Run tests
