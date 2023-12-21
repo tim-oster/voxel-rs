@@ -75,7 +75,7 @@ impl Gameplay {
 
     fn handle_movement(&mut self, frame: &mut Frame, player: &mut Entity) {
         let forward = player.get_forward();
-        let right = forward.cross(Vector3::unit_y());
+        let right = forward.cross(Vector3::unit_y()).normalize();
 
         let mut impulse = Vector3::new(0.0, 0.0, 0.0);
 
