@@ -9,6 +9,7 @@ mod tests {
     use crate::graphics::buffer;
     use crate::graphics::buffer::{Buffer, MappedBuffer};
     use crate::graphics::macros::{AlignedBool, AlignedPoint2, AlignedPoint3, AlignedVec3, AlignedVec4};
+    use crate::graphics::macros::{assert_vec2_eq, assert_vec3_eq, assert_vec4_eq};
     use crate::graphics::resource::Resource;
     use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
     use crate::graphics::svo::buffer_indices;
@@ -294,7 +295,7 @@ mod tests {
             t: 31.0,
             value: 1,
             face_id: 0,
-            pos: AlignedPoint3::new(31.000008, 0.5, 0.5),
+            pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(31.000008, 0.5, 0.5)),
             uv: AlignedPoint2::new(0.5, 0.5),
             color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
             inside_block: AlignedBool::from(false),
@@ -434,16 +435,25 @@ mod tests {
                 },
             },
         ];
+        let derive_expected = |actual: &OctreeResult, expected: &OctreeResult| OctreeResult {
+            t: assert_float_eq!(actual.t, expected.t),
+            value: expected.value,
+            face_id: expected.face_id,
+            pos: assert_vec3_eq!(actual.pos, expected.pos),
+            uv: assert_vec2_eq!(actual.uv, expected.uv),
+            color: assert_vec4_eq!(actual.color, expected.color),
+            inside_block: expected.inside_block,
+        };
         for case in cases {
             let buffer_out = cast_ray(&setup.shader, case.pos, case.dir, 100.0, false);
-            assert_eq!(buffer_out.result, case.expected, "test case \"{}\" inside", case.name);
+            assert_eq!(buffer_out.result, derive_expected(&buffer_out.result, &case.expected), "test case \"{}\" inside", case.name);
 
             let mut case = case;
             case.pos -= case.dir.normalize();
             case.expected.t += 1.0;
 
             let buffer_out = cast_ray(&setup.shader, case.pos, case.dir, 100.0, false);
-            assert_eq!(buffer_out.result, case.expected, "test case \"{}\" outside", case.name);
+            assert_eq!(buffer_out.result, derive_expected(&buffer_out.result, &case.expected), "test case \"{}\" outside", case.name);
         }
     }
 
@@ -555,11 +565,10 @@ mod tests {
         for (i, case) in cases.iter().enumerate() {
             let buffer_out = cast_ray(&setup.shader, case.pos, case.dir, 32.0, false);
             let case_name = format!("#{} (pos={:?}, dir={:?})", i, case.pos, case.dir);
-            assert_eq!(buffer_out.result.uv.0, Point2::new(
-                assert_float_eq!(buffer_out.result.uv.x, case.expected_uv.x),
-                assert_float_eq!(buffer_out.result.uv.y, case.expected_uv.y),
-            ), "{}", case_name);
-            assert_eq!(buffer_out.result.color.0, case.expected_color, "{}", case_name);
+
+            println!("{}", case_name);
+            assert_vec2_eq!(buffer_out.result.uv, case.expected_uv);
+            assert_vec4_eq!(buffer_out.result.color, case.expected_color);
         }
     }
 
@@ -586,15 +595,8 @@ mod tests {
             t: assert_float_eq!(buffer_out.result.t, 0.1, 0.01),
             value: 3,
             face_id: 4,
-            pos: AlignedPoint3::new(
-                assert_float_eq!(buffer_out.result.pos.x, 0.295, 0.01),
-                assert_float_eq!(buffer_out.result.pos.y, 0.5),
-                assert_float_eq!(buffer_out.result.pos.z, 0.0),
-            ),
-            uv: AlignedPoint2::new(
-                assert_float_eq!(buffer_out.result.uv.x, 0.295, 0.01),
-                assert_float_eq!(buffer_out.result.uv.y, 0.5),
-            ),
+            pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(0.295, 0.5, 0.0), 0.01),
+            uv: assert_vec2_eq!(buffer_out.result.uv, AlignedPoint2::new(0.295, 0.5), 0.01),
             color: AlignedVec4::new(0.0, 0.0, 0.0, 0.0),
             inside_block: AlignedBool::from(false),
         }, "do not cast translucent");
@@ -617,15 +619,8 @@ mod tests {
             t: assert_float_eq!(buffer_out.result.t, 1.2, 0.01),
             value: 4,
             face_id: 4,
-            pos: AlignedPoint3::new(
-                assert_float_eq!(buffer_out.result.pos.x, 5.75, 0.01),
-                assert_float_eq!(buffer_out.result.pos.y, 0.5),
-                assert_float_eq!(buffer_out.result.pos.z, 1.0),
-            ),
-            uv: AlignedPoint2::new(
-                assert_float_eq!(buffer_out.result.uv.x, 0.75, 0.01),
-                assert_float_eq!(buffer_out.result.uv.y, 0.5),
-            ),
+            pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(5.75, 0.5, 1.0), 0.01),
+            uv: assert_vec2_eq!(buffer_out.result.uv, AlignedPoint2::new(0.75, 0.5), 0.01),
             color: AlignedVec4::new(0.0, 1.0, 0.0, 1.0),
             inside_block: AlignedBool::from(false),
         }, "cast translucent with adjacent different");
@@ -667,11 +662,7 @@ mod tests {
             t: 0.5,
             value: 1,
             face_id: 0,
-            pos: AlignedPoint3::new(
-                assert_float_eq!(buffer_out.result.pos.x, 8e-6),
-                0.5,
-                0.5,
-            ),
+            pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(8e-6, 0.5, 0.5)),
             uv: AlignedPoint2::new(0.5, 0.5),
             color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
             inside_block: AlignedBool::from(false),
@@ -720,11 +711,11 @@ mod tests {
             StackFrame { t_min: assert_float_eq!(buffer_out.stack[9].t_min, 0.9593506), ptr: 2021, idx: 1, parent_octant_idx: 0, scale: 14, is_child: AlignedBool(1), is_leaf: AlignedBool(1) },
         ]);
         assert_eq!(buffer_out.result, OctreeResult {
-            t: 0.9593506,
+            t: assert_float_eq!(buffer_out.result.t, 0.9593506),
             value: 1,
             face_id: 3,
-            pos: AlignedPoint3::new(484.9203, 484.99994, 493.84668),
-            uv: AlignedPoint2::new(0.9202881, 0.8466797),
+            pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(484.9203, 484.99994, 493.84668)),
+            uv: assert_vec2_eq!(buffer_out.result.uv,AlignedPoint2::new(0.9202881, 0.8466797)),
             color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
             inside_block: AlignedBool::from(false),
         });

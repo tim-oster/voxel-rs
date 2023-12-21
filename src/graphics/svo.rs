@@ -211,6 +211,7 @@ mod svo_tests {
     use crate::{assert_float_eq, gl_assert_no_error, world};
     use crate::core::GlContext;
     use crate::graphics::framebuffer::{diff_images, Framebuffer};
+    use crate::graphics::macros::assert_vec3_eq;
     use crate::graphics::svo::{RenderParams, Svo};
     use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
@@ -330,21 +331,13 @@ mod svo_tests {
                 RayResult {
                     dst: assert_float_eq!(result.rays[0].dst, 0.5, 0.0001),
                     inside_block: false,
-                    pos: Point3::new(
-                        assert_float_eq!(result.rays[0].pos.x, 0.5, 0.0001),
-                        assert_float_eq!(result.rays[0].pos.y, 1.0, 0.0001),
-                        assert_float_eq!(result.rays[0].pos.z, 0.5, 0.0001),
-                    ),
+                    pos: assert_vec3_eq!(result.rays[0].pos, Point3::new(0.5, 1.0, 0.5), 0.0001),
                     normal: Vector3::new(0.0, 1.0, 0.0),
                 },
                 RayResult {
                     dst: assert_float_eq!(result.rays[1].dst, 0.5, 0.0001),
                     inside_block: true,
-                    pos: Point3::new(
-                        assert_float_eq!(result.rays[1].pos.x, 1.0, 0.0001),
-                        assert_float_eq!(result.rays[1].pos.y, 0.5, 0.0001),
-                        assert_float_eq!(result.rays[1].pos.z, 0.5, 0.0001),
-                    ),
+                    pos: assert_vec3_eq!(result.rays[1].pos, Point3::new(1.0, 0.5, 0.5), 0.0001),
                     normal: Vector3::new(-1.0, 0.0, 0.0),
                 },
                 RayResult {

@@ -1,5 +1,5 @@
 #shader_type vertex
-#version 460
+#version 450
 
 layout (location = 0) in vec3 position;
 layout (location = 1) in vec2 uv;
@@ -14,7 +14,7 @@ void main() {
 // ------------------------------------------------------------
 
 #shader_type fragment
-#version 460
+#version 450
 
 #include "svo.glsl"
 
@@ -46,7 +46,7 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
         vec2 local = abs(res.uv - 0.5) * 2;
         float lmax = max(local.x, local.y);
         if (lmax > 1.0 - thickness) {
-            return vec4(1-color.rgb, 1);
+            return vec4(1);
         }
     }
 

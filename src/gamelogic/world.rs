@@ -355,9 +355,9 @@ mod tests {
         gl_assert_no_error!();
 
         let actual = fb.as_image();
-        actual.save_with_format("assets/tests/game_world_end_to_end_actual.png", image::ImageFormat::Png).unwrap();
+        actual.save_with_format("assets/tests/gamelogic_world_end_to_end_actual.png", image::ImageFormat::Png).unwrap();
 
-        let expected = image::open("assets/tests/game_world_end_to_end_expected.png").unwrap();
+        let expected = image::open("assets/tests/gamelogic_world_end_to_end_expected.png").unwrap();
         let diff_percent = diff_images(&actual, &expected);
         assert!(diff_percent < 0.001, "difference: {:.5} < 0.001", diff_percent);
     }

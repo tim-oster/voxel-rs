@@ -174,6 +174,8 @@ impl Drop for TextureArray {
 
 impl TextureArray {
     fn new(width: u32, height: u32, depth: u32, mip_levels: u8, textures: FxHashMap<String, u32>) -> TextureArray {
+        assert!(mip_levels > 0, "mip_levels must at least be 1, but is {}", mip_levels);
+
         let mut id = 0;
 
         unsafe {
@@ -184,6 +186,7 @@ impl TextureArray {
             gl::TexParameteri(gl::TEXTURE_2D_ARRAY, gl::TEXTURE_WRAP_R, gl::CLAMP_TO_EDGE as GLint);
             gl::TexParameteri(gl::TEXTURE_2D_ARRAY, gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR as GLint);
             gl::TexParameteri(gl::TEXTURE_2D_ARRAY, gl::TEXTURE_MAG_FILTER, gl::NEAREST as GLint);
+            gl_assert_no_error!();
 
             gl::TexStorage3D(
                 gl::TEXTURE_2D_ARRAY,
@@ -193,6 +196,7 @@ impl TextureArray {
                 height as GLint,
                 depth as GLint,
             );
+            gl_assert_no_error!();
 
             gl::BindTexture(gl::TEXTURE_2D_ARRAY, 0);
         }

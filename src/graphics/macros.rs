@@ -1,5 +1,31 @@
 use std::ops::{Deref, DerefMut};
 
+macro_rules! impl_assert_eq {
+    ($macro_name: ident, $($args: ident),+) => {
+        #[macro_export]
+        macro_rules! $macro_name {
+            ($actual: expr, $expected: expr) => {
+                $macro_name!($actual, $expected, 1e-5)
+            };
+            ($actual: expr, $expected: expr, $eps: literal) => {
+                {
+                    $(
+                        assert_float_eq!($actual.$args, $expected.$args, $eps);
+                    )*
+                    $actual
+                }
+            };
+        }
+
+        #[allow(unused_imports)]
+        pub(crate) use $macro_name;
+    };
+}
+
+impl_assert_eq!(assert_vec2_eq, x, y);
+impl_assert_eq!(assert_vec3_eq, x, y, z);
+impl_assert_eq!(assert_vec4_eq, x, y, z, w);
+
 macro_rules! impl_constructor {
     (
         $base: ident,
@@ -76,14 +102,14 @@ impl From<bool> for AlignedBool {
 
 #[macro_export]
 macro_rules! assert_float_eq {
-        ($expected: expr, $actual: expr) => {
-            assert_float_eq!($expected, $actual, 1e-5)
+        ($actual: expr, $expected: expr) => {
+            assert_float_eq!($actual, $expected, 1e-5)
         };
-        ($expected: expr, $actual: expr, $eps: literal) => {
+        ($actual: expr, $expected: expr, $eps: literal) => {
             {
-                let diff = ($expected - $actual).abs();
-                assert!(diff < $eps, "|{} - {}| = {} >= {}", $expected, $actual, diff, $eps);
-                $expected
+                let diff = ($actual - $expected).abs();
+                assert!(diff < $eps, "|{} - {}| = {} >= {}", $actual, $expected, diff, $eps);
+                $actual
             }
         };
     }

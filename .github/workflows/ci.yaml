@@ -1,0 +1,53 @@
+name: Test and Lint
+
+on:
+  push:
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal --no-self-update
+          rustup default stable
+
+      - name: Install OpenGL
+        run: |
+          sudo apt-get update
+          sudo apt-get install mesa-utils xvfb xorg-dev
+
+      - name: Run tests
+        run: |
+          echo "OpenGL Version Info:"
+          xvfb-run --auto-servernum glxinfo | grep OpenGL | grep -v extensions
+
+          echo ""
+          echo "Run tests:"
+          xvfb-run --auto-servernum cargo test
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: render-tests
+          path: assets/tests/*.png
+          if-no-files-found: error
+          retention-days: 1
+
+      - name: Run linter
+        run: cargo clippy
