@@ -89,12 +89,14 @@ impl TextureArrayBuilder {
             }
         }
 
+        let mip_levels = self.mip_levels.min(width.min(height).ilog2() as u8);
+
         let textures = self.textures.clone();
         let mut texture = TextureArray::new(
             width,
             height,
             self.content.len() as u32,
-            self.mip_levels,
+            mip_levels,
             textures,
         );
 
@@ -129,7 +131,7 @@ impl TextureArrayBuilder {
             texture.sub_image_3d(i as u32, iw, ih, data);
             gl_assert_no_error!();
         }
-        if self.mip_levels > 1 {
+        if mip_levels > 1 {
             texture.generate_mipmaps();
         }
         texture.unbind();
