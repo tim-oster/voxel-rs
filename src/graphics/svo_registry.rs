@@ -135,7 +135,7 @@ impl VoxelRegistry {
     pub(super) fn build_material_buffer(&self, tex_array: &TextureArray) -> Buffer<MaterialInstance> {
         fn lookup(array: &TextureArray, name: Option<&String>) -> i32 {
             name.map_or(
-                0,
+                -1,
                 |name| array.lookup(name).unwrap_or(0) as i32,
             )
         }
