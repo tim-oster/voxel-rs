@@ -9,9 +9,8 @@ macro_rules! impl_assert_eq {
             };
             ($actual: expr, $expected: expr, $eps: literal) => {
                 {
-                    $(
-                        assert_float_eq!($actual.$args, $expected.$args, $eps);
-                    )*
+                    let equal = $(($actual.$args - $expected.$args).abs() < $eps)&&+;
+                    assert!(equal, "(actual) != (expected) where eps={} => {:?} != {:?}", $eps, $actual, $expected);
                     $actual
                 }
             };
