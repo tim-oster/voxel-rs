@@ -34,6 +34,7 @@ struct octree_result {
     vec3 pos;
     vec2 uv;
     vec4 color;
+    float lod;
     bool inside_block;
 };
 
@@ -64,7 +65,7 @@ layout (std430, binding = 2) readonly buffer material_registry {
 uniform sampler2DArray u_texture;// TODO rename or as param
 
 #if !defined(OCTREE_RAYTRACE_DEBUG_FN)
-#define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf) ;
+#define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf);
 #endif
 
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
@@ -217,15 +218,27 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
                 int tex_id = mat.tex_side;
                 if (face_id == 3) { tex_id = mat.tex_top; }
                 else if (face_id == 2) { tex_id = mat.tex_bottom; }
-                vec4 tex_color = texture(u_texture, vec3(uv, float(tex_id)));
+
+                float dst = t_min / octree_scale;
+                float tex_lod = smoothstep(15, 25, dst) * (dst-15) * 0.05;
+
+                #if SHADER_COMPILE_TYPE != SHADER_TYPE_COMPUTE
+                // use deriviate of t because uv is not continuous
+                vec4 tex_color_a = textureGrad(u_texture, vec3(uv, float(tex_id)), vec2(dFdx(dst), 0), vec2(dFdy(dst), 0));
+                vec4 tex_color_b = textureLod(u_texture, vec3(uv, float(tex_id)), tex_lod);
+                vec4 tex_color = mix(tex_color_b, tex_color_b, smoothstep(15, 25, dst));
+                #else
+                vec4 tex_color = textureLod(u_texture, vec3(uv, float(tex_id)), tex_lod);
+                #endif
 
                 bool first_of_kind = adjecent_leaf_count == 0 || value != last_leaf_value;
                 if ((tex_color.a > 0 || !cast_translucent) && first_of_kind) {
-                    res.t = t_min / octree_scale;
+                    res.t = dst;
                     res.face_id = face_id;
                     res.uv = uv;
                     res.value = value;
                     res.color = tex_color;
+                    res.lod = tex_lod;
 
                     res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + epsilon), pos.x + scale_exp2 - epsilon);
                     res.pos.y = min(max(ro.y + t_min * rd.y, pos.y + epsilon), pos.y + scale_exp2 - epsilon);

@@ -59,11 +59,14 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
     vec3 tangent = FACE_TANGENTS[res.face_id];
     vec3 bitangent = FACE_BITANGENTS[res.face_id];
     if (tex_normal_id != -1) {
-        vec3 tex = texture(u_texture, vec3(res.uv, float(tex_normal_id))).xzy;// blue = up -> y axis
-        // NOTE: since automatic mipmap generation is used, the resulting textures do not look that nicely. To
-        // prevent this from being noticable, texture lookups at the base mip level are forced for close distances.
-        if (res.t < 20) tex = textureLod(u_texture, vec3(res.uv, float(tex_normal_id)), smoothstep(15, 20, res.t)).xzy;
+        #if SHADER_COMPILE_TYPE != SHADER_TYPE_COMPUTE
+        vec3 tex = textureGrad(u_texture, vec3(res.uv, float(tex_normal_id)), vec2(dFdx(res.t), 0), vec2(dFdy(res.t), 0)).xzy;
+        #else
+        vec3 tex = textureLod(u_texture, vec3(res.uv, float(tex_normal_id)), res.lod).xzy;
+        #endif
         tex = normalize(tex * 2 - 1);
+
+        // blue = up -> y axis
         normal = tex.x * tangent + tex.y * normal + tex.z * bitangent;
     }
 

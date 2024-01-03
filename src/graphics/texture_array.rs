@@ -35,14 +35,16 @@ enum ImageContent {
 /// can later be used, to lookup the texture's index in the array.
 pub struct TextureArrayBuilder {
     mip_levels: u8,
+    max_anisotropy: f32,
     textures: FxHashMap<String, u32>,
     content: Vec<ImageContent>,
 }
 
 impl TextureArrayBuilder {
-    pub fn new(mip_levels: u8) -> TextureArrayBuilder {
+    pub fn new(mip_levels: u8, max_anisotropy: f32) -> TextureArrayBuilder {
         TextureArrayBuilder {
             mip_levels,
+            max_anisotropy,
             textures: FxHashMap::default(),
             content: Vec::new(),
         }
@@ -97,6 +99,7 @@ impl TextureArrayBuilder {
             height,
             self.content.len() as u32,
             mip_levels,
+            self.max_anisotropy,
             textures,
         );
 
@@ -175,7 +178,7 @@ impl Drop for TextureArray {
 }
 
 impl TextureArray {
-    fn new(width: u32, height: u32, depth: u32, mip_levels: u8, textures: FxHashMap<String, u32>) -> TextureArray {
+    fn new(width: u32, height: u32, depth: u32, mip_levels: u8, max_anisotropy: f32, textures: FxHashMap<String, u32>) -> TextureArray {
         assert!(mip_levels > 0, "mip_levels must at least be 1, but is {}", mip_levels);
 
         let mut id = 0;
@@ -189,6 +192,22 @@ impl TextureArray {
             gl::TexParameteri(gl::TEXTURE_2D_ARRAY, gl::TEXTURE_MIN_FILTER, gl::LINEAR_MIPMAP_LINEAR as GLint);
             gl::TexParameteri(gl::TEXTURE_2D_ARRAY, gl::TEXTURE_MAG_FILTER, gl::NEAREST as GLint);
             gl_assert_no_error!();
+
+            if max_anisotropy > 1.0 && crate::core::SUPPORTS_GL_ARB_TEXTURE_FILTER_ANISOTROPIC {
+                // GL_MAX_TEXTURE_MAX_ANISOTROPY (extension)
+                let mut max_value = 1.0;
+                gl::GetFloatv(0x84FF as GLenum, &mut max_value);
+                gl_assert_no_error!();
+
+                let mut max_anisotropy = max_anisotropy;
+                if max_anisotropy > max_value {
+                    max_anisotropy = max_value;
+                }
+
+                // GL_TEXTURE_MAX_ANISOTROPY (extension)
+                gl::TexParameterf(gl::TEXTURE_2D_ARRAY, 0x84FE as GLenum, max_anisotropy);
+                gl_assert_no_error!();
+            }
 
             gl::TexStorage3D(
                 gl::TEXTURE_2D_ARRAY,

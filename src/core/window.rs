@@ -25,6 +25,9 @@ pub struct GlContext {
     events: mpsc::Receiver<(f64, glfw::WindowEvent)>,
 }
 
+/// True if GL_ARB_texture_filter_anisotropic extension is loaded.
+pub static mut SUPPORTS_GL_ARB_TEXTURE_FILTER_ANISOTROPIC: bool = false;
+
 // GLFW_CONTEXT is represented as a singleton because it can only be created once per process.
 // To allow multiple tests to initialise windows, for graphical testing in parallel, this is
 // the only viable option of sharing this state without adding a custom test execution framework
@@ -57,6 +60,8 @@ impl GlContext {
 
         // apply OpenGL default settings
         unsafe {
+            SUPPORTS_GL_ARB_TEXTURE_FILTER_ANISOTROPIC = context.extension_supported("GL_ARB_texture_filter_anisotropic");
+
             gl::Enable(gl::CULL_FACE);
             gl::CullFace(gl::BACK);
             gl::FrontFace(gl::CCW);

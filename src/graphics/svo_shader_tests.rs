@@ -84,7 +84,7 @@ mod tests {
 
     fn create_test_materials() -> (Buffer<MaterialInstance>, Resource<TextureArray, TextureArrayError>) {
         let tex_array = Resource::new(
-            || TextureArrayBuilder::new(1)
+            || TextureArrayBuilder::new(1, 0.0)
                 .add_rgba8("full", 4, 4, vec![
                     255, 000, 000, 255, /**/ 255, 000, 000, 255, /**/ 255, 000, 000, 255, /**/ 255, 000, 000, 255,
                     255, 000, 000, 255, /**/ 255, 000, 000, 255, /**/ 255, 000, 000, 255, /**/ 255, 000, 000, 255,

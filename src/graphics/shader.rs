@@ -8,6 +8,7 @@ use std::path::Path;
 
 use cgmath::{Array, Matrix};
 use gl::types::*;
+use indoc::formatdoc;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
@@ -72,12 +73,13 @@ impl ShaderProgramBuilder {
     ///
     /// Special directives:
     /// - `#inlucde "file.glsl"` can be used to include other file's contents
+    /// - Adds `SHADER_COMPILE_TYPE` definition
     pub fn load_shader(&mut self, type_: ShaderType, path: &str) -> Result<&mut ShaderProgramBuilder, ShaderError> {
-        let src = self.load_file(path)?;
+        let mut src = self.load_file(path)?;
         if src.len() != 1 || !src.keys().next().unwrap().is_empty() {
             return Err(ShaderError::Other(String::from("file must not contain any #shader_type directives")));
         }
-        self.add_shader(type_, src.get("").unwrap())
+        self.add_shader(type_, src.remove("").unwrap())
     }
 
     /// Reads a shader bundle file that can define multiple shader types in one file.
@@ -85,6 +87,7 @@ impl ShaderProgramBuilder {
     /// Special directives:
     /// - `#inlucde "file.glsl"` can be used to include other file's contents
     /// - `#shader_type <vertex|fragment|compute>` will use all lines until the next type directive for compiling the given shader type
+    /// - Adds `SHADER_COMPILE_TYPE` definition
     pub fn load_shader_bundle(&mut self, path: &str) -> Result<&mut ShaderProgramBuilder, ShaderError> {
         let src = self.load_file(path)?;
         for (type_, src) in src {
@@ -96,7 +99,7 @@ impl ShaderProgramBuilder {
                     return Err(ShaderError::Other(format!("unsupported shader type: {}", type_)));
                 }
             };
-            self.add_shader(type_, &src)?;
+            self.add_shader(type_, src)?;
         }
         Ok(self)
     }
@@ -205,13 +208,34 @@ impl ShaderProgramBuilder {
         Ok(())
     }
 
-    pub fn add_shader(&mut self, type_: ShaderType, src: &str) -> Result<&mut ShaderProgramBuilder, ShaderError> {
+    pub fn add_shader(&mut self, type_: ShaderType, src: String) -> Result<&mut ShaderProgramBuilder, ShaderError> {
         if self.shaders.get(&type_).is_some() {
             return Err(ShaderError::Other(format!("type {:?} is already registered", type_)));
         }
-        let shader = Shader::new(type_, src)?;
+
+        let mut src = src;
+        Self::inject_preprocessor_defines(&mut src, type_);
+
+        let shader = Shader::new(type_, &src)?;
         self.shaders.insert(type_, shader);
         Ok(self)
+    }
+
+    fn inject_preprocessor_defines(src: &mut String, type_: ShaderType) {
+        let mut offset = 0;
+        if let Some(version_start) = src.find("#version") {
+            if let Some(line_end) = src[version_start..].find('\n') {
+                offset = version_start + line_end + 1;
+            }
+        }
+
+        let inject = formatdoc! {r#"
+            #define SHADER_TYPE_VERTEX      0
+            #define SHADER_TYPE_FRAGMENT    1
+            #define SHADER_TYPE_COMPUTE     2
+            #define SHADER_COMPILE_TYPE     SHADER_TYPE_{}
+        "#, type_.string()};
+        src.insert_str(offset, &inject);
     }
 
     pub fn build(&self) -> Result<ShaderProgram, ShaderError> {
@@ -241,7 +265,7 @@ mod shader_program_builder_tests {
     use rustc_hash::FxHashMap;
     use tempfile::NamedTempFile;
 
-    use crate::graphics::shader::ShaderProgramBuilder;
+    use crate::graphics::shader::{ShaderProgramBuilder, ShaderType};
 
     /// Tests if files with includes and other directives are loaded correctly without actually
     /// compiling the shader.
@@ -277,6 +301,32 @@ mod shader_program_builder_tests {
 
         shader_file.close().unwrap();
         include_file.close().unwrap();
+    }
+
+    /// Tests if preprocessor defines are injected correctly into shader source.
+    #[test]
+    fn inject_preprocessor_defines() {
+        let mut code = String::from(indoc! {r#"
+            #version 450
+
+            void main() {
+                gl_Position = vec4(position, 1.0);
+            }
+        "#});
+
+        ShaderProgramBuilder::inject_preprocessor_defines(&mut code, ShaderType::Vertex);
+
+        assert_eq!(code, String::from(indoc! {r#"
+            #version 450
+            #define SHADER_TYPE_VERTEX      0
+            #define SHADER_TYPE_FRAGMENT    1
+            #define SHADER_TYPE_COMPUTE     2
+            #define SHADER_COMPILE_TYPE     SHADER_TYPE_VERTEX
+
+            void main() {
+                gl_Position = vec4(position, 1.0);
+            }
+        "#}));
     }
 }
 
@@ -362,6 +412,23 @@ impl ShaderProgram {
     }
 }
 
+#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
+pub enum ShaderType {
+    Vertex,
+    Fragment,
+    Compute,
+}
+
+impl ShaderType {
+    fn string(&self) -> &'static str {
+        match self {
+            ShaderType::Vertex => "VERTEX",
+            ShaderType::Fragment => "FRAGMENT",
+            ShaderType::Compute => "COMPUTE",
+        }
+    }
+}
+
 struct Shader {
     gl_id: GLuint,
 }
@@ -370,13 +437,6 @@ impl Drop for Shader {
     fn drop(&mut self) {
         unsafe { gl::DeleteShader(self.gl_id) }
     }
-}
-
-#[derive(Debug, Copy, Clone, Hash, Eq, PartialEq)]
-pub enum ShaderType {
-    Vertex,
-    Fragment,
-    Compute,
 }
 
 impl Shader {

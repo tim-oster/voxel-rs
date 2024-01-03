@@ -123,7 +123,7 @@ impl VoxelRegistry {
         let textures = self.textures.clone();
         Resource::new(
             move || {
-                let mut builder = TextureArrayBuilder::new(1); // TODO
+                let mut builder = TextureArrayBuilder::new(6, 4.0);
                 for tex in &textures {
                     builder.add_file(&tex.name, &tex.path)?;
                 }
