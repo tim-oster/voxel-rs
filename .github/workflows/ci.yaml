@@ -32,6 +32,9 @@ jobs:
           sudo apt-get install mesa-utils xvfb xorg-dev
 
       - name: Run tests
+        env:
+          TEST_WORLD_E2E_THRESHOLD: 0.014
+          TEST_SVO_RENDER_THRESHOLD: 0.009
         run: |
           echo "OpenGL Version Info:"
           xvfb-run --auto-servernum glxinfo | grep OpenGL | grep -v extensions

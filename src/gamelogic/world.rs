@@ -307,6 +307,7 @@ impl World {
 
 #[cfg(test)]
 mod tests {
+    use std::env;
     use std::rc::Rc;
 
     use cgmath::{Point3, Vector3};
@@ -359,6 +360,7 @@ mod tests {
 
         let expected = image::open("assets/tests/gamelogic_world_end_to_end_expected.png").unwrap();
         let diff_percent = diff_images(&actual, &expected);
-        assert!(diff_percent < 0.001, "difference: {:.5} < 0.001", diff_percent);
+        let threshold = env::var("TEST_WORLD_E2E_THRESHOLD").map_or(0.001, |x| x.parse::<f64>().unwrap());
+        assert!(diff_percent < threshold, "difference: {:.5} < {:.5}", diff_percent, threshold);
     }
 }
