@@ -142,7 +142,7 @@ impl TextureArrayBuilder {
         Ok(texture)
     }
 
-    fn flip_image_v(data: &mut Vec<u8>, w: u32, h: u32, bytes_per_pixel: u8) {
+    fn flip_image_v(data: &mut [u8], w: u32, h: u32, bytes_per_pixel: u8) {
         assert_eq!(data.len(), (w * h * bytes_per_pixel as u32) as usize);
 
         for y in 0..(h / 2) {

@@ -121,7 +121,7 @@ impl Physics {
         }
     }
 
-    fn raycast_entities(raycaster: &impl Raycaster, entities: &Vec<&mut Entity>) -> Vec<RaycastData> {
+    fn raycast_entities(raycaster: &impl Raycaster, entities: &[&mut Entity]) -> Vec<RaycastData> {
         let mut batch = PickerBatch::new();
         let mut results = Vec::with_capacity(entities.len());
 
