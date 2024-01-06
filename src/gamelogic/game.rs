@@ -96,7 +96,7 @@ impl State {
         self.handle_debug_keys(frame);
 
         self.world.update(&mut self.player, frame.stats.delta_time);
-        self.gameplay.update(frame, &mut self.player, &mut self.world.world, &self.world.world_svo);
+        self.gameplay.update(frame, &mut self.player, &mut self.world);
         self.world.selected_voxel = self.gameplay.looking_at_block.map(|result| result.pos);
     }
 

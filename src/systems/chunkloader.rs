@@ -131,6 +131,10 @@ impl ChunkLoader {
     pub fn is_loaded(&self, pos: &ChunkPos) -> bool {
         self.loaded_chunks.contains_key(pos)
     }
+
+    pub fn add_loaded_chunk(&mut self, pos: ChunkPos, lod: u8) {
+        self.loaded_chunks.insert(pos, lod);
+    }
 }
 
 #[cfg(test)]

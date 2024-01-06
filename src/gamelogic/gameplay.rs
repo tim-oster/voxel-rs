@@ -5,15 +5,14 @@ use std::ops::Add;
 use cgmath::{ElementWise, InnerSpace, Matrix4, SquareMatrix, Vector2, Vector3};
 
 use crate::core::Frame;
+use crate::gamelogic;
 use crate::gamelogic::content::blocks;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
 use crate::graphics::svo_picker::{PickerBatch, RayResult};
 use crate::systems::physics::{Entity, Raycaster};
-use crate::systems::worldsvo;
-use crate::world::chunk::BlockId;
-use crate::world::world::World;
+use crate::world::chunk::{BlockId, BlockPos, Chunk};
 
 /// Gameplay handles all user input and uses it to implement the gameplay logic. The in-game UI is
 /// also rendered here.
@@ -51,7 +50,7 @@ impl Gameplay {
         }
     }
 
-    pub fn update(&mut self, frame: &mut Frame, player: &mut Entity, world: &mut World, svo: &worldsvo::Svo) {
+    pub fn update(&mut self, frame: &mut Frame, player: &mut Entity, world: &mut gamelogic::world::World) {
         if frame.input.was_key_pressed(&glfw::Key::Escape) {
             frame.request_close();
         }
@@ -60,7 +59,7 @@ impl Gameplay {
         }
 
         self.handle_movement(frame, player);
-        self.handle_voxel_placement(frame, player, world, svo);
+        self.handle_voxel_placement(frame, player, world);
     }
 
     pub fn handle_window_resize(&mut self, width: i32, height: i32) {
@@ -149,10 +148,10 @@ impl Gameplay {
         }
     }
 
-    fn handle_voxel_placement(&mut self, frame: &mut Frame, player: &Entity, world: &mut World, svo: &worldsvo::Svo) {
+    fn handle_voxel_placement(&mut self, frame: &mut Frame, player: &Entity, world: &mut gamelogic::world::World) {
         let mut batch = PickerBatch::new();
         batch.add_ray(player.position, player.get_forward(), 30.0);
-        let batch_result = svo.raycast(batch);
+        let batch_result = world.world_svo.raycast(batch);
         let block_result = batch_result.rays[0];
 
         if block_result.did_hit() {
@@ -177,7 +176,7 @@ impl Gameplay {
             let x = block_result.pos.x.floor() as i32;
             let y = block_result.pos.y.floor() as i32;
             let z = block_result.pos.z.floor() as i32;
-            world.set_block(x, y, z, blocks::AIR);
+            world.world.set_block(x, y, z, blocks::AIR);
         }
 
         // block picking
@@ -185,7 +184,7 @@ impl Gameplay {
             let x = block_result.pos.x.floor() as i32;
             let y = block_result.pos.y.floor() as i32;
             let z = block_result.pos.z.floor() as i32;
-            self.selected_block = world.get_block(x, y, z);
+            self.selected_block = world.world.get_block(x, y, z);
         }
 
         // adding blocks
@@ -208,7 +207,15 @@ impl Gameplay {
                 (player_max_y < y || player_min_y > y + 1.0) ||
                 (player_max_z < z || player_min_z > z + 1.0) ||
                 player.caps.flying {
-                world.set_block(x as i32, y as i32, z as i32, self.selected_block);
+                let did_set = world.world.set_block(x as i32, y as i32, z as i32, self.selected_block);
+                if !did_set {
+                    // if the block could not be placed because of no chunk being present, manually add the chunk
+                    let pos = BlockPos::new(x as i32, y as i32, z as i32);
+                    let storage = world.chunk_storage_allocator.allocate();
+                    let mut chunk = Chunk::new(pos.chunk, 5, storage);
+                    chunk.set_block(pos.rel_x as u32, pos.rel_y as u32, pos.rel_z as u32, self.selected_block);
+                    world.add_chunk(chunk);
+                }
             }
         }
     }

@@ -17,7 +17,7 @@ use crate::systems::chunkloader::{ChunkEvent, ChunkLoader};
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{Entity, Physics};
 use crate::systems::storage::Storage;
-use crate::world::chunk::ChunkPos;
+use crate::world::chunk::{Chunk, ChunkPos};
 use crate::world::memory::ChunkStorageAllocator;
 use crate::world::world;
 
@@ -198,6 +198,11 @@ impl World {
 
         visible_chunks.extend(other_chunks.iter());
         visible_chunks
+    }
+
+    pub fn add_chunk(&mut self, chunk: Chunk) {
+        self.chunk_loader.add_loaded_chunk(chunk.pos, chunk.lod);
+        self.world.set_chunk(chunk);
     }
 
     pub fn render(&self, aspect_ratio: f32) {
