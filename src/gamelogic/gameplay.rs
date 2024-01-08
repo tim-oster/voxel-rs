@@ -2,7 +2,7 @@ use std::f32::consts::PI;
 use std::ffi::c_int;
 use std::ops::Add;
 
-use cgmath::{ElementWise, InnerSpace, Matrix4, SquareMatrix, Vector2, Vector3};
+use cgmath::{ElementWise, InnerSpace, Matrix4, SquareMatrix, Vector2, Vector3, Zero};
 
 use crate::core::Frame;
 use crate::gamelogic;
@@ -21,7 +21,6 @@ pub struct Gameplay {
     crosshair_shader: Resource<ShaderProgram, ShaderError>,
     screen_quad: ScreenQuad,
 
-    player_speed: f32,
     is_jumping: bool,
     was_grounded: bool,
     pub looking_at_block: Option<RayResult>,
@@ -32,8 +31,8 @@ impl Gameplay {
     const FLY_SPEED: f32 = 60.0;
     const NORMAL_SPEED: f32 = 9.0;
     const SPRINT_FACTOR: f32 = 1.5;
-    const JUMP_SPEED: f32 = 20.0;
-    const ROTATION_SPEED: f32 = 0.2;
+    const JUMP_SPEED: f32 = 13.0;
+    const ROTATION_SPEED: f32 = 0.002;
 
     pub fn new() -> Gameplay {
         Gameplay {
@@ -42,7 +41,6 @@ impl Gameplay {
                 || ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/crosshair.glsl")?.build()
             ).unwrap(),
             screen_quad: ScreenQuad::new(),
-            player_speed: Self::FLY_SPEED,
             is_jumping: false,
             was_grounded: false,
             looking_at_block: None,
@@ -72,51 +70,58 @@ impl Gameplay {
         }
     }
 
-    fn handle_movement(&mut self, frame: &mut Frame, player: &mut Entity) {
-        let forward = player.get_forward();
+    fn handle_movement(&mut self, frame: &Frame, player: &mut Entity) {
+        let forward = player.get_forward()
+            .mul_element_wise(Vector3::new(1.0, 0.0, 1.0))
+            .normalize();
         let right = forward.cross(Vector3::unit_y()).normalize();
+
+        let speed = if player.caps.flying {
+            Self::FLY_SPEED
+        } else if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
+            Self::NORMAL_SPEED * Self::SPRINT_FACTOR
+        } else {
+            Self::NORMAL_SPEED
+        };
 
         let mut impulse = Vector3::new(0.0, 0.0, 0.0);
 
         if frame.input.is_key_pressed(&glfw::Key::W) {
-            let dir = forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-            let speed = dir * self.player_speed;
+            let speed = forward * speed;
             impulse += speed;
         }
         if frame.input.is_key_pressed(&glfw::Key::S) {
-            let dir = -forward.mul_element_wise(Vector3::new(1.0, 0.0, 1.0)).normalize();
-            let speed = dir * self.player_speed;
+            let speed = -forward * speed;
             impulse += speed;
         }
         if frame.input.is_key_pressed(&glfw::Key::A) {
-            let speed = -right * self.player_speed;
+            let speed = -right * speed;
             impulse += speed;
         }
         if frame.input.is_key_pressed(&glfw::Key::D) {
-            let speed = right * self.player_speed;
+            let speed = right * speed;
             impulse += speed;
         }
+
+        if !impulse.is_zero() {
+            impulse = impulse.normalize_to(speed);
+        }
+        player.velocity.x = impulse.x;
+        player.velocity.z = impulse.z;
+
         if frame.input.was_key_pressed(&glfw::Key::F) {
             player.caps.flying = !player.caps.flying;
-            self.player_speed = if player.caps.flying { Self::FLY_SPEED } else { Self::NORMAL_SPEED };
         }
-
         if !player.caps.flying {
             let is_grounded = player.get_state().is_grounded;
 
             if frame.input.is_key_pressed(&glfw::Key::Space) && self.was_grounded {
                 if !self.is_jumping {
                     self.is_jumping = true;
-                    impulse.y += Self::JUMP_SPEED;
+                    player.velocity.y = Self::JUMP_SPEED;
                 }
             } else if is_grounded {
                 self.is_jumping = false;
-
-                if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
-                    self.player_speed = Self::NORMAL_SPEED * Self::SPRINT_FACTOR;
-                } else {
-                    self.player_speed = Self::NORMAL_SPEED;
-                }
             }
 
             self.was_grounded = is_grounded;
@@ -124,31 +129,31 @@ impl Gameplay {
             self.is_jumping = false;
             self.was_grounded = false;
 
+            player.velocity.y = 0.0;
+
             if frame.input.is_key_pressed(&glfw::Key::Space) {
-                impulse.y += self.player_speed;
+                player.velocity.y = speed;
             }
             if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
-                impulse.y -= self.player_speed;
+                player.velocity.y = -speed;
             }
         }
-
-        player.velocity += impulse;
     }
 
-    fn handle_mouse_movement(&mut self, frame: &mut Frame, player: &mut Entity) {
+    fn handle_mouse_movement(&mut self, frame: &Frame, player: &mut Entity) {
         let delta = frame.input.get_mouse_delta();
         if delta.x.abs() > 0.01 {
-            player.euler_rotation.y += delta.x * Self::ROTATION_SPEED * frame.stats.delta_time;
+            player.euler_rotation.y += delta.x * Self::ROTATION_SPEED;
         }
         if delta.y.abs() > 0.01 {
-            player.euler_rotation.x -= delta.y * Self::ROTATION_SPEED * frame.stats.delta_time;
+            player.euler_rotation.x -= delta.y * Self::ROTATION_SPEED;
 
             let limit = PI / 2.0 - 0.01;
             player.euler_rotation.x = player.euler_rotation.x.clamp(-limit, limit);
         }
     }
 
-    fn handle_voxel_placement(&mut self, frame: &mut Frame, player: &Entity, world: &mut gamelogic::world::World) {
+    fn handle_voxel_placement(&mut self, frame: &Frame, player: &Entity, world: &mut gamelogic::world::World) {
         let mut batch = PickerBatch::new();
         batch.add_ray(player.position, player.get_forward(), 30.0);
         let batch_result = world.world_svo.raycast(batch);

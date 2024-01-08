@@ -90,12 +90,15 @@ impl World {
         }
     }
 
-    pub fn update(&mut self, entity: &mut Entity, delta_time: f32) {
+    pub fn update_fixed(&mut self, entity: &mut Entity, delta_time: f32) {
+        self.physics.step(delta_time, &self.world_svo, vec![entity]);
+    }
+
+    pub fn update(&mut self, entity: &mut Entity) {
         self.camera.position = entity.position;
         self.camera.forward = entity.get_forward();
 
         self.handle_chunk_loading();
-        self.physics.step(delta_time, &self.world_svo, vec![entity]);
     }
 
     pub fn handle_window_resize(&mut self, aspect_ratio: f32) {
@@ -344,7 +347,7 @@ mod tests {
         world.handle_window_resize(aspect_ratio);
 
         loop {
-            world.update(&mut player, 0.1);
+            world.update(&mut player);
 
             if !world.world_generator.has_pending_jobs() && !world.world_svo.has_pending_jobs() {
                 break;
