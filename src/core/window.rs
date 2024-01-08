@@ -1,8 +1,9 @@
 use std::cell::RefCell;
 use std::sync::{mpsc, Mutex};
+use std::thread;
 use std::time::{Duration, Instant};
 
-use glfw::Context;
+use glfw::{Context, SwapInterval};
 use once_cell::sync::Lazy;
 
 use crate::core::imgui as imgui_wrapper;
@@ -15,6 +16,16 @@ pub struct Config {
     pub msaa_samples: u32,
     pub headless: bool,
     pub resizable: bool,
+    pub buffering: Buffering,
+    pub target_fps: Option<u32>,
+}
+
+#[derive(Default)]
+pub enum Buffering {
+    Single,
+    #[default]
+    Double,
+    Adaptive,
 }
 
 /// GlContext holds the native OpenGL rendering context for glfw as well as the associated event
@@ -58,6 +69,12 @@ impl GlContext {
 
         gl::load_with(|symbol| window.get_proc_address(symbol) as *const _);
 
+        context.set_swap_interval(match cfg.buffering {
+            Buffering::Single => SwapInterval::None,
+            Buffering::Double => SwapInterval::Sync(1),
+            Buffering::Adaptive => SwapInterval::Adaptive,
+        });
+
         // apply OpenGL default settings
         unsafe {
             SUPPORTS_GL_ARB_TEXTURE_FILTER_ANISOTROPIC = context.extension_supported("GL_ARB_texture_filter_anisotropic");
@@ -84,6 +101,8 @@ impl GlContext {
             msaa_samples: 0,
             headless: true,
             resizable: false,
+            buffering: Buffering::Single,
+            target_fps: None,
         })
     }
 }
@@ -93,6 +112,7 @@ impl GlContext {
 pub struct Window {
     context: RefCell<GlContext>,
     imgui: imgui_wrapper::Wrapper,
+    target_fps: Option<u32>,
 
     current_stats: FrameStats,
     is_cursor_grabbed: bool,
@@ -115,6 +135,7 @@ pub struct FrameStats {
 
 impl Window {
     pub fn new(cfg: Config) -> Self {
+        let target_fps = cfg.target_fps;
         let mut context = GlContext::new(cfg);
 
         context.window.set_all_polling(true);
@@ -125,6 +146,7 @@ impl Window {
         Window {
             context: RefCell::new(context),
             imgui,
+            target_fps,
             current_stats: FrameStats {
                 last_frame: Instant::now(),
                 last_measurement: Instant::now(),
@@ -189,6 +211,16 @@ impl Window {
 
         self.context.borrow_mut().window.swap_buffers();
         self.first_update = false;
+
+        // if enabled, limit fps to target
+        if let Some(target) = self.target_fps {
+            let target_delta = 1.0 / target as f64;
+            let actual_delta = self.current_stats.last_frame.elapsed().as_secs_f64();
+            let diff = target_delta - actual_delta;
+            if diff > 0.0 {
+                thread::sleep(Duration::from_secs_f64(diff));
+            }
+        }
     }
 
     fn update_frame_state(&mut self) {

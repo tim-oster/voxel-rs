@@ -3,7 +3,7 @@ use std::rc::Rc;
 use cgmath::{Point3, Vector3};
 use imgui::Condition;
 
-use crate::core::{Config, Frame, Window};
+use crate::core::{Buffering, Config, Frame, Window};
 use crate::gamelogic::gameplay::Gameplay;
 use crate::gamelogic::world::World;
 use crate::systems::jobs::JobSystem;
@@ -34,6 +34,8 @@ impl Game {
             msaa_samples: 0,
             headless: false,
             resizable: true,
+            buffering: Buffering::Double,
+            target_fps: None,
         });
         window.request_grab_cursor(true);
 
