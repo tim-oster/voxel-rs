@@ -27,22 +27,22 @@ vec3(0, 1, 0),
 vec3(0, 1, 0)
 );
 
-struct octree_result {
-    float t;
-    uint value;
-    int face_id;
-    vec3 pos;
-    vec2 uv;
-    vec4 color;
-    float lod;
-    bool inside_block;
+struct OctreeResult {
+    float t;// distance along the ray in world space
+    uint value;// hit octree value
+    int face_id;// face index of the voxel that was hit (0=-x, 1=+x, 2=-y, 3=+y, 4=-z, 5=+z)
+    vec3 pos;// hit position in world space (ro + t*rd)
+    vec2 uv;// uv coordinate on the voxel face
+    vec4 color;// texture color of the hit point
+    float lod;// lod that was used for texture lookup
+    bool inside_voxel;// true if ray is cast from within a voxel
 };
 
 // https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Buffer_backed
 // https://www.khronos.org/opengl/wiki/Shader_Storage_Buffer_Object
-layout (std430, binding = 0) readonly buffer root_node {
-    float octree_scale;
-    int descriptors[];
+layout (std430, binding = 0) readonly buffer RootNode {
+    float octree_scale;// Size of one leaf node in an octree from [0;1]. Calculated by `2^(-octree_depth)`.
+    uint descriptors[];// Serialized octree bytes. See `src/world/svo.rs` for details on the format.
 };
 
 struct Material {
@@ -58,11 +58,9 @@ struct Material {
     int tex_bottom_normal;
 };
 
-layout (std430, binding = 2) readonly buffer material_registry {
+layout (std430, binding = 2) readonly buffer MaterialRegistry {
     Material materials[];
 };
-
-uniform sampler2DArray u_texture;// TODO rename or as param
 
 #if !defined(OCTREE_RAYTRACE_DEBUG_FN)
 #define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf);
@@ -70,7 +68,7 @@ uniform sampler2DArray u_texture;// TODO rename or as param
 
 // TODO https://diglib.eg.org/bitstream/handle/10.2312/EGGH.EGGH89.061-073/061-073.pdf?sequence=1
 // ideas from: https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
-void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, out octree_result res) {
+void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sampler2DArray textures, out OctreeResult res) {
     ro *= octree_scale;
     max_dst *= octree_scale;
 
@@ -80,27 +78,27 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
     res.pos = vec3(0);
     res.uv = vec2(0);
     res.color = vec4(0);
-    res.inside_block = false;
+    res.inside_voxel = false;
 
     // shift input coordinate system so that the octree spans from [1;2]
     ro += 1;
 
     const int MAX_STACK_DEPTH = 23;
-    int[MAX_STACK_DEPTH] ptr_stack;
-    int[MAX_STACK_DEPTH] parent_octant_idx_stack;
+    uint[MAX_STACK_DEPTH] ptr_stack;
+    uint[MAX_STACK_DEPTH] parent_octant_idx_stack;
     float[MAX_STACK_DEPTH] t_max_stack;
 
     const float epsilon = exp2(-MAX_STACK_DEPTH);
 
-    int ptr = 0;
-    int parent_octant_idx = 0;
     int scale = MAX_STACK_DEPTH - 1;
     float scale_exp2 = 0.5;
+    uint ptr = 0;// current index inside the SVO data structure
+    uint parent_octant_idx = 0;// the child index of the current octant's parent octant
 
     // In case a leaf has a texture with transparency, the ray can pass through several leaf voxels. When that happens,
     // these variables keep track of how many adjecent leafs of the same value the ray has passed through to skip
     // after the first leaf. This invokes the look of connected textures / voxels and reduces visual "noise".
-    int last_leaf_value = -1;
+    uint last_leaf_value = -1;
     int adjecent_leaf_count = 0;
 
     // prevents divide by zero (bit-magic to copy sign of rd to epsilon value)
@@ -151,14 +149,16 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
         float tz_corner = pos.z * tz_coef - tz_bias;
         float tc_max = min(min(tx_corner, ty_corner), tz_corner);
 
-        int octant_idx = idx ^ octant_mask;
-        int bit = 1 << octant_idx;
+        // get octant index and its bit index
+        uint octant_idx = idx ^ octant_mask;
+        uint bit = 1u << octant_idx;
 
-        int descriptor = descriptors[ptr + int(parent_octant_idx / 2)];
+        // lookup the descriptor for the current octant
+        uint descriptor = descriptors[ptr + (parent_octant_idx / 2)];
         if ((parent_octant_idx % 2) != 0) {
             descriptor >>= 16;
         }
-        descriptor &= 0xffff;
+        descriptor &= 0xffffu;
 
         bool is_child = (descriptor & (bit << 8)) != 0;
         bool is_leaf = (descriptor & bit) != 0;
@@ -167,17 +167,17 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
 
         if (is_child && t_min <= t_max) {
             if (is_leaf && t_min == 0) {
-                res.inside_block = true;
+                res.inside_voxel = true;
             }
             if (is_leaf && t_min > 0) {
-                int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
-                if ((next_ptr & (1 << 31)) != 0) {
+                uint next_ptr = descriptors[ptr + 4 + parent_octant_idx];
+                if ((next_ptr & (1u << 31u)) != 0) {
                     // use as relative offset if relative bit is set
-                    next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
+                    next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffffu);
                 }
                 next_ptr = next_ptr + 4 + octant_idx;
 
-                int value = descriptors[next_ptr];
+                uint value = descriptors[next_ptr];
 
                 float tx_corner = (pos.x + scale_exp2) * tx_coef - tx_bias;
                 float ty_corner = (pos.y + scale_exp2) * ty_coef - ty_bias;
@@ -224,11 +224,11 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
 
                 #if SHADER_COMPILE_TYPE != SHADER_TYPE_COMPUTE
                 // use deriviate of t because uv is not continuous
-                vec4 tex_color_a = textureGrad(u_texture, vec3(uv, float(tex_id)), vec2(dFdx(dst), 0), vec2(dFdy(dst), 0));
-                vec4 tex_color_b = textureLod(u_texture, vec3(uv, float(tex_id)), tex_lod);
+                vec4 tex_color_a = textureGrad(textures, vec3(uv, float(tex_id)), vec2(dFdx(dst), 0), vec2(dFdy(dst), 0));
+                vec4 tex_color_b = textureLod(textures, vec3(uv, float(tex_id)), tex_lod);
                 vec4 tex_color = mix(tex_color_b, tex_color_b, smoothstep(15, 25, dst));
                 #else
-                vec4 tex_color = textureLod(u_texture, vec3(uv, float(tex_id)), tex_lod);
+                vec4 tex_color = textureLod(textures, vec3(uv, float(tex_id)), tex_lod);
                 #endif
 
                 bool first_of_kind = adjecent_leaf_count == 0 || value != last_leaf_value;
@@ -270,11 +270,11 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, ou
                     t_max_stack[scale] = t_max;
 
                     // TODO convert everything to uint?
-                    int next_ptr = descriptors[ptr + 4 + parent_octant_idx];
+                    uint next_ptr = descriptors[ptr + 4 + parent_octant_idx];
                     // TODO move relative & aboslut pointer resolving into function
-                    if ((next_ptr & (1 << 31)) != 0) {
+                    if ((next_ptr & (1u << 31)) != 0) {
                         // use as relative offset if relative bit is set
-                        next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffff);
+                        next_ptr = ptr + 4 + parent_octant_idx + (next_ptr & 0x7fffffffu);
                     }
                     ptr = next_ptr;
 

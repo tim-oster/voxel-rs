@@ -80,7 +80,7 @@ impl PickerBatch {
 
             batch_result.rays.push(RayResult {
                 dst: result.dst,
-                inside_block: result.inside_voxel,
+                inside_voxel: result.inside_voxel,
                 pos: result.pos.0,
                 normal: result.normal.0,
             });
@@ -115,7 +115,7 @@ pub struct Ray {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RayResult {
     pub dst: f32,
-    pub inside_block: bool,
+    pub inside_voxel: bool,
     pub pos: Point3<f32>,
     pub normal: Vector3<f32>,
 }
@@ -479,8 +479,8 @@ mod tests {
 
         assert_eq!(result, PickerBatchResult {
             rays: vec![
-                RayResult { dst: -1.0, inside_block: false, pos: Point3::new(0.0, 0.0, 0.0), normal: Vector3::new(0.0, 0.0, 0.0) },
-                RayResult { dst: 10.0, inside_block: true, pos: Point3::new(-1.0, 0.0, 0.0), normal: Vector3::new(10.0, 0.0, 0.0) },
+                RayResult { dst: -1.0, inside_voxel: false, pos: Point3::new(0.0, 0.0, 0.0), normal: Vector3::new(0.0, 0.0, 0.0) },
+                RayResult { dst: 10.0, inside_voxel: true, pos: Point3::new(-1.0, 0.0, 0.0), normal: Vector3::new(10.0, 0.0, 0.0) },
             ],
             aabbs: vec![
                 AabbResult { neg: Vector3::new(8.0, 7.0, 8.0), pos: Vector3::new(2.0, 4.0, 1.0) },

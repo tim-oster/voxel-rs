@@ -45,16 +45,16 @@ mod tests {
         pos: AlignedPoint3<f32>,
         uv: AlignedPoint2<f32>,
         color: AlignedVec4<f32>,
-        inside_block: AlignedBool,
+        inside_voxel: AlignedBool,
     }
 
     #[repr(C)]
     #[derive(Copy, Clone, Debug, PartialEq)]
     struct StackFrame {
         t_min: f32,
-        ptr: i32,
+        ptr: u32,
         idx: i32,
-        parent_octant_idx: i32,
+        parent_octant_idx: u32,
         scale: i32,
         is_child: AlignedBool,
         is_leaf: AlignedBool,
@@ -221,7 +221,7 @@ mod tests {
                 pos: AlignedPoint3::new(0.0, 0.0, 0.0),
                 uv: AlignedPoint2::new(0.0, 0.0),
                 color: AlignedVec4::new(0.0, 0.0, 0.0, 0.0),
-                inside_block: AlignedBool::from(false),
+                inside_voxel: AlignedBool::from(false),
             },
             stack_ptr: 0,
             stack: [StackFrame {
@@ -298,7 +298,7 @@ mod tests {
             pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(31.000008, 0.5, 0.5)),
             uv: AlignedPoint2::new(0.5, 0.5),
             color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-            inside_block: AlignedBool::from(false),
+            inside_voxel: AlignedBool::from(false),
         });
     }
 
@@ -333,7 +333,7 @@ mod tests {
                     pos: AlignedPoint3::new(30.000008, 0.5, 0.5),
                     uv: AlignedPoint2::new(0.5, 0.5),
                     color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-                    inside_block: AlignedBool::from(false),
+                    inside_voxel: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -347,7 +347,7 @@ mod tests {
                     pos: AlignedPoint3::new(30.999992, 0.5, 0.5),
                     uv: AlignedPoint2::new(0.5, 0.5),
                     color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-                    inside_block: AlignedBool::from(false),
+                    inside_voxel: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -361,7 +361,7 @@ mod tests {
                     pos: AlignedPoint3::new(0.5, 30.000008, 0.5),
                     uv: AlignedPoint2::new(0.5, 0.5),
                     color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-                    inside_block: AlignedBool::from(false),
+                    inside_voxel: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -375,7 +375,7 @@ mod tests {
                     pos: AlignedPoint3::new(0.5, 30.999992, 0.5),
                     uv: AlignedPoint2::new(0.5, 0.5),
                     color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-                    inside_block: AlignedBool::from(false),
+                    inside_voxel: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -389,7 +389,7 @@ mod tests {
                     pos: AlignedPoint3::new(0.5, 0.5, 30.000008),
                     uv: AlignedPoint2::new(0.5, 0.5),
                     color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-                    inside_block: AlignedBool::from(false),
+                    inside_voxel: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -403,7 +403,7 @@ mod tests {
                     pos: AlignedPoint3::new(0.5, 0.5, 30.999992),
                     uv: AlignedPoint2::new(0.5, 0.5),
                     color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-                    inside_block: AlignedBool::from(false),
+                    inside_voxel: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -417,7 +417,7 @@ mod tests {
                     pos: AlignedPoint3::new(30.099998, 30.000008, 30.099998),
                     uv: AlignedPoint2::new(0.099998474, 0.9000015),
                     color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-                    inside_block: AlignedBool::from(false),
+                    inside_voxel: AlignedBool::from(false),
                 },
             },
             TestCase {
@@ -431,7 +431,7 @@ mod tests {
                     pos: AlignedPoint3::new(30.900002, 30.999992, 30.900002),
                     uv: AlignedPoint2::new(0.9000015, 0.9000015),
                     color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-                    inside_block: AlignedBool::from(false),
+                    inside_voxel: AlignedBool::from(false),
                 },
             },
         ];
@@ -442,7 +442,7 @@ mod tests {
             pos: assert_vec3_eq!(actual.pos, expected.pos),
             uv: assert_vec2_eq!(actual.uv, expected.uv),
             color: assert_vec4_eq!(actual.color, expected.color),
-            inside_block: expected.inside_block,
+            inside_voxel: expected.inside_voxel,
         };
         for case in cases {
             let buffer_out = cast_ray(&setup.shader, case.pos, case.dir, 100.0, false);
@@ -598,7 +598,7 @@ mod tests {
             pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(0.295, 0.5, 0.0), 0.01),
             uv: assert_vec2_eq!(buffer_out.result.uv, AlignedPoint2::new(0.295, 0.5), 0.01),
             color: AlignedVec4::new(0.0, 0.0, 0.0, 0.0),
-            inside_block: AlignedBool::from(false),
+            inside_voxel: AlignedBool::from(false),
         }, "do not cast translucent");
 
         // cast translucent with adjacent identical
@@ -610,7 +610,7 @@ mod tests {
             pos: AlignedPoint3::new(0.0, 0.0, 0.0),
             uv: AlignedPoint2::new(0.0, 0.0),
             color: AlignedVec4::new(0.0, 0.0, 0.0, 0.0),
-            inside_block: AlignedBool::from(false),
+            inside_voxel: AlignedBool::from(false),
         }, "cast translucent with adjacent identical");
 
         // cast translucent with adjacent different
@@ -622,7 +622,7 @@ mod tests {
             pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(5.75, 0.5, 1.0), 0.01),
             uv: assert_vec2_eq!(buffer_out.result.uv, AlignedPoint2::new(0.75, 0.5), 0.01),
             color: AlignedVec4::new(0.0, 1.0, 0.0, 1.0),
-            inside_block: AlignedBool::from(false),
+            inside_voxel: AlignedBool::from(false),
         }, "cast translucent with adjacent different");
     }
 
@@ -647,7 +647,7 @@ mod tests {
             pos: AlignedPoint3::new(0.0, 0.0, 0.0),
             uv: AlignedPoint2::new(0.0, 0.0),
             color: AlignedVec4::new(0.0, 0.0, 0.0, 0.0),
-            inside_block: AlignedBool::from(true),
+            inside_voxel: AlignedBool::from(true),
         }, "inside block");
 
         // outside block
@@ -665,7 +665,7 @@ mod tests {
             pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(8e-6, 0.5, 0.5)),
             uv: AlignedPoint2::new(0.5, 0.5),
             color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-            inside_block: AlignedBool::from(false),
+            inside_voxel: AlignedBool::from(false),
         }, "outside block");
     }
 
@@ -717,7 +717,7 @@ mod tests {
             pos: assert_vec3_eq!(buffer_out.result.pos, AlignedPoint3::new(484.9203, 484.99994, 493.84668)),
             uv: assert_vec2_eq!(buffer_out.result.uv,AlignedPoint2::new(0.9202881, 0.8466797)),
             color: AlignedVec4::new(1.0, 0.0, 0.0, 1.0),
-            inside_block: AlignedBool::from(false),
+            inside_voxel: AlignedBool::from(false),
         });
     }
 }
