@@ -1,9 +1,10 @@
 use std::rc::Rc;
+use std::time::Instant;
 
 use cgmath::{Point3, Vector3};
 use imgui::Condition;
 
-use crate::core::{Config, Frame, Window};
+use crate::core::{Buffering, Config, Frame, Window};
 use crate::gamelogic::gameplay::Gameplay;
 use crate::gamelogic::world::World;
 use crate::systems::jobs::JobSystem;
@@ -23,6 +24,9 @@ struct State {
     world: World,
     gameplay: Gameplay,
     player: Entity,
+
+    physics_target_fps: u32,
+    physics_fps: u32,
 }
 
 impl Game {
@@ -34,6 +38,8 @@ impl Game {
             msaa_samples: 0,
             headless: false,
             resizable: true,
+            buffering: Buffering::Double,
+            target_fps: None,
         });
         window.request_grab_cursor(true);
 
@@ -51,7 +57,14 @@ impl Game {
         Game {
             window,
             job_system: Rc::clone(&job_system),
-            state: State { job_system, world, gameplay, player },
+            state: State {
+                job_system,
+                world,
+                gameplay,
+                player,
+                physics_target_fps: 250,
+                physics_fps: 0,
+            },
         }
     }
 
@@ -59,22 +72,42 @@ impl Game {
         let mut window = self.window;
         let mut state = self.state;
 
+        let fixed_frame_time = 1.0 / state.physics_target_fps as f32;
+        let mut frame_time_accumulator = 0.0;
+        let mut last_fixed_frame_measurement = Instant::now();
+        let mut fixed_frames = 0;
+
         loop {
             if window.should_close() {
                 break;
             }
             window.update(|frame| {
+                // per frame update
                 if frame.was_resized {
                     state.handle_window_resize(frame.size.0, frame.size.1, frame.get_aspect());
                 }
-
                 state.update(frame);
 
+                // accumulate frame time for fixed update
+                frame_time_accumulator += frame.stats.delta_time;
+
+                // consume accumulated time for fixed physics updates
+                while frame_time_accumulator >= fixed_frame_time {
+                    state.update_fixed(frame, fixed_frame_time);
+                    frame_time_accumulator -= fixed_frame_time;
+                    fixed_frames += 1;
+                }
+                if last_fixed_frame_measurement.elapsed().as_secs() >= 1 {
+                    state.physics_fps = fixed_frames;
+                    last_fixed_frame_measurement = Instant::now();
+                    fixed_frames = 0;
+                }
+
+                // draw frame
                 unsafe {
                     gl::ClearColor(0.0, 0.0, 0.0, 1.0);
                     gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
                 }
-
                 state.render(frame);
             });
         }
@@ -92,10 +125,14 @@ impl Game {
 }
 
 impl State {
+    fn update_fixed(&mut self, frame: &mut Frame, delta_time: f32) {
+        self.world.update_fixed(&mut self.player, delta_time);
+    }
+
     fn update(&mut self, frame: &mut Frame) {
         self.handle_debug_keys(frame);
 
-        self.world.update(&mut self.player, frame.stats.delta_time);
+        self.world.update(&mut self.player);
         self.gameplay.update(frame, &mut self.player, &mut self.world);
         self.world.selected_voxel = self.gameplay.looking_at_block.map(|result| result.pos);
     }
@@ -132,17 +169,31 @@ impl State {
                     frame.stats.avg_update_time_per_second * 1000.0,
                 ));
                 frame.ui.text(format!(
-                    "abs pos: ({:.3},{:.3},{:.3})",
+                    "physics fps: {}, every: {:.2}ms",
+                    self.physics_fps,
+                    (1.0 / self.physics_target_fps as f32) * 1000.0,
+                ));
+
+                frame.ui.separator();
+
+                frame.ui.text(format!(
+                    "abs pos: ({:.3}, {:.3}, {:.3})",
                     self.player.position.x, self.player.position.y, self.player.position.z,
                 ));
                 frame.ui.text(format!(
-                    "cam pos: ({:.3},{:.3},{:.3})",
+                    "cam pos: ({:.3}, {:.3}, {:.3})",
                     camera.position.x, camera.position.y, camera.position.z,
                 ));
                 frame.ui.text(format!(
-                    "cam fwd: ({:.3},{:.3},{:.3})",
+                    "cam fwd: ({:.3}, {:.3}, {:.3})",
                     camera.forward.x, camera.forward.y, camera.forward.z,
                 ));
+                frame.ui.text(format!(
+                    "velocity: ({:.3}, {:.3}, {:.3})",
+                    self.player.velocity.x, self.player.velocity.y, self.player.velocity.z,
+                ));
+
+                frame.ui.separator();
 
                 let mut pos = Point3::new(0.0, 0.0, 0.0);
                 let mut norm = Vector3::new(0.0, 0.0, 0.0);
@@ -151,11 +202,11 @@ impl State {
                     norm = result.normal;
                 }
                 frame.ui.text(format!(
-                    "block pos: ({:.2},{:.2},{:.2})",
+                    "block pos: ({:.2}, {:.2}, {:.2})",
                     pos.x, pos.y, pos.z,
                 ));
                 frame.ui.text(format!(
-                    "block normal: ({},{},{})",
+                    "block normal: ({}, {}, {})",
                     norm.x as i32, norm.y as i32, norm.z as i32,
                 ));
 
@@ -165,9 +216,11 @@ impl State {
                     self.player.position.z as i32,
                 );
                 frame.ui.text(format!(
-                    "chunk pos: ({},{},{})",
+                    "chunk pos: ({}, {}, {})",
                     chunk_pos.x, chunk_pos.y, chunk_pos.z,
                 ));
+
+                frame.ui.separator();
 
                 let svo_stats = self.world.world_svo.get_stats();
                 frame.ui.text(format!(

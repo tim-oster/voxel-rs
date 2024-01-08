@@ -50,8 +50,8 @@ impl Default for EntityCapabilities {
         EntityCapabilities {
             wall_clip: false,
             flying: false,
-            gravity: 0.8,
-            max_fall_velocity: 3.0,
+            gravity: 60.0,
+            max_fall_velocity: 100.0,
         }
     }
 }
@@ -143,31 +143,36 @@ impl Physics {
     }
 
     fn update_entity(entity: &mut Entity, result: &AabbResult, delta_time: f32) {
-        let mut v = entity.velocity * delta_time;
-
+        // apply gravity
         if !entity.caps.flying {
-            v.y -= entity.caps.gravity * delta_time;
-            if v.y < 0.0 {
-                v.y = v.y.max(-entity.caps.max_fall_velocity);
+            entity.velocity.y -= entity.caps.gravity * delta_time;
+            if entity.velocity.y < 0.0 {
+                entity.velocity.y = entity.velocity.y.max(-entity.caps.max_fall_velocity);
             }
-
-            if !entity.caps.wall_clip {
-                v.x = Physics::apply_axial_physics(v.x, result.pos.x, result.neg.x);
-                v.z = Physics::apply_axial_physics(v.z, result.pos.z, result.neg.z);
-            }
-            v.y = Physics::apply_axial_physics(v.y, result.pos.y, result.neg.y);
         }
 
-        entity.position += v;
+        let mut velocity = entity.velocity * delta_time;
+
+        // calculate entity state with new velocity
         entity.state = EntityState {
-            is_grounded: !entity.caps.flying && (result.neg.y + v.y) < 0.02 && result.neg.y != -1.0,
+            is_grounded: !entity.caps.flying && (result.neg.y + velocity.y) < 0.02 && result.neg.y != -1.0,
         };
+        // reset gravity, if entity collides with ground already
+        if entity.state.is_grounded && entity.velocity.y < 0.0 {
+            entity.velocity.y = 0.0;
+        }
 
-        v.x = 0.0;
-        v.z = 0.0;
-        if entity.caps.flying { v.y = 0.0; }
+        // constraint velocity by nearby collisions
+        if !entity.caps.flying {
+            if !entity.caps.wall_clip {
+                velocity.x = Physics::apply_axial_physics(velocity.x, result.pos.x, result.neg.x);
+                velocity.z = Physics::apply_axial_physics(velocity.z, result.pos.z, result.neg.z);
+            }
+            velocity.y = Physics::apply_axial_physics(velocity.y, result.pos.y, result.neg.y);
+        }
 
-        entity.velocity = v / delta_time;
+        // apply velocity
+        entity.position += velocity;
     }
 
     fn apply_axial_physics(speed: f32, dst_pos: f32, dst_neg: f32) -> f32 {
@@ -242,7 +247,7 @@ mod tests {
                 caps: None,
                 aabb_result: AabbResult { neg: Vector3::new(-1.0, 0.01, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(0.0, -0.0335, 0.0), // should be -0.034 but epsilon value prevents them from getting close
-                expected_velocity: Vector3::new(0.0, -0.0095, 0.0),
+                expected_velocity: Vector3::new(0.0, 0.0, 0.0),
                 expected_state: Some(EntityState { is_grounded: true }),
             },
             EntityTestCase {
@@ -253,7 +258,7 @@ mod tests {
                 caps: Some(EntityCapabilities { wall_clip: true, flying: false, gravity: 0.008, max_fall_velocity: 3.0 }),
                 aabb_result: AabbResult { neg: Vector3::new(-1.0, 0.01, -1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(0.0, -0.0335, 0.0), // should be -0.034 but epsilon value prevents them from getting close
-                expected_velocity: Vector3::new(0.0, -0.0095, 0.0),
+                expected_velocity: Vector3::new(0.0, 0.0, 0.0),
                 expected_state: Some(EntityState { is_grounded: true }),
             },
             EntityTestCase {
@@ -286,7 +291,7 @@ mod tests {
                 caps: None,
                 aabb_result: AabbResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 2.0, -1.0) },
                 expected_position: Point3::new(0.0, 1.9995, 0.0),
-                expected_velocity: Vector3::new(0.0, 1.9995, 0.0), // will be reset on the next iteration
+                expected_velocity: Vector3::new(0.0, 4.992, 0.0), // will be reset on the next iteration
                 expected_state: None,
             },
             EntityTestCase {
@@ -297,7 +302,7 @@ mod tests {
                 caps: None,
                 aabb_result: AabbResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 0.0005, -1.0) },
                 expected_position: Point3::new(0.0, 1.9995, 0.0),
-                expected_velocity: Vector3::new(0.0, 0.0, 0.0), // this is reset now
+                expected_velocity: Vector3::new(0.0,  1.9915, 0.0), // this is reset now
                 expected_state: None,
             },
             EntityTestCase {
@@ -308,7 +313,7 @@ mod tests {
                 caps: Some(EntityCapabilities { wall_clip: true, flying: false, gravity: 0.008, max_fall_velocity: 3.0 }),
                 aabb_result: AabbResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 2.0, -1.0) },
                 expected_position: Point3::new(0.0, 1.9995, 0.0),
-                expected_velocity: Vector3::new(0.0, 1.9995, 0.0), // would be reset on the next iteration
+                expected_velocity: Vector3::new(0.0, 4.992, 0.0), // would be reset on the next iteration
                 expected_state: None,
             },
             EntityTestCase {
@@ -319,7 +324,7 @@ mod tests {
                 caps: Some(EntityCapabilities { wall_clip: false, flying: true, gravity: 0.008, max_fall_velocity: 3.0 }),
                 aabb_result: AabbResult { neg: Vector3::new(-1.0, 5.0, -1.0), pos: Vector3::new(2.0, -1.0, 2.0) },
                 expected_position: Point3::new(3.0, 0.0, 3.0),
-                expected_velocity: Vector3::new(0.0, 0.0, 0.0),
+                expected_velocity: Vector3::new(3.0, -5.0, 3.0),
                 expected_state: Some(EntityState { is_grounded: false }),
             },
             EntityTestCase {
@@ -330,7 +335,7 @@ mod tests {
                 caps: None,
                 aabb_result: AabbResult { neg: Vector3::new(-1.0, 0.0, -1.0), pos: Vector3::new(1.0, -1.0, 1.0) },
                 expected_position: Point3::new(0.9995, 0.0, 0.9995),
-                expected_velocity: Vector3::new(0.0, 0.0, 0.0),
+                expected_velocity: Vector3::new(2.0, 0.0, 2.0),
                 expected_state: Some(EntityState { is_grounded: true }),
             },
             EntityTestCase {
@@ -341,7 +346,7 @@ mod tests {
                 caps: None,
                 aabb_result: AabbResult { neg: Vector3::new(1.0, 0.0, 1.0), pos: Vector3::new(-1.0, -1.0, -1.0) },
                 expected_position: Point3::new(-0.9995, 0.0, -0.9995),
-                expected_velocity: Vector3::new(0.0, 0.0, 0.0),
+                expected_velocity: Vector3::new(-2.0, 0.0, -2.0),
                 expected_state: Some(EntityState { is_grounded: true }),
             },
             EntityTestCase {
@@ -352,7 +357,7 @@ mod tests {
                 caps: Some(EntityCapabilities { wall_clip: true, flying: false, gravity: 0.008, max_fall_velocity: 3.0 }),
                 aabb_result: AabbResult { neg: Vector3::new(-1.0, 0.0, -1.0), pos: Vector3::new(1.0, -1.0, 1.0) },
                 expected_position: Point3::new(2.0, 0.0, 2.0),
-                expected_velocity: Vector3::new(0.0, 0.0, 0.0),
+                expected_velocity: Vector3::new(2.0, 0.0, 2.0),
                 expected_state: Some(EntityState { is_grounded: true }),
             },
         ];
