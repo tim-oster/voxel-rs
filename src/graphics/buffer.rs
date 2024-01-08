@@ -18,6 +18,7 @@ pub const DYNAMIC_READ: BufferUsage = gl::DYNAMIC_READ;
 pub const DYNAMIC_DRAW: BufferUsage = gl::DYNAMIC_DRAW;
 pub const DYNAMIC_COPY: BufferUsage = gl::DYNAMIC_COPY;
 
+/// Buffer is a wrapper around a native OpenGL buffer.
 pub struct Buffer<T> {
     data: Option<Vec<T>>,
     handle: GLuint,
@@ -82,8 +83,12 @@ impl<T> Buffer<T> {
     }
 }
 
+/// MappedBuffer is a wrapper for a persistently mapped OpenGL buffer. Both client and server
+/// side changes are reflected in the buffer without pulling or flushing. For synchronizing
+/// CPU & GPU, look into `Fences` and `Memory Barriers`.
 pub struct MappedBuffer<T> {
     handle: GLuint,
+    size: usize,
     mapped_ptr: *mut T,
 }
 
@@ -121,21 +126,30 @@ impl<T> MappedBuffer<T> {
                 handle,
                 size_bytes as GLsizeiptr,
                 ptr::null(),
-                gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+                gl::MAP_READ_BIT | gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
             );
             mapped_ptr = gl::MapNamedBufferRange(
                 handle,
                 0,
                 size_bytes as isize,
-                gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
+                gl::MAP_READ_BIT | gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
             ) as *mut T;
         }
-        MappedBuffer { handle, mapped_ptr }
+        MappedBuffer { handle, size, mapped_ptr }
     }
 
     pub fn bind_as_storage_buffer(&self, index: u32) {
         unsafe {
             gl::BindBufferBase(gl::SHADER_STORAGE_BUFFER, index, self.handle);
         }
+    }
+
+    #[allow(clippy::mut_from_ref)]
+    pub fn as_slice_mut(&self) -> &mut [T] {
+        unsafe { std::slice::from_raw_parts_mut(self.mapped_ptr, self.size) }
+    }
+
+    pub fn as_slice(&self) -> &[T] {
+        unsafe { std::slice::from_raw_parts(self.mapped_ptr, self.size) }
     }
 }

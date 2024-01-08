@@ -1,5 +1,5 @@
 #shader_type compute
-#version 460
+#version 450
 
 #include "svo.glsl"
 
@@ -12,7 +12,7 @@ struct PickerResult {
     vec3 normal;
 };
 layout (std430, binding = 1) writeonly buffer picker_output {
-    PickerResult results[50];
+    PickerResult results[100];
 };
 
 struct PickerTask {
@@ -21,7 +21,7 @@ struct PickerTask {
     vec3 dir;
 };
 layout (std430, binding = 3) readonly buffer picker_input {
-    PickerTask tasks[50];
+    PickerTask tasks[100];
 };
 
 void main() {

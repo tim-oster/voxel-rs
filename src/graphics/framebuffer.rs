@@ -1,6 +1,9 @@
+#![allow(dead_code)]
+
 use std::ptr;
 
 use gl::types::{GLint, GLuint, GLvoid};
+use image::{DynamicImage, GenericImageView};
 
 use crate::gl_assert_no_error;
 
@@ -10,6 +13,8 @@ pub struct Framebuffer {
     height: i32,
 }
 
+/// Framebuffer is a wrapper around a OpenGL framebuffer object. It attaches color, depth & stencil
+/// buffer for the given resolution. No multi-sampling is applied.
 impl Framebuffer {
     pub fn new(width: i32, height: i32) -> Framebuffer {
         let mut handle = 0;
@@ -58,6 +63,13 @@ impl Framebuffer {
         unsafe { gl::BindFramebuffer(gl::FRAMEBUFFER, 0); }
     }
 
+    pub fn clear(&self, r: f32, g: f32, b: f32, a: f32) {
+        unsafe {
+            gl::ClearColor(r, g, b, a);
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
+        }
+    }
+
     pub fn read_pixels(&self) -> Vec<u8> {
         let mut bytes = vec![0; (self.width * self.height * 4) as usize];
         unsafe {
@@ -67,10 +79,32 @@ impl Framebuffer {
         }
         bytes
     }
+
+    pub fn as_image(&self) -> DynamicImage {
+        let pixels = self.read_pixels();
+        let image = image::RgbaImage::from_raw(self.width as u32, self.height as u32, pixels).unwrap();
+        DynamicImage::ImageRgba8(image).flipv()
+    }
 }
 
 impl Drop for Framebuffer {
     fn drop(&mut self) {
         unsafe { gl::DeleteFramebuffers(1, &self.handle) }
     }
+}
+
+pub fn diff_images(lhs: &DynamicImage, rhs: &DynamicImage) -> f64 {
+    // source: https://rosettacode.org/wiki/Percentage_difference_between_images#Rust
+    fn diff_rgba3(rgba1: image::Rgba<u8>, rgba2: image::Rgba<u8>) -> i32 {
+        (rgba1[0] as i32 - rgba2[0] as i32).abs()
+            + (rgba1[1] as i32 - rgba2[1] as i32).abs()
+            + (rgba1[2] as i32 - rgba2[2] as i32).abs()
+    }
+
+    let mut accum = 0;
+    let zipper = lhs.pixels().zip(rhs.pixels());
+    for (pixel1, pixel2) in zipper {
+        accum += diff_rgba3(pixel1.2, pixel2.2);
+    }
+    accum as f64 / (255.0 * 3.0 * (lhs.width() * lhs.height()) as f64)
 }

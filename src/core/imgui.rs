@@ -30,7 +30,7 @@ impl Wrapper {
     pub fn new(window: &mut glfw::Window) -> Wrapper {
         let mut context = imgui::Context::create();
 
-        let mut io = context.io_mut();
+        let io = context.io_mut();
         io.key_map[imgui::Key::Tab as usize] = glfw::Key::Tab as u32;
         io.key_map[imgui::Key::LeftArrow as usize] = glfw::Key::Left as u32;
         io.key_map[imgui::Key::RightArrow as usize] = glfw::Key::Right as u32;
