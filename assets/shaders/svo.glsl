@@ -149,8 +149,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     uint ptr = 0;// current pointer inside the SVO data structure
     uint parent_octant_idx = 0;// the child index [0;7] of the current octant's parent octant
 
-    // Scale is the mantiassa bit of the current ray step size. Starts at bit 22, which with an exponent of 0, is
-    // equal to 1.5, or in case of this algorithm is interpreted as 0.5. A more intuitive representation would be a
+    // Scale is the mantiassa bit of the current ray step size. A more intuitive representation would be a
     // scale that increments from 0..22 as the algorithm descends into the octree, but choosing the inverted form allows
     // for optimizing the POP implementation below.
     int scale = MAX_SCALE - 1;
@@ -173,14 +172,15 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // To calculate octant intersections, the algorithm needs to know the distance `t` along every axis until the next
     // octant at the current step size is reached. This can be expressed as `rx(t) = rx + t * dx` for the x-axis.
     // This equation however is solving for the target position. In this algorithm, the target position is known as
-    // `pos.x + scale_exp2`. So instead of solving for x, it must solve for t to determine how far away the target
-    // position is from the current position on a given axis: `tx(x) = (x - rx) / dx`.
+    // `pos.x`. So instead of solving for x, it must solve for t to determine how far away the target position is from
+    // the current position on a given axis: `tx(x) = (x - rx) / dx`.
     //
     // To optimize calculations, the result can be rewritten as `tx(x) = x * (1/dx) - (rx/dx)` allowing for
-    // pre-calculating the coefficient of x and the bias once. This means that calculating the next interception
+    // pre-calculating the coefficient of x and the bias. This means that calculating the next interception
     // distnance is one FMA-operation (fused multiply-add) per axis: `x * tx_coef - tx_bias`.
     //
-    // Because t always increases, the bias only has to be caclculated once with the ray origin position.
+    // Because t always increases but is never reset, the bias only has to be caclculated once with the ray origin
+    // position.
     //
     // Ensure that ray directions are always negative, this is required so that the mirroring logic below works.
     float tx_coef = 1.0 / -abs(rd.x);
@@ -199,10 +199,10 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // This can be simplified to only adjust the bias `tx'(x) = x * tx_coef - (3 * tx_coef - tx_bias)`. Hence,
     // to mirror the equation for one axis, the bias has to be rewritten as `tx_bias = x * tx_coef - tx_bias`.
     //
-    // Using negative directions has the advantegous property that the pos vector decreases over time. This allows the
-    // POP phase implementation to round down floats using bit operations, which is more efficient than alternative
-    // implementations. The negative property also simplifies the calculation of corner points, which happens
-    // frequently.
+    // Using negative directions has the advantegous property that the pos (see below) vector decreases over time. This
+    // allows the POP phase implementation to round down floats using bit operations, which is more efficient than
+    // alternative implementations. The negative property also simplifies the calculation of corner points, which
+    // happens frequently.
     int octant_mask = 0;
     if (rd.x > 0) octant_mask ^= 1, tx_bias = 3.0 * tx_coef - tx_bias;
     if (rd.y > 0) octant_mask ^= 2, ty_bias = 3.0 * ty_coef - ty_bias;
@@ -221,7 +221,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // allocating one bit per axis and setting it to 0 or 1 depending on the position of the octant on the given axis
     // (e.g. (0,0,0) => 0b000 => 0, (1,0,1) => 0b101 => 5, (0,1,0) => 0b010 => 4).
     int idx = 0;
-    // pos keeps track of the current octant's position inside the octree. Each component is within [1;2).
+    // pos keeps track of the current octant's position inside the octree. Each component is within [1;2). Note that pos
+    // can be looked at as the "upper bound" at the current scale at which the ray will leave the current octant.
     vec3 pos = vec3(1.0);
     // Since the ray casts through the octree in the inverted direction from 2 -> 1, the intersection and index
     // calculation logic needs to be inverted as well. If t_min is less than the distance to the center of every
@@ -245,11 +246,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
         // The smallest distance across axes determines the exit distance of the current octant.
         float tc_max = min(min(tx_corner, ty_corner), tz_corner);
 
-        // get octant index and its bit index
-        uint octant_idx = idx ^ octant_mask;
-        uint bit = 1u << octant_idx;
-
         // lookup the descriptor for the current octant
+        uint octant_idx = idx ^ octant_mask;// undo mirroring
         bvec2 desc = parse_descriptor(ptr, parent_octant_idx, octant_idx);
         bool is_child = desc.x;
         bool is_leaf = desc.y;
@@ -275,15 +273,14 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 // fetch leaf value
                 uint value = descriptors[next_ptr];
 
-                // Because the ray direction is inverted, use pos and the current octant scale to calculate the entry
-                // distance of the hit leaf.
+                // Use current pos + scale_exp2 to get the lower bound, i.e. the entry distinace for the ray.
                 float tx_corner = (pos.x + scale_exp2) * tx_coef - tx_bias;
                 float ty_corner = (pos.y + scale_exp2) * ty_coef - ty_bias;
                 float tz_corner = (pos.z + scale_exp2) * tz_coef - tz_bias;
                 // The smallest distance across axes determines the entry distance of the hit leaf.
                 float tc_min = max(max(tx_corner, ty_corner), tz_corner);
 
-                // Use octant_mask to undo mirroring of pos.
+                // undo mirroring of the position
                 vec3 pos = pos;
                 if ((octant_mask & 1) != 0) pos.x = 3.0 - scale_exp2 - pos.x;
                 if ((octant_mask & 2) != 0) pos.y = 3.0 - scale_exp2 - pos.y;
@@ -358,8 +355,11 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
             } else {
                 // intersect with octant and descend into it
 
-                // Use corner coordinates (upper bound of the current octant) and add half the scale to them to get
-                // the center position.
+                // When intersecting with a child octant (that is not a leaf), it is required to know which child of
+                // that octant the ray intercects with in order to calculate the new idx. Therefore, by calculating
+                // the center position of the hit octant, it can be determined to which side of the center the ray
+                // intersects on each axis. This center position is equal to the current "upper bound" pos + half of
+                // the current scale.
                 float half_scale = scale_exp2 * 0.5;
                 float tx_center = half_scale * tx_coef + tx_corner;
                 float ty_center = half_scale * ty_coef + ty_corner;
@@ -408,7 +408,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
         // if nothing was hit, advance the ray to the next sibling
 
         // Figure out which corner is the closest and build the step_mask using it. Also adjust the pos (upper bound)
-        // to inverse direction to reflect the next upper bound correctly.
+        // in inverse direction to reflect the next upper bound correctly.
         int step_mask = 0;
         if (tc_max >= tx_corner) step_mask ^= 1, pos.x -= scale_exp2;
         if (tc_max >= ty_corner) step_mask ^= 2, pos.y -= scale_exp2;
@@ -419,7 +419,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
         idx ^= step_mask;
 
         // If the next idx does not align with the step mask, i.e. the step caused the ray to leave the parent octant,
-        // pop the current stack and ascend to the highest parent that the ray exists and proceed with the next sibling.
+        // pop the current stack and ascend to the highest parent that the ray exits and proceed with the next sibling.
         if ((idx & step_mask) != 0) {
             // phase: POP
 
@@ -430,8 +430,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
             //
             // Because ADVANCE stepped outside the parent octant, adding scale_exp2 to pos will cause a higher bit of
             // the mantiassa to be flipped (e.g. `1.25 + 0.25 = 1.5 <=> (2^0)+(2^-2) + (2^-2) = (2^0)+(2^-1)`). Using
-            // this approach, a differing_bits mask can be calculated by comparing the current position against the new
-            // one on every axis.
+            // this approach, a differing_bits mask can be calculated by comparing the current position (pos) against
+            // the previous one (pos + scale_exp2) on every axis.
             uint differing_bits = 0;
             if ((step_mask & 1) != 0) differing_bits |= floatBitsToUint(pos.x) ^ floatBitsToUint(pos.x + scale_exp2);
             if ((step_mask & 2) != 0) differing_bits |= floatBitsToUint(pos.y) ^ floatBitsToUint(pos.y + scale_exp2);
