@@ -17,14 +17,14 @@ struct Result {
     vec3 pos;
     vec2 uv;
     vec4 color;
-    bool inside_block;
+    bool inside_voxel;
 };
 
 struct StackFrame {
     float t_min;
-    int ptr;
+    uint ptr;
     int idx;
-    int parent_octant_idx;
+    uint parent_octant_idx;
     int scale;
     int is_child;
     int is_leaf;
@@ -36,10 +36,14 @@ layout (std430, binding = 12) buffer buffer_out {
     StackFrame out_stack[];
 };
 
+uniform sampler2DArray u_texture;
+
+// override debug function to capture raytracing frames
 #define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf) \
     add_dbg_frame(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf)
 
-void add_dbg_frame(float t_min, int ptr, int idx, int parent_octant_idx, int scale, bool is_child, bool is_leaf) {
+// Creates a new frame on the stack by incrementing the stack pointer and storing all values in it.
+void add_dbg_frame(float t_min, uint ptr, int idx, uint parent_octant_idx, int scale, bool is_child, bool is_leaf) {
     out_stack_ptr += 1;
     out_stack[out_stack_ptr].t_min = t_min;
     out_stack[out_stack_ptr].ptr = ptr;
@@ -55,8 +59,8 @@ void add_dbg_frame(float t_min, int ptr, int idx, int parent_octant_idx, int sca
 void main() {
     out_stack_ptr = -1;
 
-    octree_result res;
-    intersect_octree(in_pos, in_dir, in_max_dst, in_cast_translucent, res);
+    OctreeResult res;
+    intersect_octree(in_pos, in_dir, in_max_dst, in_cast_translucent, u_texture, res);
 
     out_result.t = res.t;
     out_result.value = res.value;
@@ -64,5 +68,5 @@ void main() {
     out_result.pos = res.pos;
     out_result.uv = res.uv;
     out_result.color = res.color;
-    out_result.inside_block = res.inside_block;
+    out_result.inside_voxel = res.inside_voxel;
 }

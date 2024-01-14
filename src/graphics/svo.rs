@@ -332,19 +332,19 @@ mod svo_tests {
             rays: vec![
                 RayResult {
                     dst: assert_float_eq!(result.rays[0].dst, 0.5, 0.0001),
-                    inside_block: false,
+                    inside_voxel: false,
                     pos: assert_vec3_eq!(result.rays[0].pos, Point3::new(0.5, 1.0, 0.5), 0.0001),
                     normal: Vector3::new(0.0, 1.0, 0.0),
                 },
                 RayResult {
                     dst: assert_float_eq!(result.rays[1].dst, 0.5, 0.0001),
-                    inside_block: true,
+                    inside_voxel: true,
                     pos: assert_vec3_eq!(result.rays[1].pos, Point3::new(1.0, 0.5, 0.5), 0.0001),
                     normal: Vector3::new(-1.0, 0.0, 0.0),
                 },
                 RayResult {
                     dst: -1.0,
-                    inside_block: false,
+                    inside_voxel: false,
                     pos: Point3::new(0.0, 0.0, 0.0),
                     normal: Vector3::new(0.0, 0.0, 0.0),
                 },

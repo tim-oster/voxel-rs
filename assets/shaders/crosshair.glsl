@@ -25,9 +25,12 @@ uniform vec2 u_dimensions;
 const float size = 4;
 
 void main() {
+    // convert uv into pixels
     vec2 coords = u_dimensions * v_uv;
     vec2 center = u_dimensions * 0.5;
     float dst = length(coords - center);
+
+    // create smooth circle at center with radius of `size`
     float alpha = 1 - smoothstep(size, size+1, dst);
     color = vec4(vec3(1), alpha);
 }
