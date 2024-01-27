@@ -2,6 +2,8 @@ use cgmath::{Point3, Vector3};
 
 use crate::graphics::macros::{AlignedPoint3, AlignedVec3};
 
+const MAX_SVO_PICKER_JOBS: usize = 100;
+
 #[derive(Debug, PartialEq)]
 pub struct PickerBatch {
     pub rays: Vec<Ray>,
@@ -33,7 +35,19 @@ pub(super) struct PickerResult {
 /// again a SVO.
 impl PickerBatch {
     pub fn new() -> PickerBatch {
-        PickerBatch { rays: Vec::new(), aabbs: Vec::new() }
+        Self::with_capacity(MAX_SVO_PICKER_JOBS)
+    }
+
+    pub fn with_capacity(capacity: usize) -> PickerBatch {
+        Self {
+            rays: Vec::with_capacity(capacity),
+            aabbs: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.rays.clear();
+        self.aabbs.clear();
     }
 
     pub fn add_ray(&mut self, pos: Point3<f32>, dir: Vector3<f32>, max_dst: f32) {
@@ -59,10 +73,7 @@ impl PickerBatch {
         }
 
         for aabb in &self.aabbs {
-            for task in aabb.generate_picker_tasks() {
-                tasks[offset] = task;
-                offset += 1;
-            }
+            offset += aabb.generate_picker_tasks(&mut tasks[offset..]);
         }
 
         offset
@@ -70,15 +81,14 @@ impl PickerBatch {
 
     /// deserialize_results reads all results from the given result buffer and parses the results
     /// for all jobs on this batch.
-    pub(super) fn deserialize_results(&self, results: &[PickerResult]) -> PickerBatchResult {
+    pub(super) fn deserialize_results(&self, results: &[PickerResult], dst: &mut PickerBatchResult) {
         let mut offset = 0;
-        let mut batch_result = PickerBatchResult { rays: Vec::new(), aabbs: Vec::new() };
 
         for _ in &self.rays {
             let result = results[offset];
             offset += 1;
 
-            batch_result.rays.push(RayResult {
+            dst.rays.push(RayResult {
                 dst: result.dst,
                 inside_voxel: result.inside_voxel,
                 pos: result.pos.0,
@@ -88,11 +98,9 @@ impl PickerBatch {
 
         for aabb in &self.aabbs {
             let (result, consumed) = aabb.parse_picker_results(&results[offset..]);
-            batch_result.aabbs.push(result);
+            dst.aabbs.push(result);
             offset += consumed;
         }
-
-        batch_result
     }
 }
 
@@ -100,6 +108,24 @@ impl PickerBatch {
 pub struct PickerBatchResult {
     pub rays: Vec<RayResult>,
     pub aabbs: Vec<AabbResult>,
+}
+
+impl PickerBatchResult {
+    pub fn new() -> PickerBatchResult {
+        Self::with_capacity(MAX_SVO_PICKER_JOBS)
+    }
+
+    pub fn with_capacity(capacity: usize) -> PickerBatchResult {
+        Self {
+            rays: Vec::with_capacity(capacity),
+            aabbs: Vec::with_capacity(capacity),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.rays.clear();
+        self.aabbs.clear();
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -153,7 +179,7 @@ impl Aabb {
         Aabb { pos, offset, extents }
     }
 
-    fn generate_picker_tasks(&self) -> Vec<PickerTask> {
+    fn generate_picker_tasks(&self, dst: &mut [PickerTask]) -> usize {
         let blocks_per_axis = [
             self.extents.x.ceil() as i32,
             self.extents.y.ceil() as i32,
@@ -165,17 +191,23 @@ impl Aabb {
             self.extents.z / blocks_per_axis[2] as f32,
         ];
 
-        let mut tasks = Vec::new();
+        let mut offset = 0;
+        let mut axes = [0; 3];
 
         // go through all block points across the AABB
         for x in 0..=blocks_per_axis[0] {
             for y in 0..=blocks_per_axis[1] {
                 for z in 0..=blocks_per_axis[2] {
+                    axes[0] = x;
+                    axes[1] = y;
+                    axes[2] = z;
+
                     // At each point, up to three rays have to be cast: 3 on corners, 2 on sides,
                     // and 1 on faces. Iterate through all axes.
-                    for (i, v) in vec![x, y, z].into_iter().enumerate() {
+                    for i in 0..3 {
                         // if the block position of the current axis is at neither start nor end,
                         // skip it
+                        let v = axes[i];
                         if v != 0 && v != blocks_per_axis[i] {
                             continue;
                         }
@@ -195,16 +227,18 @@ impl Aabb {
                             y as f32 * step_size_per_axis[1],
                             z as f32 * step_size_per_axis[2],
                         );
-                        tasks.push(PickerTask {
+                        dst[offset] = PickerTask {
                             max_dst: 10.0,
                             pos: AlignedPoint3(self.pos + self.offset + point),
                             dir: AlignedVec3(Vector3::new(dir(0), dir(1), dir(2))),
-                        });
+                        };
+                        offset += 1;
                     }
                 }
             }
         }
-        tasks
+
+        offset
     }
 
     fn parse_picker_results(&self, data: &[PickerResult]) -> (AabbResult, usize) {
@@ -222,6 +256,7 @@ impl Aabb {
         ];
 
         let mut res_index: usize = 0;
+        let mut axes = [0; 3];
 
         // Go through all possible block points across the AABB using the same logic as in
         // `generate_picker_tasks` and keep the shortest distance from every hit per axis
@@ -229,7 +264,12 @@ impl Aabb {
         for x in 0..=blocks_per_axis[0] {
             for y in 0..=blocks_per_axis[1] {
                 for z in 0..=blocks_per_axis[2] {
-                    for (i, v) in vec![x, y, z].into_iter().enumerate() {
+                    axes[0] = x;
+                    axes[1] = y;
+                    axes[2] = z;
+
+                    for i in 0..3 {
+                        let v = axes[i];
                         if v != 0 && v != blocks_per_axis[i] {
                             continue;
                         }
@@ -475,7 +515,8 @@ mod tests {
             PickerResult { dst: -1.0, inside_voxel: false, pos: AlignedPoint3(Point3::new(1.5, 1.5, 1.5)), normal: AlignedVec3(Vector3::new(0.0, 0.0, 1.0)) },
         ];
 
-        let result = batch.deserialize_results(&buffer);
+        let mut result = PickerBatchResult::new();
+        batch.deserialize_results(&buffer, &mut result);
 
         assert_eq!(result, PickerBatchResult {
             rays: vec![

@@ -177,7 +177,7 @@ impl Svo {
 
     /// Uploads the given `batch` to the GPU and runs a compute shader on it to calculate
     /// SVO interceptions without rendering anything.
-    pub fn raycast(&self, batch: PickerBatch) -> PickerBatchResult {
+    pub fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult) {
         self.picker_shader.bind();
 
         let in_data = self.picker_in_buffer.as_slice_mut();
@@ -198,7 +198,7 @@ impl Svo {
         self.picker_shader.unbind();
 
         let out_data = self.picker_out_buffer.as_slice();
-        batch.deserialize_results(&out_data[..task_count])
+        batch.deserialize_results(&out_data[..task_count], result);
     }
 }
 
@@ -326,7 +326,9 @@ mod svo_tests {
         batch.add_ray(Point3::new(0.5, 0.5, 0.5), Vector3::new(1.0, 0.0, 0.0), 1.0);
         batch.add_ray(Point3::new(0.5, 0.5, -2.0), Vector3::new(0.0, 0.0, 1.0), 1.0);
 
-        let result = svo.raycast(batch);
+        let mut result = PickerBatchResult::new();
+        svo.raycast(&mut batch, &mut result);
+
         gl_assert_no_error!();
         assert_eq!(result, PickerBatchResult {
             rays: vec![

@@ -365,9 +365,7 @@ impl Svo {
 /// from world space into SVO space.
 impl Raycaster for Svo {
     /// Calls [`graphics::Svo::raycast`]. Positions are expected to be in world space.
-    fn raycast(&self, batch: PickerBatch) -> PickerBatchResult {
-        let mut batch = batch;
-
+    fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult) {
         for ray in &mut batch.rays {
             ray.pos = self.svo_coord_space.cnv_block_pos(ray.pos);
         }
@@ -375,13 +373,11 @@ impl Raycaster for Svo {
             aabb.pos = self.svo_coord_space.cnv_block_pos(aabb.pos);
         }
 
-        let mut result = self.graphics_svo.raycast(batch);
+        self.graphics_svo.raycast(batch, result);
 
         for ray in &mut result.rays {
             ray.pos = self.svo_coord_space.cnv_svo_pos(ray.pos);
         }
-
-        result
     }
 }
 

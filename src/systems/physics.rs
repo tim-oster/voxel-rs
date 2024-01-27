@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+
 use cgmath::{InnerSpace, Point3, Vector3};
 #[cfg(test)]
 use mockall::automock;
@@ -87,59 +89,52 @@ impl AABBDef {
 
 #[cfg_attr(test, automock)]
 pub trait Raycaster {
-    fn raycast(&self, batch: PickerBatch) -> PickerBatchResult;
+    fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult);
 }
 
 impl Raycaster for Svo {
-    fn raycast(&self, batch: PickerBatch) -> PickerBatchResult {
-        self.raycast(batch)
+    fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult) {
+        self.raycast(batch, result);
     }
 }
 
-pub struct Physics {}
-
-#[allow(dead_code)]
-struct RaycastData {
-    aabb: Aabb,
-    aabb_result: AabbResult,
+pub struct Physics {
+    reusable_batch: RefCell<EntityBatch>,
 }
 
 impl Physics {
     pub fn new() -> Physics {
-        Physics {}
+        Physics {
+            reusable_batch: RefCell::new(EntityBatch::new()),
+        }
+    }
+
+    /// Simulates the next step for `entity` for the given delta time. `raycaster` is used
+    /// to identify collisions.
+    pub fn step(&self, delta_time: f32, raycaster: &impl Raycaster, entity: &mut Entity) {
+        let mut batch = self.reusable_batch.borrow_mut();
+        batch.reset();
+        batch.add_entity(entity);
+
+        let results = batch.raycast(raycaster);
+        Physics::update_entity(entity, &results[0], delta_time);
     }
 
     /// Simulates the next step for all `entities` for the given delta time. `raycaster` is used
     /// to identify collisions.
-    pub fn step(&self, delta_time: f32, raycaster: &impl Raycaster, entities: Vec<&mut Entity>) {
-        let results = Physics::raycast_entities(raycaster, &entities);
-        let mut entities = entities;
+    pub fn step_many(&self, delta_time: f32, raycaster: &impl Raycaster, entities: &mut [Entity]) {
+        let mut batch = self.reusable_batch.borrow_mut();
+        batch.reset();
+
+        for entity in &mut entities.iter_mut() {
+            batch.add_entity(entity);
+        }
+
+        let results = batch.raycast(raycaster);
 
         for i in 0..entities.len() {
-            let data = &results[i];
-            Physics::update_entity(entities[i], &data.aabb_result, delta_time);
+            Physics::update_entity(&mut entities[i], &results[i], delta_time);
         }
-    }
-
-    fn raycast_entities(raycaster: &impl Raycaster, entities: &[&mut Entity]) -> Vec<RaycastData> {
-        let mut batch = PickerBatch::new();
-        let mut results = Vec::with_capacity(entities.len());
-
-        for entity in entities.iter() {
-            let aabb = Aabb::new(entity.position, entity.aabb_def.offset, entity.aabb_def.extents);
-            batch.add_aabb(aabb);
-            results.push(RaycastData {
-                aabb,
-                aabb_result: AabbResult::default(),
-            });
-        }
-
-        let batch_result = raycaster.raycast(batch);
-        for (i, result) in results.iter_mut().enumerate() {
-            result.aabb_result = batch_result.aabbs[i];
-        }
-
-        results
     }
 
     fn update_entity(entity: &mut Entity, result: &AabbResult, delta_time: f32) {
@@ -190,18 +185,87 @@ impl Physics {
     }
 }
 
+struct EntityBatch {
+    batch: PickerBatch,
+    result: PickerBatchResult,
+}
+
+impl EntityBatch {
+    fn new() -> EntityBatch {
+        EntityBatch {
+            batch: PickerBatch::new(),
+            result: PickerBatchResult::new(),
+        }
+    }
+
+    fn reset(&mut self) {
+        self.batch.reset();
+        self.result.reset();
+    }
+
+    fn add_entity(&mut self, entity: &Entity) {
+        let aabb = Aabb::new(entity.position, entity.aabb_def.offset, entity.aabb_def.extents);
+        self.batch.add_aabb(aabb);
+    }
+
+    fn raycast(&mut self, raycaster: &impl Raycaster) -> &Vec<AabbResult> {
+        raycaster.raycast(&mut self.batch, &mut self.result);
+        &self.result.aabbs
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::vec;
+
     use cgmath::{Point3, Vector3, Zero};
     use mockall::predicate::eq;
 
     use crate::graphics::svo_picker::{Aabb, AabbResult, PickerBatch, PickerBatchResult};
     use crate::systems::physics::{AABBDef, Entity, EntityCapabilities, EntityState, MockRaycaster, Physics};
 
+    /// Asserts that the single entity implementation works. All edge cases are covered by the test for step_many.
+    #[test]
+    fn step() {
+        let mut e = Entity {
+            position: Point3::new(0.0, 0.0, 0.0),
+            velocity: Vector3::zero(),
+            euler_rotation: Vector3::new(0.0, 0.0, 0.0),
+            aabb_def: AABBDef::new(Vector3::zero(), Vector3::new(1.0, 1.0, 1.0)),
+            caps: EntityCapabilities {
+                wall_clip: false,
+                flying: false,
+                gravity: 0.008,
+                max_fall_velocity: 3.0,
+            },
+            state: EntityState::default(),
+        };
+
+        let mut expected_batch = PickerBatch::new();
+        expected_batch.aabbs.push(Aabb::new(e.position, e.aabb_def.offset, e.aabb_def.extents));
+
+        let mut mock = MockRaycaster::new();
+        mock.expect_raycast()
+            .with(eq(expected_batch), eq(PickerBatchResult::new()))
+            .times(1)
+            .returning(move |_, dst| *dst = PickerBatchResult { rays: Vec::new(), aabbs: vec![AabbResult::default()] });
+
+        let physics = Physics::new();
+        physics.step(1.0, &mock, &mut e);
+        assert_eq!(Entity {
+            position: Point3::new(0.0, -0.008, 0.0),
+            velocity: Vector3::new(0.0, -0.008, 0.0),
+            euler_rotation: Vector3::new(0.0, 0.0, 0.0),
+            aabb_def: AABBDef::new(Vector3::zero(), Vector3::new(1.0, 1.0, 1.0)),
+            caps: e.caps,
+            state: EntityState::default(),
+        }, e);
+    }
+
     /// Asserts that all entities are raycasted and updated. The test contains different entities
     /// in different positions and configurations.
     #[test]
-    fn step() {
+    fn step_many() {
         struct EntityTestCase {
             name: &'static str,
             position: Point3<f32>,
@@ -302,7 +366,7 @@ mod tests {
                 caps: None,
                 aabb_result: AabbResult { neg: Vector3::new(-1.0, -1.0, -1.0), pos: Vector3::new(-1.0, 0.0005, -1.0) },
                 expected_position: Point3::new(0.0, 1.9995, 0.0),
-                expected_velocity: Vector3::new(0.0,  1.9915, 0.0), // this is reset now
+                expected_velocity: Vector3::new(0.0, 1.9915, 0.0), // this is reset now
                 expected_state: None,
             },
             EntityTestCase {
@@ -398,12 +462,12 @@ mod tests {
 
         let mut mock = MockRaycaster::new();
         mock.expect_raycast()
-            .with(eq(expected_batch))
+            .with(eq(expected_batch), eq(PickerBatchResult::new()))
             .times(1)
-            .returning(move |_| PickerBatchResult { rays: Vec::new(), aabbs: aabb_results.clone() });
+            .returning(move |_, dst| *dst = PickerBatchResult { rays: Vec::new(), aabbs: aabb_results.clone() });
 
         let physics = Physics::new();
-        physics.step(1.0, &mock, entities.iter_mut().collect());
+        physics.step_many(1.0, &mock, &mut entities);
         for (i, expected) in expected_entities.iter().enumerate() {
             assert_eq!(expected, &entities[i], "entity case '{}'", &test_cases[i].name);
         }
