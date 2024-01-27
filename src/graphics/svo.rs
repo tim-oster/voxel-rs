@@ -232,7 +232,7 @@ mod svo_tests {
 
         let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), Arc::new(buffer_alloc));
         let mut svo = world::svo::Svo::<SerializedChunk>::new();
-        svo.set_leaf(Position(0, 0, 0), chunk);
+        svo.set_leaf(Position(0, 0, 0), chunk, true);
         svo.serialize();
         svo
     }

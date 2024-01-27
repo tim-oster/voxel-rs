@@ -384,6 +384,13 @@ impl<T> Child<T> {
         }
     }
 
+    pub fn get_leaf_value_mut(&mut self) -> Option<&mut T> {
+        match self {
+            Child::Leaf(value) => Some(value),
+            _ => None,
+        }
+    }
+
     pub fn into_leaf_value(self) -> Option<T> {
         match self {
             Child::Leaf(value) => Some(value),

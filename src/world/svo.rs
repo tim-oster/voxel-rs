@@ -42,7 +42,7 @@ pub trait SvoSerializable {
     fn unique_id(&self) -> u64;
 
     /// Serializes the data into the destination buffer and returns metadata about the data layout.
-    fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult;
+    fn serialize(&mut self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -163,12 +163,15 @@ impl<T: SvoSerializable> Svo<T> {
         self.root_info = None;
     }
 
-    /// See [`Octree::set_leaf`].
-    pub fn set_leaf(&mut self, pos: Position, leaf: T) -> (LeafId, Option<T>) {
+    /// See [`Octree::set_leaf`]. Setting `serialize` to false attempts to bypass re-serializing the leaf in case it
+    /// was done. This is useful if the leaf is moved around, but its content has not changed.
+    pub fn set_leaf(&mut self, pos: Position, leaf: T, serialize: bool) -> (LeafId, Option<T>) {
         let uid = leaf.unique_id();
         let (leaf_id, prev_leaf) = self.octree.set_leaf(pos, leaf);
 
-        self.change_set.insert(OctantChange::Add(uid, leaf_id));
+        if serialize || !self.leaf_info.contains_key(&uid) {
+            self.change_set.insert(OctantChange::Add(uid, leaf_id));
+        }
 
         (leaf_id, prev_leaf)
     }
@@ -209,8 +212,8 @@ impl<T: SvoSerializable> Svo<T> {
         for change in changes {
             match change {
                 OctantChange::Add(id, leaf_id) => {
-                    let child = &self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
-                    let content = child.get_leaf_value().unwrap();
+                    let child = &mut self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
+                    let content = child.get_leaf_value_mut().unwrap();
                     let result = content.serialize(&mut tmp_buffer.data, 0);
                     if result.depth > 0 {
                         let offset = self.buffer.insert(id, &tmp_buffer);
@@ -382,10 +385,15 @@ impl SvoSerializable for SerializedChunk {
 
     /// Serializes the already serialized chunk by copying its results into the given buffer and returning the cached
     /// result.
-    fn serialize(&self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
+    fn serialize(&mut self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
         if self.buffer.is_some() {
             let buffer = self.buffer.as_ref().unwrap();
             dst.extend(buffer.data.iter());
+
+            // Drop the buffer so that he allocator can reuse it. A SerializedChunk only needs it's buffer for the
+            // serialization to the SVO. After that, it is indexed by an absolute pointer. If the content changes
+            // however, a new SerializedChunk is built and the old one discarded.
+            self.buffer = None;
         }
         self.result
     }
@@ -547,7 +555,7 @@ mod svo_tests {
         };
 
         let mut svo = Svo::new();
-        svo.set_leaf(Position(1, 0, 0), sc);
+        svo.set_leaf(Position(1, 0, 0), sc, true);
         svo.serialize();
 
         assert_eq!(svo.root_info, Some(LeafInfo {
@@ -713,9 +721,9 @@ mod svo_tests {
         let mut svo = Svo::new();
 
         // NOTE: serialize twice to avoid non-deterministic results due to random map lookup in implementation
-        svo.set_leaf(Position(0, 0, 0), 10);
+        svo.set_leaf(Position(0, 0, 0), 10, true);
         svo.serialize();
-        svo.set_leaf(Position(1, 0, 0), 20);
+        svo.set_leaf(Position(1, 0, 0), 20, true);
         svo.serialize();
 
         assert_eq!(svo.root_info, Some(LeafInfo {

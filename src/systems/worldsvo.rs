@@ -119,6 +119,7 @@ impl Svo {
         for (chunk_pos, leaf_id) in leaf_ids.iter_mut() {
             let new_svo_pos = coord_space.cnv_chunk_pos(*chunk_pos);
             if new_svo_pos.is_none() {
+                // remove leaf from octree if it hasn't yet been overridden by another moved leaf
                 if !overridden_leaves.contains_key(leaf_id) {
                     world_svo.remove_leaf(*leaf_id);
                 }
@@ -130,7 +131,9 @@ impl Svo {
             let new_svo_pos = new_svo_pos.unwrap();
 
             let (new_leaf_id, old_value) = if let Some(value) = overridden_leaves.remove(leaf_id) {
-                world_svo.set_leaf(new_svo_pos, value)
+                // try to bypass serialization in svo since the leaf was only moved and might
+                // already in the serialization buffer
+                world_svo.set_leaf(new_svo_pos, value, false)
             } else {
                 world_svo.move_leaf(*leaf_id, new_svo_pos)
             };
@@ -158,7 +161,9 @@ impl Svo {
                 continue;
             }
 
-            let (id, _) = self.world_svo.set_leaf(svo_pos.unwrap(), result.value);
+            // NOTE: this moves ownership of the serialized ChunkBuffer into the world svo octree.
+            //       If not freed properly, the otherwise pooled objects cannot be reused.
+            let (id, _) = self.world_svo.set_leaf(svo_pos.unwrap(), result.value, true);
             self.leaf_ids.insert(result.pos, id);
             self.has_changed = true;
         }
@@ -185,7 +190,7 @@ mod svo_tests {
             *self as u64
         }
 
-        fn serialize(&self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
+        fn serialize(&mut self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
             dst.push(*self);
             SerializationResult { child_mask: 1, leaf_mask: 1, depth: 1 }
         }
@@ -198,13 +203,13 @@ mod svo_tests {
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
-        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32);
+        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
         leaf_ids.insert(ChunkPos::new(-1, 0, 0), c0);
 
-        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32);
+        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32, true);
         leaf_ids.insert(ChunkPos::new(0, 0, 0), c1);
 
-        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
+        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32, true);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
         assert_eq!(leaf_ids, FxHashMap::from_iter([
@@ -253,13 +258,13 @@ mod svo_tests {
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
-        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32);
+        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
         leaf_ids.insert(ChunkPos::new(-1, 0, 0), c0);
 
-        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32);
+        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32, true);
         leaf_ids.insert(ChunkPos::new(0, 0, 0), c1);
 
-        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
+        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32, true);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
         assert_eq!(leaf_ids, FxHashMap::from_iter([
@@ -309,13 +314,13 @@ mod svo_tests {
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
-        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32);
+        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
         leaf_ids.insert(ChunkPos::new(-1, 0, 0), c0);
 
-        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32);
+        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32, true);
         leaf_ids.insert(ChunkPos::new(0, 0, 0), c1);
 
-        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
+        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32, true);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
         assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), Some(&1u32));
