@@ -73,7 +73,7 @@ mod tests {
         svo.set_leaf(svo_pos, chunk, true);
         svo.serialize();
 
-        let world_buffer = MappedBuffer::<u32>::new(1000 * 1024 * 1024 / 4);
+        let world_buffer = MappedBuffer::<u32>::new(100 * 1000 * 1000 / 4);
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             world_buffer.write(max_depth_exp.to_bits());
