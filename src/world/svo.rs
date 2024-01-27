@@ -1293,7 +1293,9 @@ impl SvoBuffer {
 
     /// Orders all free ranges by start index and merges adjacent ranges into one.
     fn merge_ranges(ranges: &mut Vec<Range>) {
-        ranges.sort_by(|lhs, rhs| lhs.start.cmp(&rhs.start));
+        // Unstable is fine here as no equivalent objects can exist. It should be slightly faster
+        // and avoids heap allocations.
+        ranges.sort_unstable_by(|lhs, rhs| lhs.start.cmp(&rhs.start));
 
         let mut i = 1;
         while i < ranges.len() {
