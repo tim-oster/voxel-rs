@@ -99,7 +99,7 @@ impl<T> Octree<T> {
             it = self.step_into_or_create_octant_at(it, idx);
         }
 
-        panic!("could not reach end of tree");
+        unreachable!("could not reach end of tree");
     }
 
     /// Moves the leaf at `leaf_id` to the given position. The original leaf will be set to an
@@ -132,14 +132,12 @@ impl<T> Octree<T> {
                 // attach new leaf octant
                 if new_leaf.get_leaf_value().is_some() {
                     self.octants[it as usize].set_child(idx, new_leaf);
-                } else {
-                    self.octants[it as usize].set_child(idx, Child::None);
                 }
 
                 let new_leaf_id = LeafId { parent: it, idx };
                 match old_leaf {
                     Child::None => return (new_leaf_id, None),
-                    Child::Octant(_) => panic!("found unexpected octant"),
+                    Child::Octant(_) => unreachable!("found unexpected octant"),
                     Child::Leaf(value) => return (new_leaf_id, Some(value)),
                 }
             }
@@ -147,7 +145,7 @@ impl<T> Octree<T> {
             it = self.step_into_or_create_octant_at(it, idx);
         }
 
-        panic!("could not reach end of tree");
+        unreachable!("could not reach end of tree");
     }
 
     fn step_into_or_create_octant_at(&mut self, it: OctantId, idx: u8) -> OctantId {
@@ -162,7 +160,7 @@ impl<T> Octree<T> {
                 next_id
             }
             Child::Octant(id) => *id,
-            Child::Leaf(_) => panic!("found unexpected leaf"),
+            Child::Leaf(_) => unreachable!("found unexpected leaf"),
         }
     }
 
@@ -189,7 +187,7 @@ impl<T> Octree<T> {
                 Child::Leaf(_) => {
                     match self.octants[it as usize].set_child(idx, Child::None) {
                         Child::None => return (None, None),
-                        Child::Octant(_) => panic!("found unexpected octant"),
+                        Child::Octant(_) => unreachable!("found unexpected octant"),
                         Child::Leaf(value) => return (Some(value), Some(LeafId { parent: it, idx })),
                     }
                 }
@@ -207,7 +205,7 @@ impl<T> Octree<T> {
             Child::Leaf(_) => {
                 match self.octants[leaf_id.parent as usize].set_child(leaf_id.idx, Child::None) {
                     Child::None => None,
-                    Child::Octant(_) => panic!("found unexpected octant"),
+                    Child::Octant(_) => unreachable!("found unexpected octant"),
                     Child::Leaf(value) => Some(value),
                 }
             }
