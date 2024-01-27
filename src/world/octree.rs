@@ -285,21 +285,24 @@ impl<T> Octree<T> {
     }
 
     fn compact_octant(&mut self, octant_id: OctantId) {
-        let octant = &self.octants[octant_id as usize];
-        let mut children = Vec::new();
-        for (i, child) in octant.children.iter().enumerate() {
-            if let Child::Octant(id) = child {
-                children.push((i, *id));
+        let children = self.octants[octant_id as usize].children.len();
+
+        for i in 0..children {
+            let id = {
+                let octant = &self.octants[octant_id as usize];
+                octant.children[i].get_octant_value()
+            };
+            if id.is_none() {
+                continue;
             }
-        }
+            let id = id.unwrap();
 
-        for child in children {
-            self.compact_octant(child.1);
+            self.compact_octant(id);
 
-            let octant = &self.octants[child.1 as usize];
+            let octant = &self.octants[id as usize];
             if octant.children_count == 0 {
-                self.delete_octant(child.1);
-                self.octants[octant_id as usize].set_child(child.0 as u8, Child::None);
+                self.delete_octant(id);
+                self.octants[octant_id as usize].set_child(i as u8, Child::None);
             }
         }
     }
