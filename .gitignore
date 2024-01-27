@@ -4,3 +4,4 @@
 /assets/ignore/**/*
 /assets/tests/*_actual.png
 /imgui.ini
+/dhat-heap.json

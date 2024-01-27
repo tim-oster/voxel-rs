@@ -12,7 +12,14 @@ mod graphics;
 mod systems;
 mod world;
 
+#[cfg(feature = "dhat-heap")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
 fn main() {
+    #[cfg(feature = "dhat-heap")]
+        let _profiler = dhat::Profiler::builder().trim_backtraces(Some(20)).build();
+
     let game = Game::new();
     game.run();
 }
