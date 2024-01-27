@@ -1,4 +1,4 @@
-use noise::{NoiseFn, Perlin, Seedable};
+use noise::{NoiseFn, Perlin};
 
 use crate::gamelogic::content::blocks;
 use crate::systems::worldgen::ChunkGenerator;
@@ -73,7 +73,7 @@ impl Noise {
 
 #[cfg(test)]
 mod noise_tests {
-    use noise::{Perlin, Seedable};
+    use noise::Perlin;
 
     use crate::assert_float_eq;
     use crate::gamelogic::worldgen::{Noise, SplinePoint};
@@ -86,7 +86,7 @@ mod noise_tests {
             octaves: 3,
             spline_points: vec![SplinePoint { x: -1.0, y: 0.0 }, SplinePoint { x: 1.0, y: 1.0 }],
         };
-        let perlin = Perlin::new().set_seed(0);
+        let perlin = Perlin::new(0);
 
         assert_float_eq!(noise.get(&perlin, 0.0, 0.0), 0.5);
         assert_float_eq!(noise.get(&perlin, 1.0, 0.0), 0.234834);
@@ -146,8 +146,7 @@ pub struct Config {
 
 impl Generator {
     pub fn new(seed: u32, cfg: Config) -> Generator {
-        let perlin = Perlin::new();
-        let perlin = perlin.set_seed(seed);
+        let perlin = Perlin::new(seed);
 
         Generator { perlin, cfg }
     }
