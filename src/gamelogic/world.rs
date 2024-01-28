@@ -17,8 +17,7 @@ use crate::systems::chunkloader::{ChunkEvent, ChunkLoader};
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{Entity, Physics};
 use crate::systems::storage::Storage;
-use crate::world::chunk::{Chunk, ChunkPos};
-use crate::world::memory::ChunkStorageAllocator;
+use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
 use crate::world::world;
 
 /// World is the game system responsible for keeping all chunks in the voxel world loaded and

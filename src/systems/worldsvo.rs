@@ -1,3 +1,4 @@
+use std::alloc::Allocator;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -10,9 +11,9 @@ use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
 use crate::systems::physics::Raycaster;
 use crate::world;
 use crate::world::chunk::{BlockPos, ChunkPos};
-use crate::world::memory::Allocator;
+use crate::world::memory::{AllocatorStats, Pool, StatsAllocator};
 use crate::world::octree::LeafId;
-use crate::world::svo::{ChunkBuffer, SerializedChunk, SvoSerializable};
+use crate::world::svo::{ChunkBuffer, ChunkBufferPool, SerializedChunk, SvoSerializable};
 use crate::world::world::BorrowedChunk;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`world::chunk::Chunk`]s.
@@ -28,26 +29,43 @@ use crate::world::world::BorrowedChunk;
 pub struct Svo {
     processor: ChunkProcessor<SerializedChunk>,
 
-    world_svo: world::Svo<SerializedChunk>,
+    world_svo_alloc: StatsAllocator,
+    world_svo: world::Svo<SerializedChunk, StatsAllocator>,
+
     graphics_svo: graphics::Svo,
-    chunk_buffer_allocator: Arc<Allocator<ChunkBuffer>>,
+    chunk_buffer_pool: Arc<ChunkBufferPool>,
 
     leaf_ids: FxHashMap<ChunkPos, LeafId>,
     has_changed: bool,
     svo_coord_space: SvoCoordSpace,
 }
 
+pub struct AllocStats {
+    pub chunk_buffers_used: usize,
+    pub chunk_buffers_allocated: usize,
+    pub chunk_buffers_bytes_total: usize,
+    pub world_svo_buffer_bytes: usize,
+}
+
 impl Svo {
     pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo, render_distance: u32) -> Svo {
-        let chunk_buffer_alloc = Allocator::new(
-            Box::new(ChunkBuffer::new),
+        let world_svo_alloc = StatsAllocator::new();
+
+        let chunk_buffer_pool = Pool::new_in(
+            // It is difficult to pre-allocate memory here as chunk sizes are random/depend heavily on the world generation
+            // mechanism. The naive approach is to allocate the maximum amount of memory, but that is too wasteful. Hence,
+            // an average size is taken so that it is sufficient in most cases and at worst, the storage is expanded a few
+            // times until it fits. This is still more stable than and safes a lot of allocations.
+            Box::new(|alloc| ChunkBuffer::with_capacity_in(100_000, alloc)),
             Some(Box::new(|buffer| buffer.reset())),
+            StatsAllocator::new(),
         );
         Svo {
             processor: ChunkProcessor::new(job_system),
-            world_svo: world::Svo::new(),
+            world_svo_alloc: world_svo_alloc.clone(),
+            world_svo: world::Svo::new_in(world_svo_alloc),
             graphics_svo,
-            chunk_buffer_allocator: Arc::new(chunk_buffer_alloc),
+            chunk_buffer_pool: Arc::new(chunk_buffer_pool),
             leaf_ids: FxHashMap::default(),
             has_changed: false,
             svo_coord_space: SvoCoordSpace {
@@ -60,7 +78,7 @@ impl Svo {
     /// Enqueues the borrowed chunk to be serialized into the GPU SVO structure. All moved chunk
     /// ownerships can be reclaimed by calling [`Svo::update`].
     pub fn set_chunk(&mut self, chunk: BorrowedChunk) {
-        let alloc = self.chunk_buffer_allocator.clone();
+        let alloc = self.chunk_buffer_pool.clone();
         self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(chunk, alloc));
     }
 
@@ -80,6 +98,15 @@ impl Svo {
 
     pub fn get_render_distance(&self) -> u32 {
         self.svo_coord_space.dst
+    }
+
+    pub fn get_alloc_stats(&self) -> AllocStats {
+        AllocStats {
+            chunk_buffers_used: self.chunk_buffer_pool.used_count(),
+            chunk_buffers_allocated: self.chunk_buffer_pool.allocated_count(),
+            chunk_buffers_bytes_total: self.chunk_buffer_pool.allocated_bytes(),
+            world_svo_buffer_bytes: self.world_svo_alloc.allocated_bytes(),
+        }
     }
 
     /// Updates the internal reference world center and performs "chunk shifting", if necessary.
@@ -112,7 +139,7 @@ impl Svo {
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
     /// space by replacing the previous chunk in the new position. Also removes all chunks, that
     /// are out of SVO bounds.
-    fn shift_chunks<T: SvoSerializable>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T>) {
+    fn shift_chunks<T: SvoSerializable, A: Allocator>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T, A>) {
         let mut overridden_leaves = FxHashMap::default();
         let mut removed = FxHashSet::default();
 

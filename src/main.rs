@@ -1,3 +1,4 @@
+#![feature(allocator_api)]
 #![allow(dead_code, unused_variables)]
 
 extern crate gl;

@@ -1,100 +1,108 @@
+use std::alloc::{Allocator, AllocError, Global, Layout};
 use std::ops::{Deref, DerefMut};
+use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::world::chunk::ChunkStorage;
-
-/// Pool holds instances of type T as a simple implementation of a memory pool.
-struct Pool<T> {
-    buffer: crossbeam_queue::SegQueue<T>,
-}
-
-impl<T> Pool<T> {
-    fn new() -> Pool<T> {
-        Pool {
-            buffer: crossbeam_queue::SegQueue::new(),
-        }
-    }
-
-    fn allocate(&self) -> Option<T> {
-        self.buffer.pop()
-    }
-
-    fn free(&self, instance: T) {
-        self.buffer.push(instance);
-    }
-}
-
-// -------------------------------------------------------------------------------------------------
-
-pub type ConstructorFn<T> = Box<dyn Fn() -> T + Send + Sync + 'static>;
+pub type ConstructorFn<T, A> = Box<dyn Fn(A) -> T + Send + Sync + 'static>;
 pub type ResetFn<T> = Box<dyn Fn(&mut T)>;
 
-/// Allocator allocates new instance using `constructor` on demand, if no previous instance are
-/// available for reuse. Every allocated object has an [`Allocated`] guard, that returns the
+/// Pool allocates new instances using `constructor` on demand, if no previous instance is
+/// available for reuse. Every allocated object has an [`Pooled`] guard, that returns the
 /// instance to the internal memory pool upon drop. If an old instance is reused, it will be
 /// `reset` before reuse.
 ///
-/// Allocator is thread-safe and might be wrapped inside [`Arc`] or other smart pointers.
-pub struct Allocator<T> {
-    pool: Arc<Pool<T>>,
+/// Allocator is thread-safe and might be wrapped inside [`Arc`] or similar smart pointers.
+pub struct Pool<T, A: Allocator = Global> {
+    alloc: A,
+    pool: Arc<crossbeam_queue::SegQueue<T>>,
     total_allocated: AtomicUsize,
-    constructor: ConstructorFn<T>,
+    constructor: ConstructorFn<T, A>,
     reset: Option<ResetFn<T>>,
 }
 
-impl<T> Allocator<T> {
-    pub fn new(constructor: ConstructorFn<T>, reset: Option<ResetFn<T>>) -> Allocator<T> {
-        Allocator {
-            pool: Arc::new(Pool::new()),
+impl<T> Pool<T> {
+    pub fn new(constructor: ConstructorFn<T, Global>, reset: Option<ResetFn<T>>) -> Pool<T> {
+        Self::new_in(constructor, reset, Global)
+    }
+}
+
+impl<T, A: Allocator + Clone> Pool<T, A> {
+    pub fn new_in(constructor: ConstructorFn<T, A>, reset: Option<ResetFn<T>>, alloc: A) -> Pool<T, A> {
+        Pool {
+            alloc,
+            pool: Arc::new(crossbeam_queue::SegQueue::new()),
             total_allocated: AtomicUsize::new(0),
             constructor,
             reset,
         }
     }
 
-    pub fn allocate(&self) -> Allocated<T> {
-        if let Some(mut elem) = self.pool.allocate() {
+    /// Returns either a reused & reset instance from the pool, or creates a new instance.
+    pub fn allocate(&self) -> Pooled<T> {
+        if let Some(mut elem) = self.pool.pop() {
             if self.reset.is_some() {
                 self.reset.as_ref().unwrap()(&mut elem);
             }
-            return Allocated::new(self.pool.clone(), elem);
+            return Pooled::new(Arc::clone(&self.pool), elem);
         }
         self.total_allocated.fetch_add(1, Ordering::Relaxed);
-        Allocated::new(self.pool.clone(), (self.constructor)())
+        Pooled::new(Arc::clone(&self.pool), (self.constructor)(self.alloc.clone()))
     }
 
+    /// Returns the total number of instances created by this pool, both in-use and reusable.
     pub fn allocated_count(&self) -> usize {
         self.total_allocated.load(Ordering::Relaxed)
     }
 
+    /// Returns the number of instances that are currently owned by some component.
     pub fn used_count(&self) -> usize {
-        self.allocated_count() - self.pool.buffer.len()
+        self.allocated_count() - self.pool.len()
+    }
+
+    /// Drops all currently pooled instances.
+    pub fn clear(&self) {
+        while !self.pool.is_empty() {
+            self.pool.pop();
+        }
     }
 }
 
-unsafe impl<T: Send> Send for Allocator<T> {}
+unsafe impl<T: Send, A: Allocator> Send for Pool<T, A> {}
 
-unsafe impl<T: Sync> Sync for Allocator<T> {}
+unsafe impl<T: Sync, A: Allocator> Sync for Pool<T, A> {}
 
-pub struct Allocated<T> {
-    pool: Arc<Pool<T>>,
+pub trait AllocatorStats {
+    fn allocated_bytes(&self) -> usize;
+}
+
+impl<T, A: Allocator + AllocatorStats> Pool<T, A> {
+    pub fn allocated_bytes(&self) -> usize {
+        self.alloc.allocated_bytes()
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Pooled ownership return their value back to the pool once dropped.
+pub struct Pooled<T> {
+    pool: Arc<crossbeam_queue::SegQueue<T>>,
     value: Option<T>,
 }
 
-impl<T> Allocated<T> {
-    fn new(pool: Arc<Pool<T>>, value: T) -> Allocated<T> {
-        Allocated { pool, value: Some(value) }
+impl<T> Pooled<T> {
+    fn new(pool: Arc<crossbeam_queue::SegQueue<T>>, value: T) -> Pooled<T> {
+        Pooled { pool, value: Some(value) }
     }
 }
 
-impl<T> Drop for Allocated<T> {
+impl<T> Drop for Pooled<T> {
     fn drop(&mut self) {
-        self.pool.free(self.value.take().unwrap())
+        self.pool.push(self.value.take().unwrap())
     }
 }
 
-impl<T> Deref for Allocated<T> {
+impl<T> Deref for Pooled<T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -102,23 +110,23 @@ impl<T> Deref for Allocated<T> {
     }
 }
 
-impl<T> DerefMut for Allocated<T> {
+impl<T> DerefMut for Pooled<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.value.as_mut().unwrap()
     }
 }
 
 #[cfg(test)]
-mod allocator_tests {
+mod pool_tests {
     use std::cell::RefCell;
 
-    use crate::world::memory::Allocator;
+    use crate::world::memory::Pool;
 
     /// Tests that object allocation and reset/reuse works properly.
     #[test]
     fn test() {
-        let alloc = Allocator::new(
-            Box::new(|| RefCell::new(0)),
+        let alloc = Pool::new(
+            Box::new(|_| RefCell::new(0)),
             Some(Box::new(|cell| *cell.borrow_mut() = 0)),
         );
 
@@ -144,52 +152,38 @@ mod allocator_tests {
 
 // -------------------------------------------------------------------------------------------------
 
-/// ChunkStorageAllocator is an allocator for ChunkStorage objects.
-pub struct ChunkStorageAllocator {
-    allocator: Allocator<ChunkStorage>,
+/// StatsAllocator is a custom rust allocator that keeps track of how much memory it allocated and freed. Its allocation
+/// behaviour is implemented by [Global].
+///
+/// It is safe to Clone, all clones of the an instance contribute to the same metric.
+/// It is safe to use across multiple threads. It uses an AtomicUsize to avoid race conditions.
+#[derive(Clone, Default, Debug)]
+pub struct StatsAllocator {
+    allocated_bytes: Arc<AtomicUsize>,
 }
 
-impl ChunkStorageAllocator {
-    pub fn new() -> ChunkStorageAllocator {
-        let allocator = Allocator::new(
-            Box::new(|| ChunkStorage::with_size(5)), // log2(32) = 5
-            Some(Box::new(|storage| {
-                storage.reset();
-                storage.expand_to(5);
-            })),
-        );
-        ChunkStorageAllocator { allocator }
+impl StatsAllocator {
+    pub fn new() -> StatsAllocator {
+        StatsAllocator {
+            allocated_bytes: Arc::new(AtomicUsize::new(0)),
+        }
     }
 }
 
-impl Deref for ChunkStorageAllocator {
-    type Target = Allocator<ChunkStorage>;
+unsafe impl Allocator for StatsAllocator {
+    fn allocate(&self, layout: Layout) -> Result<NonNull<[u8]>, AllocError> {
+        self.allocated_bytes.fetch_add(layout.size(), Ordering::Relaxed);
+        Global.allocate(layout)
+    }
 
-    fn deref(&self) -> &Self::Target {
-        &self.allocator
+    unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
+        self.allocated_bytes.fetch_sub(layout.size(), Ordering::Relaxed);
+        Global.deallocate(ptr, layout)
     }
 }
 
-#[cfg(test)]
-mod chunk_storage_allocator_tests {
-    use crate::world::memory::ChunkStorageAllocator;
-
-    /// Tests that newly allocated and reused storage objects always have a depth of 5 blocks to prevent visual voxel
-    /// scale issues in the world.
-    #[test]
-    fn new() {
-        let alloc = ChunkStorageAllocator::new();
-
-        // new allocation
-        let storage = alloc.allocate();
-        assert_eq!(storage.depth(), 5);
-        assert_eq!(alloc.allocated_count(), 1);
-
-        drop(storage);
-
-        // reused allocation
-        let storage = alloc.allocate();
-        assert_eq!(storage.depth(), 5);
-        assert_eq!(alloc.allocated_count(), 1);
+impl AllocatorStats for StatsAllocator {
+    fn allocated_bytes(&self) -> usize {
+        self.allocated_bytes.load(Ordering::Relaxed)
     }
 }

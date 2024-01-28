@@ -1,3 +1,4 @@
+use std::alloc::Allocator;
 use std::cell::RefCell;
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
@@ -128,7 +129,7 @@ impl Svo {
     }
 
     /// Writes all changes from the given `svo` to the GPU buffer.
-    pub fn update(&mut self, svo: &mut world::svo::Svo<SerializedChunk>) {
+    pub fn update<A: Allocator>(&mut self, svo: &mut world::svo::Svo<SerializedChunk, A>) {
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             self.world_buffer.write(max_depth_exp.to_bits());
@@ -216,8 +217,8 @@ mod svo_tests {
     use crate::graphics::svo::{RenderParams, Svo};
     use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
-    use crate::world::chunk::{Chunk, ChunkPos};
-    use crate::world::memory::{Allocator, ChunkStorageAllocator};
+    use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
+    use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::octree::Position;
     use crate::world::svo::{ChunkBuffer, SerializedChunk};
     use crate::world::world::BorrowedChunk;
@@ -228,7 +229,7 @@ mod svo_tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, storage_alloc.allocate());
         builder(&mut chunk);
 
-        let buffer_alloc = Allocator::new(Box::new(|| ChunkBuffer::new()), None);
+        let buffer_alloc = Pool::new_in(Box::new(|alloc| ChunkBuffer::new_in(alloc)), None, StatsAllocator::new());
 
         let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), Arc::new(buffer_alloc));
         let mut svo = world::svo::Svo::<SerializedChunk>::new();

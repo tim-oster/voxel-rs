@@ -193,8 +193,7 @@ mod tests {
     use rustc_hash::FxHashSet;
 
     use crate::world::chunk;
-    use crate::world::chunk::{Chunk, ChunkPos};
-    use crate::world::memory::ChunkStorageAllocator;
+    use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
 
     /// Tests that setting and getting blocks on world works.
     #[test]
@@ -204,7 +203,7 @@ mod tests {
         world.set_chunk(Chunk::new(ChunkPos::new(0, 1, 2), 5, alloc.allocate()));
 
         let block = world.get_block(1, 33, 65);
-        assert_eq!(block, super::chunk::NO_BLOCK);
+        assert_eq!(block, chunk::NO_BLOCK);
 
         world.set_block(1, 33, 65, 99);
 

@@ -1,3 +1,4 @@
+use std::alloc::{Allocator, Global};
 use std::cmp::max;
 use std::mem;
 
@@ -50,23 +51,40 @@ impl std::ops::RemAssign<u32> for Position {
 /// can contain up to 8 leaf nodes, or 8 child octants which further subdivide their parent octant
 /// to contain 8 children/leaves.
 /// The data structure is allocated in linearly without any nested pointer structs.
-#[derive(Debug, PartialEq)]
-pub struct Octree<T> {
+#[derive(Debug)]
+pub struct Octree<T, A: Allocator = Global> {
     pub(super) root: Option<OctantId>,
-    pub(super) octants: Vec<Octant<T>>,
+    pub(super) octants: Vec<Octant<T>, A>,
     free_list: Vec<OctantId>,
     depth: u8,
 }
 
 impl<T> Octree<T> {
     pub fn new() -> Octree<T> {
-        Octree { root: None, octants: Vec::new(), free_list: Vec::new(), depth: 0 }
+        Self::new_in(Global)
     }
 
-    pub fn with_size(size: u8) -> Octree<T> {
-        let mut octree = Self::new();
-        octree.expand_to(size);
-        octree
+    pub fn with_capacity(capacity: usize) -> Octree<T> {
+        Self::with_capacity_in(capacity, Global)
+    }
+}
+
+impl<T: PartialEq, A: Allocator> PartialEq for Octree<T, A> {
+    fn eq(&self, other: &Self) -> bool {
+        self.root.eq(&other.root)
+            && self.octants.eq(&other.octants)
+            && self.free_list.eq(&other.free_list)
+            && self.depth.eq(&other.depth)
+    }
+}
+
+impl<T, A: Allocator> Octree<T, A> {
+    pub fn new_in(alloc: A) -> Octree<T, A> {
+        Self::with_capacity_in(0, alloc)
+    }
+
+    pub fn with_capacity_in(capacity: usize, alloc: A) -> Octree<T, A> {
+        Self { root: None, octants: Vec::with_capacity_in(capacity, alloc), free_list: Vec::new(), depth: 0 }
     }
 
     pub fn reset(&mut self) {
