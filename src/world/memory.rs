@@ -1,4 +1,4 @@
-use std::alloc::{Allocator, AllocError, Global, Layout};
+use std::alloc::{Allocator, AllocError, Global, GlobalAlloc, Layout, System};
 use std::ops::{Deref, DerefMut};
 use std::ptr::NonNull;
 use std::sync::Arc;
@@ -164,7 +164,7 @@ pub struct StatsAllocator {
 
 impl StatsAllocator {
     pub fn new() -> StatsAllocator {
-        StatsAllocator {
+        Self {
             allocated_bytes: Arc::new(AtomicUsize::new(0)),
         }
     }
@@ -185,5 +185,25 @@ unsafe impl Allocator for StatsAllocator {
 impl AllocatorStats for StatsAllocator {
     fn allocated_bytes(&self) -> usize {
         self.allocated_bytes.load(Ordering::Relaxed)
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// GlobalStatsAllocator is identical to StatsAllocator but implements the GlobalAlloc trait, allowing it to be used
+/// as a replacement allocator for the whole rust runtime.
+pub struct GlobalStatsAllocator {
+    pub allocated_bytes: AtomicUsize,
+}
+
+unsafe impl GlobalAlloc for GlobalStatsAllocator {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        self.allocated_bytes.fetch_add(layout.size(), Ordering::Relaxed);
+        System.alloc(layout)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        self.allocated_bytes.fetch_sub(layout.size(), Ordering::Relaxed);
+        System.dealloc(ptr, layout)
     }
 }
