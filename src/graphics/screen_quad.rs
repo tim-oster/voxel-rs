@@ -22,7 +22,7 @@ pub struct ScreenQuad {
 
 impl ScreenQuad {
     pub fn new() -> ScreenQuad {
-        let vertices = vec![
+        let vertices = [
             Vertex { position: AlignedPoint3::new(1.0, 1.0, -1.0), uv: AlignedPoint2::new(1.0, 1.0), normal: AlignedVec3::new(0.0, 0.0, 1.0) },
             Vertex { position: AlignedPoint3::new(-1.0, 1.0, -1.0), uv: AlignedPoint2::new(0.0, 1.0), normal: AlignedVec3::new(0.0, 0.0, 1.0) },
             Vertex { position: AlignedPoint3::new(-1.0, -1.0, -1.0), uv: AlignedPoint2::new(0.0, 0.0), normal: AlignedVec3::new(0.0, 0.0, 1.0) },
