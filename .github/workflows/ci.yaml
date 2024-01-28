@@ -54,4 +54,4 @@ jobs:
           retention-days: 1
 
       - name: Run linter
-        run: cargo clippy
+        run: cargo clippy -- -D warnings
