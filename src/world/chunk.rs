@@ -37,7 +37,7 @@ impl ChunkStorageAllocator {
         ChunkStorageAllocator { pool }
     }
 
-    pub fn get_allocated_bytes(&self) -> usize {
+    pub fn allocated_bytes(&self) -> usize {
         self.pool.allocated_bytes()
     }
 }
@@ -65,7 +65,7 @@ mod chunk_storage_allocator_tests {
         assert_eq!(storage.depth(), 5);
         assert_eq!(alloc.used_count(), 1);
         assert_eq!(alloc.allocated_count(), 1);
-        assert_ne!(alloc.get_allocated_bytes(), 0);
+        assert_ne!(alloc.allocated_bytes(), 0);
 
         drop(storage);
 
@@ -77,13 +77,13 @@ mod chunk_storage_allocator_tests {
         assert_eq!(storage.depth(), 5);
         assert_eq!(alloc.used_count(), 1);
         assert_eq!(alloc.allocated_count(), 1);
-        assert_ne!(alloc.get_allocated_bytes(), 0);
+        assert_ne!(alloc.allocated_bytes(), 0);
 
         drop(storage);
 
         // remove from buffer to check if allocator stats reset
         alloc.pool.clear();
-        assert_eq!(alloc.get_allocated_bytes(), 0);
+        assert_eq!(alloc.allocated_bytes(), 0);
     }
 }
 

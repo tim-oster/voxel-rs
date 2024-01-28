@@ -51,8 +51,10 @@ pub struct Svo {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Stats {
-    /// size_bytes is the size of the CPU side SVO buffer that is synced to the GPU.
-    pub size_bytes: usize,
+    /// used_bytes is the amount of bytes that is used by of the mapped buffer.
+    pub used_bytes: usize,
+    /// capacity_bytes is the full size of the mapped buffer on both CPU & GPU.
+    pub capacity_bytes: usize,
     /// depth is the number of octant divisions the SVO has, until the leaf node is encoded.
     pub depth: u8,
 }
@@ -112,7 +114,7 @@ impl Svo {
             picker_out_buffer,
             picker_fence: RefCell::new(Fence::new()),
 
-            stats: Stats { size_bytes: 0, depth: 0 },
+            stats: Stats { used_bytes: 0, capacity_bytes: 0, depth: 0 },
         }
     }
 
@@ -139,7 +141,8 @@ impl Svo {
             svo.write_changes_to(self.world_buffer.offset(1), true);
 
             self.stats = Stats {
-                size_bytes: svo.size_in_bytes(),
+                used_bytes: svo.size_in_bytes(),
+                capacity_bytes: self.world_buffer.size_in_bytes(),
                 depth: svo.depth(),
             };
         }
