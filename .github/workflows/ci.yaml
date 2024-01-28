@@ -24,7 +24,7 @@ jobs:
       - name: Install Rust
         run: |
           rustup toolchain install nightly --profile minimal --no-self-update
-          rustup default stable
+          rustup default nightly
 
       - name: Install OpenGL
         run: |
