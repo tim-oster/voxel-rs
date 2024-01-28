@@ -23,8 +23,9 @@ jobs:
 
       - name: Install Rust
         run: |
-          rustup toolchain install stable --profile minimal --no-self-update
-          rustup default stable
+          rustup toolchain install nightly --profile minimal --no-self-update
+          rustup default nightly
+          rustup component add clippy
 
       - name: Install OpenGL
         run: |
@@ -53,4 +54,4 @@ jobs:
           retention-days: 1
 
       - name: Run linter
-        run: cargo clippy
+        run: cargo clippy -- -D warnings

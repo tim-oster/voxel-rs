@@ -1,3 +1,4 @@
+use std::alloc::Allocator;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -10,9 +11,9 @@ use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
 use crate::systems::physics::Raycaster;
 use crate::world;
 use crate::world::chunk::{BlockPos, ChunkPos};
-use crate::world::memory::Allocator;
+use crate::world::memory::{AllocatorStats, Pool, StatsAllocator};
 use crate::world::octree::LeafId;
-use crate::world::svo::{ChunkBuffer, SerializedChunk, SvoSerializable};
+use crate::world::svo::{ChunkBuffer, ChunkBufferPool, SerializedChunk, SvoSerializable};
 use crate::world::world::BorrowedChunk;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`world::chunk::Chunk`]s.
@@ -28,26 +29,43 @@ use crate::world::world::BorrowedChunk;
 pub struct Svo {
     processor: ChunkProcessor<SerializedChunk>,
 
-    world_svo: world::Svo<SerializedChunk>,
+    world_svo_alloc: StatsAllocator,
+    world_svo: world::Svo<SerializedChunk, StatsAllocator>,
+
     graphics_svo: graphics::Svo,
-    chunk_buffer_allocator: Arc<Allocator<ChunkBuffer>>,
+    chunk_buffer_pool: Arc<ChunkBufferPool>,
 
     leaf_ids: FxHashMap<ChunkPos, LeafId>,
     has_changed: bool,
     svo_coord_space: SvoCoordSpace,
 }
 
+pub struct AllocStats {
+    pub chunk_buffers_used: usize,
+    pub chunk_buffers_allocated: usize,
+    pub chunk_buffers_bytes_total: usize,
+    pub world_svo_buffer_bytes: usize,
+}
+
 impl Svo {
     pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo, render_distance: u32) -> Svo {
-        let chunk_buffer_alloc = Allocator::new(
-            Box::new(ChunkBuffer::new),
+        let world_svo_alloc = StatsAllocator::new();
+
+        let chunk_buffer_pool = Pool::new_in(
+            // It is difficult to pre-allocate memory here as chunk sizes are random/depend heavily on the world generation
+            // mechanism. The naive approach is to allocate the maximum amount of memory, but that is too wasteful. Hence,
+            // an average size is taken so that it is sufficient in most cases and at worst, the storage is expanded a few
+            // times until it fits. This is still more stable than and safes a lot of allocations.
+            Box::new(|alloc| ChunkBuffer::with_capacity_in(100_000, alloc)),
             Some(Box::new(|buffer| buffer.reset())),
+            StatsAllocator::new(),
         );
         Svo {
             processor: ChunkProcessor::new(job_system),
-            world_svo: world::Svo::new(),
+            world_svo_alloc: world_svo_alloc.clone(),
+            world_svo: world::Svo::new_in(world_svo_alloc),
             graphics_svo,
-            chunk_buffer_allocator: Arc::new(chunk_buffer_alloc),
+            chunk_buffer_pool: Arc::new(chunk_buffer_pool),
             leaf_ids: FxHashMap::default(),
             has_changed: false,
             svo_coord_space: SvoCoordSpace {
@@ -60,7 +78,7 @@ impl Svo {
     /// Enqueues the borrowed chunk to be serialized into the GPU SVO structure. All moved chunk
     /// ownerships can be reclaimed by calling [`Svo::update`].
     pub fn set_chunk(&mut self, chunk: BorrowedChunk) {
-        let alloc = self.chunk_buffer_allocator.clone();
+        let alloc = self.chunk_buffer_pool.clone();
         self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(chunk, alloc));
     }
 
@@ -80,6 +98,15 @@ impl Svo {
 
     pub fn get_render_distance(&self) -> u32 {
         self.svo_coord_space.dst
+    }
+
+    pub fn get_alloc_stats(&self) -> AllocStats {
+        AllocStats {
+            chunk_buffers_used: self.chunk_buffer_pool.used_count(),
+            chunk_buffers_allocated: self.chunk_buffer_pool.allocated_count(),
+            chunk_buffers_bytes_total: self.chunk_buffer_pool.allocated_bytes(),
+            world_svo_buffer_bytes: self.world_svo_alloc.allocated_bytes(),
+        }
     }
 
     /// Updates the internal reference world center and performs "chunk shifting", if necessary.
@@ -112,13 +139,14 @@ impl Svo {
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
     /// space by replacing the previous chunk in the new position. Also removes all chunks, that
     /// are out of SVO bounds.
-    fn shift_chunks<T: SvoSerializable>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T>) {
+    fn shift_chunks<T: SvoSerializable, A: Allocator>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T, A>) {
         let mut overridden_leaves = FxHashMap::default();
         let mut removed = FxHashSet::default();
 
         for (chunk_pos, leaf_id) in leaf_ids.iter_mut() {
             let new_svo_pos = coord_space.cnv_chunk_pos(*chunk_pos);
             if new_svo_pos.is_none() {
+                // remove leaf from octree if it hasn't yet been overridden by another moved leaf
                 if !overridden_leaves.contains_key(leaf_id) {
                     world_svo.remove_leaf(*leaf_id);
                 }
@@ -130,7 +158,9 @@ impl Svo {
             let new_svo_pos = new_svo_pos.unwrap();
 
             let (new_leaf_id, old_value) = if let Some(value) = overridden_leaves.remove(leaf_id) {
-                world_svo.set_leaf(new_svo_pos, value)
+                // try to bypass serialization in svo since the leaf was only moved and might
+                // already in the serialization buffer
+                world_svo.set_leaf(new_svo_pos, value, false)
             } else {
                 world_svo.move_leaf(*leaf_id, new_svo_pos)
             };
@@ -158,7 +188,9 @@ impl Svo {
                 continue;
             }
 
-            let (id, _) = self.world_svo.set_leaf(svo_pos.unwrap(), result.value);
+            // NOTE: this moves ownership of the serialized ChunkBuffer into the world svo octree.
+            //       If not freed properly, the otherwise pooled objects cannot be reused.
+            let (id, _) = self.world_svo.set_leaf(svo_pos.unwrap(), result.value, true);
             self.leaf_ids.insert(result.pos, id);
             self.has_changed = true;
         }
@@ -185,7 +217,7 @@ mod svo_tests {
             *self as u64
         }
 
-        fn serialize(&self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
+        fn serialize(&mut self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
             dst.push(*self);
             SerializationResult { child_mask: 1, leaf_mask: 1, depth: 1 }
         }
@@ -198,13 +230,13 @@ mod svo_tests {
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
-        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32);
+        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
         leaf_ids.insert(ChunkPos::new(-1, 0, 0), c0);
 
-        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32);
+        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32, true);
         leaf_ids.insert(ChunkPos::new(0, 0, 0), c1);
 
-        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
+        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32, true);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
         assert_eq!(leaf_ids, FxHashMap::from_iter([
@@ -253,13 +285,13 @@ mod svo_tests {
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
-        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32);
+        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
         leaf_ids.insert(ChunkPos::new(-1, 0, 0), c0);
 
-        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32);
+        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32, true);
         leaf_ids.insert(ChunkPos::new(0, 0, 0), c1);
 
-        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
+        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32, true);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
         assert_eq!(leaf_ids, FxHashMap::from_iter([
@@ -309,13 +341,13 @@ mod svo_tests {
         let mut world_svo = world::Svo::new();
 
         // setup test SVO
-        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32);
+        let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
         leaf_ids.insert(ChunkPos::new(-1, 0, 0), c0);
 
-        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32);
+        let (c1, _) = world_svo.set_leaf(Position(1, 1, 1), 2u32, true);
         leaf_ids.insert(ChunkPos::new(0, 0, 0), c1);
 
-        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32);
+        let (c2, _) = world_svo.set_leaf(Position(2, 1, 1), 3u32, true);
         leaf_ids.insert(ChunkPos::new(1, 0, 0), c2);
 
         assert_eq!(world_svo.get_leaf(Position(0, 1, 1)), Some(&1u32));
@@ -365,9 +397,7 @@ impl Svo {
 /// from world space into SVO space.
 impl Raycaster for Svo {
     /// Calls [`graphics::Svo::raycast`]. Positions are expected to be in world space.
-    fn raycast(&self, batch: PickerBatch) -> PickerBatchResult {
-        let mut batch = batch;
-
+    fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult) {
         for ray in &mut batch.rays {
             ray.pos = self.svo_coord_space.cnv_block_pos(ray.pos);
         }
@@ -375,13 +405,11 @@ impl Raycaster for Svo {
             aabb.pos = self.svo_coord_space.cnv_block_pos(aabb.pos);
         }
 
-        let mut result = self.graphics_svo.raycast(batch);
+        self.graphics_svo.raycast(batch, result);
 
         for ray in &mut result.rays {
             ray.pos = self.svo_coord_space.cnv_svo_pos(ray.pos);
         }
-
-        result
     }
 }
 

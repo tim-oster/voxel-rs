@@ -1,14 +1,93 @@
-use std::ops::Sub;
+use std::ops::{Deref, Sub};
 
 use cgmath::{num_traits, Point3};
 
-use crate::world::memory::Allocated;
+use crate::world::memory::{Pool, Pooled, StatsAllocator};
 use crate::world::octree::{Octree, Position};
 
 pub type BlockId = u32;
-pub type ChunkStorage = Octree<BlockId>;
+pub type ChunkStorage = Octree<BlockId, StatsAllocator>;
 
 pub const NO_BLOCK: BlockId = 0;
+
+// -------------------------------------------------------------------------------------------------
+
+/// ChunkStorageAllocator is an allocator for ChunkStorage objects.
+pub struct ChunkStorageAllocator {
+    pool: Pool<ChunkStorage, StatsAllocator>,
+}
+
+impl ChunkStorageAllocator {
+    pub fn new() -> ChunkStorageAllocator {
+        let pool = Pool::new_in(
+            Box::new(|alloc| {
+                // It is difficult to choose the correct capacity for the octree storage, as octrees can differ a lot.
+                // Here, an average is taken to avoid repetitive storage expansion during game startup. This will not
+                // prevent from the program's memory usage to grow during runtime however.
+                let mut storage = ChunkStorage::with_capacity_in(5000, alloc);
+                storage.expand_to(5); // log2(32) = 5
+                storage
+            }),
+            Some(Box::new(|storage| {
+                storage.reset();
+                storage.expand_to(5);
+            })),
+            StatsAllocator::new(),
+        );
+        ChunkStorageAllocator { pool }
+    }
+
+    pub fn allocated_bytes(&self) -> usize {
+        self.pool.allocated_bytes()
+    }
+}
+
+impl Deref for ChunkStorageAllocator {
+    type Target = Pool<ChunkStorage, StatsAllocator>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.pool
+    }
+}
+
+#[cfg(test)]
+mod chunk_storage_allocator_tests {
+    use crate::world::chunk::ChunkStorageAllocator;
+
+    /// Tests that newly allocated and reused storage objects always have a depth of 5 blocks to prevent visual voxel
+    /// scale issues in the world.
+    #[test]
+    fn new() {
+        let alloc = ChunkStorageAllocator::new();
+
+        // new allocation
+        let storage = alloc.allocate();
+        assert_eq!(storage.depth(), 5);
+        assert_eq!(alloc.used_count(), 1);
+        assert_eq!(alloc.allocated_count(), 1);
+        assert_ne!(alloc.allocated_bytes(), 0);
+
+        drop(storage);
+
+        assert_eq!(alloc.used_count(), 0);
+        assert_eq!(alloc.allocated_count(), 1);
+
+        // reused allocation
+        let storage = alloc.allocate();
+        assert_eq!(storage.depth(), 5);
+        assert_eq!(alloc.used_count(), 1);
+        assert_eq!(alloc.allocated_count(), 1);
+        assert_ne!(alloc.allocated_bytes(), 0);
+
+        drop(storage);
+
+        // remove from buffer to check if allocator stats reset
+        alloc.pool.clear();
+        assert_eq!(alloc.allocated_bytes(), 0);
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
 
 /// Chunk is a group of 32^3 voxels. It is the smallest voxel container. Many chunks make up the
 /// world.
@@ -17,11 +96,11 @@ pub struct Chunk {
     /// Indicates the level of detail. Defined as the maximum depth to iterate inside the chunk's
     /// octree. 5 = maximum depth/full level of detail (2^5=32 - chunk block size along each axis).
     pub lod: u8,
-    pub storage: Option<Allocated<ChunkStorage>>,
+    pub storage: Option<Pooled<ChunkStorage>>,
 }
 
 impl Chunk {
-    pub fn new(pos: ChunkPos, lod: u8, storage: Allocated<ChunkStorage>) -> Chunk {
+    pub fn new(pos: ChunkPos, lod: u8, storage: Pooled<ChunkStorage>) -> Chunk {
         Chunk { pos, lod, storage: Some(storage) }
     }
 
@@ -42,6 +121,8 @@ impl Chunk {
         }
     }
 }
+
+// -------------------------------------------------------------------------------------------------
 
 /// ChunkPos represents a chunk's position in world space. One increment in chunk coord space is
 /// equal to 32 increments in block coord space.
@@ -153,6 +234,8 @@ mod chunk_pos_test {
         assert_eq!(pos - other, ChunkPos { x: 1, y: -3, z: 1 });
     }
 }
+
+// -------------------------------------------------------------------------------------------------
 
 /// BlockPos represents a block's position relative to the chunk it is in. Negative coordinates are
 /// special because a block position of x=-1 is x=31 inside the actual chunk.

@@ -2,8 +2,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::systems::jobs::{ChunkProcessor, JobSystem};
-use crate::world::chunk::{Chunk, ChunkPos};
-use crate::world::memory::ChunkStorageAllocator;
+use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
 
 pub trait ChunkGenerator {
     /// Returns true if the chunk needs generation, otherwise the chunk will be skipped and no

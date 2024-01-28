@@ -17,8 +17,7 @@ use crate::systems::chunkloader::{ChunkEvent, ChunkLoader};
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{Entity, Physics};
 use crate::systems::storage::Storage;
-use crate::world::chunk::{Chunk, ChunkPos};
-use crate::world::memory::ChunkStorageAllocator;
+use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
 use crate::world::world;
 
 /// World is the game system responsible for keeping all chunks in the voxel world loaded and
@@ -91,7 +90,7 @@ impl World {
     }
 
     pub fn update_fixed(&mut self, entity: &mut Entity, delta_time: f32) {
-        self.physics.step(delta_time, &self.world_svo, vec![entity]);
+        self.physics.step(delta_time, &self.world_svo, entity);
     }
 
     pub fn update(&mut self, entity: &mut Entity) {

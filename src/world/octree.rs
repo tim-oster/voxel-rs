@@ -1,3 +1,4 @@
+use std::alloc::{Allocator, Global};
 use std::cmp::max;
 use std::mem;
 
@@ -50,23 +51,40 @@ impl std::ops::RemAssign<u32> for Position {
 /// can contain up to 8 leaf nodes, or 8 child octants which further subdivide their parent octant
 /// to contain 8 children/leaves.
 /// The data structure is allocated in linearly without any nested pointer structs.
-#[derive(Debug, PartialEq)]
-pub struct Octree<T> {
+#[derive(Debug)]
+pub struct Octree<T, A: Allocator = Global> {
     pub(super) root: Option<OctantId>,
-    pub(super) octants: Vec<Octant<T>>,
+    pub(super) octants: Vec<Octant<T>, A>,
     free_list: Vec<OctantId>,
     depth: u8,
 }
 
 impl<T> Octree<T> {
     pub fn new() -> Octree<T> {
-        Octree { root: None, octants: Vec::new(), free_list: Vec::new(), depth: 0 }
+        Self::new_in(Global)
     }
 
-    pub fn with_size(size: u8) -> Octree<T> {
-        let mut octree = Self::new();
-        octree.expand_to(size);
-        octree
+    pub fn with_capacity(capacity: usize) -> Octree<T> {
+        Self::with_capacity_in(capacity, Global)
+    }
+}
+
+impl<T: PartialEq, A: Allocator> PartialEq for Octree<T, A> {
+    fn eq(&self, other: &Self) -> bool {
+        self.root.eq(&other.root)
+            && self.octants.eq(&other.octants)
+            && self.free_list.eq(&other.free_list)
+            && self.depth.eq(&other.depth)
+    }
+}
+
+impl<T, A: Allocator> Octree<T, A> {
+    pub fn new_in(alloc: A) -> Octree<T, A> {
+        Self::with_capacity_in(0, alloc)
+    }
+
+    pub fn with_capacity_in(capacity: usize, alloc: A) -> Octree<T, A> {
+        Self { root: None, octants: Vec::with_capacity_in(capacity, alloc), free_list: Vec::new(), depth: 0 }
     }
 
     pub fn reset(&mut self) {
@@ -99,7 +117,7 @@ impl<T> Octree<T> {
             it = self.step_into_or_create_octant_at(it, idx);
         }
 
-        panic!("could not reach end of tree");
+        unreachable!("could not reach end of tree");
     }
 
     /// Moves the leaf at `leaf_id` to the given position. The original leaf will be set to an
@@ -132,14 +150,12 @@ impl<T> Octree<T> {
                 // attach new leaf octant
                 if new_leaf.get_leaf_value().is_some() {
                     self.octants[it as usize].set_child(idx, new_leaf);
-                } else {
-                    self.octants[it as usize].set_child(idx, Child::None);
                 }
 
                 let new_leaf_id = LeafId { parent: it, idx };
                 match old_leaf {
                     Child::None => return (new_leaf_id, None),
-                    Child::Octant(_) => panic!("found unexpected octant"),
+                    Child::Octant(_) => unreachable!("found unexpected octant"),
                     Child::Leaf(value) => return (new_leaf_id, Some(value)),
                 }
             }
@@ -147,7 +163,7 @@ impl<T> Octree<T> {
             it = self.step_into_or_create_octant_at(it, idx);
         }
 
-        panic!("could not reach end of tree");
+        unreachable!("could not reach end of tree");
     }
 
     fn step_into_or_create_octant_at(&mut self, it: OctantId, idx: u8) -> OctantId {
@@ -162,7 +178,7 @@ impl<T> Octree<T> {
                 next_id
             }
             Child::Octant(id) => *id,
-            Child::Leaf(_) => panic!("found unexpected leaf"),
+            Child::Leaf(_) => unreachable!("found unexpected leaf"),
         }
     }
 
@@ -189,7 +205,7 @@ impl<T> Octree<T> {
                 Child::Leaf(_) => {
                     match self.octants[it as usize].set_child(idx, Child::None) {
                         Child::None => return (None, None),
-                        Child::Octant(_) => panic!("found unexpected octant"),
+                        Child::Octant(_) => unreachable!("found unexpected octant"),
                         Child::Leaf(value) => return (Some(value), Some(LeafId { parent: it, idx })),
                     }
                 }
@@ -207,7 +223,7 @@ impl<T> Octree<T> {
             Child::Leaf(_) => {
                 match self.octants[leaf_id.parent as usize].set_child(leaf_id.idx, Child::None) {
                     Child::None => None,
-                    Child::Octant(_) => panic!("found unexpected octant"),
+                    Child::Octant(_) => unreachable!("found unexpected octant"),
                     Child::Leaf(value) => Some(value),
                 }
             }
@@ -287,21 +303,24 @@ impl<T> Octree<T> {
     }
 
     fn compact_octant(&mut self, octant_id: OctantId) {
-        let octant = &self.octants[octant_id as usize];
-        let mut children = Vec::new();
-        for (i, child) in octant.children.iter().enumerate() {
-            if let Child::Octant(id) = child {
-                children.push((i, *id));
+        let children = self.octants[octant_id as usize].children.len();
+
+        for i in 0..children {
+            let id = {
+                let octant = &self.octants[octant_id as usize];
+                octant.children[i].get_octant_value()
+            };
+            if id.is_none() {
+                continue;
             }
-        }
+            let id = id.unwrap();
 
-        for child in children {
-            self.compact_octant(child.1);
+            self.compact_octant(id);
 
-            let octant = &self.octants[child.1 as usize];
+            let octant = &self.octants[id as usize];
             if octant.children_count == 0 {
-                self.delete_octant(child.1);
-                self.octants[octant_id as usize].set_child(child.0 as u8, Child::None);
+                self.delete_octant(id);
+                self.octants[octant_id as usize].set_child(i as u8, Child::None);
             }
         }
     }
@@ -378,6 +397,13 @@ impl<T> Child<T> {
     }
 
     pub fn get_leaf_value(&self) -> Option<&T> {
+        match self {
+            Child::Leaf(value) => Some(value),
+            _ => None,
+        }
+    }
+
+    pub fn get_leaf_value_mut(&mut self) -> Option<&mut T> {
         match self {
             Child::Leaf(value) => Some(value),
             _ => None,

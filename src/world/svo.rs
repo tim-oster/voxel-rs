@@ -1,3 +1,4 @@
+use std::alloc::{Allocator, Global};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::ptr;
@@ -6,22 +7,34 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::world::chunk::{BlockId, ChunkPos};
-use crate::world::memory::{Allocated, Allocator};
+use crate::world::memory::{Pool, Pooled, StatsAllocator};
 use crate::world::octree::{LeafId, Octant, OctantId, Octree, Position};
 use crate::world::world::BorrowedChunk;
 
+pub type ChunkBufferPool<A = StatsAllocator> = Pool<ChunkBuffer<A>, A>;
+
 /// ChunkBuffer abstracts the temporary storage used for serializing octants into the SVO format.
-pub struct ChunkBuffer {
-    data: Vec<u32>,
+pub struct ChunkBuffer<A: Allocator = Global> {
+    data: Vec<u32, A>,
 }
 
 impl ChunkBuffer {
     pub fn new() -> ChunkBuffer {
-        // It is difficult to pre-allocate memory here as chunk sizes are random/depend heavily on the world generation
-        // mechanism. The naive approach is to allocate the maximum amount of memory, but that is too wasteful. Hence,
-        // the memory will be expanded a couple times until it is sufficient for most chunks and performance can
-        // stabilise.
-        ChunkBuffer { data: Vec::new() }
+        Self::new_in(Global)
+    }
+
+    pub fn with_capacity(capacity: usize) -> ChunkBuffer {
+        Self::with_capacity_in(capacity, Global)
+    }
+}
+
+impl<A: Allocator> ChunkBuffer<A> {
+    pub fn new_in(alloc: A) -> ChunkBuffer<A> {
+        Self::with_capacity_in(0, alloc)
+    }
+
+    pub fn with_capacity_in(capacity: usize, alloc: A) -> ChunkBuffer<A> {
+        Self { data: Vec::with_capacity_in(capacity, alloc) }
     }
 
     pub fn reset(&mut self) {
@@ -42,7 +55,7 @@ pub trait SvoSerializable {
     fn unique_id(&self) -> u64;
 
     /// Serializes the data into the destination buffer and returns metadata about the data layout.
-    fn serialize(&self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult;
+    fn serialize(&mut self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult;
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -115,11 +128,11 @@ pub struct SerializationResult {
 /// [10] 00000000 00000000  00000000 00000000
 /// [11] 00000000 00000000  00000000 00000000
 /// ```
-pub struct Svo<T: SvoSerializable> {
+pub struct Svo<T: SvoSerializable, A: Allocator = Global> {
     octree: Octree<T>,
     change_set: FxHashSet<OctantChange>,
 
-    buffer: SvoBuffer,
+    buffer: SvoBuffer<A>,
     leaf_info: FxHashMap<u64, LeafInfo>,
     root_info: Option<LeafInfo>,
 
@@ -136,18 +149,28 @@ struct LeafInfo {
 }
 
 impl<T: SvoSerializable> Svo<T> {
-    /// Static size of the serialized data required for wrapping the root octant into a traversable format.
-    const PREAMBLE_LENGTH: u32 = 5;
-
     pub fn new() -> Svo<T> {
-        Self::with_capacity(0)
+        Self::new_in(Global)
     }
 
     pub fn with_capacity(capacity: usize) -> Svo<T> {
-        Svo {
+        Self::with_capacity_in(capacity, Global)
+    }
+}
+
+impl<T: SvoSerializable, A: Allocator> Svo<T, A> {
+    /// Static size of the serialized data required for wrapping the root octant into a traversable format.
+    const PREAMBLE_LENGTH: u32 = 5;
+
+    pub fn new_in(alloc: A) -> Svo<T, A> {
+        Self::with_capacity_in(0, alloc)
+    }
+
+    pub fn with_capacity_in(capacity: usize, alloc: A) -> Svo<T, A> {
+        Self {
             octree: Octree::new(),
             change_set: FxHashSet::default(),
-            buffer: SvoBuffer::new(capacity),
+            buffer: SvoBuffer::with_capacity_in(capacity, alloc),
             leaf_info: FxHashMap::default(),
             root_info: None,
             tmp_octant_buffer: Some(ChunkBuffer::new()),
@@ -163,12 +186,15 @@ impl<T: SvoSerializable> Svo<T> {
         self.root_info = None;
     }
 
-    /// See [`Octree::set_leaf`].
-    pub fn set_leaf(&mut self, pos: Position, leaf: T) -> (LeafId, Option<T>) {
+    /// See [`Octree::set_leaf`]. Setting `serialize` to false attempts to bypass re-serializing the leaf in case it
+    /// was done. This is useful if the leaf is moved around, but its content has not changed.
+    pub fn set_leaf(&mut self, pos: Position, leaf: T, serialize: bool) -> (LeafId, Option<T>) {
         let uid = leaf.unique_id();
         let (leaf_id, prev_leaf) = self.octree.set_leaf(pos, leaf);
 
-        self.change_set.insert(OctantChange::Add(uid, leaf_id));
+        if serialize || !self.leaf_info.contains_key(&uid) {
+            self.change_set.insert(OctantChange::Add(uid, leaf_id));
+        }
 
         (leaf_id, prev_leaf)
     }
@@ -209,8 +235,8 @@ impl<T: SvoSerializable> Svo<T> {
         for change in changes {
             match change {
                 OctantChange::Add(id, leaf_id) => {
-                    let child = &self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
-                    let content = child.get_leaf_value().unwrap();
+                    let child = &mut self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
+                    let content = child.get_leaf_value_mut().unwrap();
                     let result = content.serialize(&mut tmp_buffer.data, 0);
                     if result.depth > 0 {
                         let offset = self.buffer.insert(id, &tmp_buffer);
@@ -337,12 +363,12 @@ pub struct SerializedChunk {
     pos_hash: u64,
     pub lod: u8,
     pub borrowed_chunk: Option<BorrowedChunk>,
-    buffer: Option<Allocated<ChunkBuffer>>,
+    buffer: Option<Pooled<ChunkBuffer<StatsAllocator>>>,
     result: SerializationResult,
 }
 
 impl SerializedChunk {
-    pub fn new(chunk: BorrowedChunk, alloc: Arc<Allocator<ChunkBuffer>>) -> SerializedChunk {
+    pub fn new(chunk: BorrowedChunk, alloc: Arc<ChunkBufferPool>) -> SerializedChunk {
         let pos = chunk.pos;
         let lod = chunk.lod;
 
@@ -358,7 +384,7 @@ impl SerializedChunk {
         SerializedChunk { pos, pos_hash, lod, borrowed_chunk: Some(chunk), buffer, result }
     }
 
-    fn serialize(octree: &Octree<BlockId>, dst: &mut Vec<u32>, lod: u8) -> SerializationResult {
+    fn serialize<A1: Allocator, A2: Allocator>(octree: &Octree<BlockId, A1>, dst: &mut Vec<u32, A2>, lod: u8) -> SerializationResult {
         if octree.root.is_none() {
             return SerializationResult { child_mask: 0, leaf_mask: 0, depth: 0 };
         }
@@ -382,10 +408,15 @@ impl SvoSerializable for SerializedChunk {
 
     /// Serializes the already serialized chunk by copying its results into the given buffer and returning the cached
     /// result.
-    fn serialize(&self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
+    fn serialize(&mut self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
         if self.buffer.is_some() {
             let buffer = self.buffer.as_ref().unwrap();
             dst.extend(buffer.data.iter());
+
+            // Drop the buffer so that he allocator can reuse it. A SerializedChunk only needs it's buffer for the
+            // serialization to the SVO. After that, it is indexed by an absolute pointer. If the content changes
+            // however, a new SerializedChunk is built and the old one discarded.
+            self.buffer = None;
         }
         self.result
     }
@@ -415,7 +446,7 @@ struct ChildEncodeParams<'a, T> {
 /// To encode a child the given encoder is called. Additionally, a level of detail can be specified. For every
 /// `lod` > 0, the recursion depth is limited to that lod. If no leaf could be found until the LOD is exceeded,
 /// [`breadth_first`] is used to find the first leaf in any octant at the last position.
-fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, dst: &mut Vec<u32>, lod: u8, child_encoder: &F) -> SerializationResult
+fn serialize_octant<T, F, A1: Allocator, A2: Allocator>(octree: &Octree<T, A1>, octant_id: OctantId, dst: &mut Vec<u32, A2>, lod: u8, child_encoder: &F) -> SerializationResult
     where F: Fn(ChildEncodeParams<T>) {
     // keep track of the start position to determine how much data was added in this call
     let start_offset = dst.len();
@@ -490,7 +521,7 @@ fn serialize_octant<T, F>(octree: &Octree<T>, octant_id: OctantId, dst: &mut Vec
 
 /// Iterates recursively through the given octant in breadth-first order. The goal is to find the first, highest level
 /// leaf value, if any.
-fn breadth_first<'a, T>(octree: &'a Octree<T>, parent: &'a Octant<T>) -> Option<&'a T> {
+fn breadth_first<'a, T, A: Allocator>(octree: &'a Octree<T, A>, parent: &'a Octant<T>) -> Option<&'a T> {
     for child in parent.children.iter() {
         if !child.is_leaf() {
             continue;
@@ -520,7 +551,7 @@ mod svo_tests {
     use rustc_hash::FxHashMap;
 
     use crate::world::chunk::{BlockId, ChunkPos};
-    use crate::world::memory::Allocator;
+    use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::octree::{LeafId, Octree, Position};
     use crate::world::svo::{ChunkBuffer, LeafInfo, Range, SerializationResult, SerializedChunk, Svo, SvoBuffer};
 
@@ -534,7 +565,7 @@ mod svo_tests {
         octree.expand_to(5);
         octree.compact();
 
-        let alloc = Allocator::new(Box::new(|| ChunkBuffer::new()), None);
+        let alloc = Pool::new_in(Box::new(|alloc| ChunkBuffer::new_in(alloc)), None, StatsAllocator::new());
         let mut buffer = alloc.allocate();
         let result = SerializedChunk::serialize(&octree, &mut buffer.data, 0);
         let sc = SerializedChunk {
@@ -547,7 +578,7 @@ mod svo_tests {
         };
 
         let mut svo = Svo::new();
-        svo.set_leaf(Position(1, 0, 0), sc);
+        svo.set_leaf(Position(1, 0, 0), sc, true);
         svo.serialize();
 
         assert_eq!(svo.root_info, Some(LeafInfo {
@@ -703,7 +734,7 @@ mod svo_tests {
                 0,
                 156 + preamble_length,
             ],
-            expected,
+            expected.to_vec(),
         ].concat());
     }
 
@@ -713,9 +744,9 @@ mod svo_tests {
         let mut svo = Svo::new();
 
         // NOTE: serialize twice to avoid non-deterministic results due to random map lookup in implementation
-        svo.set_leaf(Position(0, 0, 0), 10);
+        svo.set_leaf(Position(0, 0, 0), 10, true);
         svo.serialize();
-        svo.set_leaf(Position(1, 0, 0), 20);
+        svo.set_leaf(Position(1, 0, 0), 20, true);
         svo.serialize();
 
         assert_eq!(svo.root_info, Some(LeafInfo {
@@ -765,7 +796,7 @@ mod svo_tests {
                 0,
                 1 + preamble_length,
             ],
-            expected,
+            expected.to_vec(),
         ].concat());
 
         // remove and move leaves, and update buffer with only changed data
@@ -819,7 +850,7 @@ mod svo_tests {
                 (1 << 8) << 8 << 16,
                 preamble_length,
             ],
-            expected,
+            expected.to_vec(),
         ].concat());
     }
 
@@ -1206,18 +1237,30 @@ pub struct Range {
 /// Removing data does not free up the already allocated memory but instead marks the range inside the buffer as free.
 /// If two adjacent ranges are removed, they are merged into one. Inserting into the buffer will prioritize reusing
 /// memory over appending to the end of the internal buffer.
-#[derive(Debug, PartialEq)]
-struct SvoBuffer {
-    bytes: Vec<u32>,
+#[derive(Debug)]
+struct SvoBuffer<A: Allocator> {
+    bytes: Vec<u32, A>,
     free_ranges: Vec<Range>,
     updated_ranges: Vec<Range>,
     octant_to_range: FxHashMap<u64, Range>,
 }
 
-impl SvoBuffer {
-    fn new(initial_capacity: usize) -> SvoBuffer {
+impl<A: Allocator> PartialEq for SvoBuffer<A> {
+    fn eq(&self, other: &Self) -> bool {
+        self.bytes == other.bytes
+            && self.free_ranges == other.free_ranges
+            && self.updated_ranges == other.updated_ranges
+            && self.octant_to_range == other.octant_to_range
+    }
+}
+
+impl<A: Allocator> SvoBuffer<A> {
+    fn with_capacity_in(initial_capacity: usize, alloc: A) -> SvoBuffer<A> {
+        let mut bytes = Vec::with_capacity_in(initial_capacity, alloc);
+        bytes.extend(std::iter::repeat(0).take(initial_capacity));
+
         let mut buffer = SvoBuffer {
-            bytes: vec![0; initial_capacity],
+            bytes,
             free_ranges: Vec::new(),
             updated_ranges: Vec::new(),
             octant_to_range: FxHashMap::default(),
@@ -1285,7 +1328,9 @@ impl SvoBuffer {
 
     /// Orders all free ranges by start index and merges adjacent ranges into one.
     fn merge_ranges(ranges: &mut Vec<Range>) {
-        ranges.sort_by(|lhs, rhs| lhs.start.cmp(&rhs.start));
+        // Unstable is fine here as no equivalent objects can exist. It should be slightly faster
+        // and avoids heap allocations.
+        ranges.sort_unstable_by(|lhs, rhs| lhs.start.cmp(&rhs.start));
 
         let mut i = 1;
         while i < ranges.len() {
@@ -1307,6 +1352,7 @@ impl SvoBuffer {
 
 #[cfg(test)]
 mod svo_buffer_tests {
+    use std::alloc::Global;
     use std::iter::FromIterator;
 
     use rustc_hash::FxHashMap;
@@ -1317,7 +1363,7 @@ mod svo_buffer_tests {
     #[test]
     fn buffer_insert_remove() {
         // create empty buffer with initial capacity
-        let mut buffer = SvoBuffer::new(10);
+        let mut buffer = SvoBuffer::with_capacity_in(10, Global);
 
         assert_eq!(buffer, SvoBuffer {
             bytes: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -1476,7 +1522,7 @@ mod svo_buffer_tests {
             },
         ] {
             let mut input = case.input;
-            SvoBuffer::merge_ranges(&mut input);
+            SvoBuffer::<Global>::merge_ranges(&mut input);
             assert_eq!(input, case.expected, "{}", case.name);
         }
     }

@@ -10,7 +10,7 @@ use crate::gamelogic::content::blocks;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
-use crate::graphics::svo_picker::{PickerBatch, RayResult};
+use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
 use crate::systems::physics::{Entity, Raycaster};
 use crate::world::chunk::{BlockId, BlockPos, Chunk};
 
@@ -25,6 +25,9 @@ pub struct Gameplay {
     was_grounded: bool,
     pub looking_at_block: Option<RayResult>,
     selected_block: BlockId,
+
+    look_ray_batch: PickerBatch,
+    look_ray_result: PickerBatchResult,
 }
 
 impl Gameplay {
@@ -45,6 +48,8 @@ impl Gameplay {
             was_grounded: false,
             looking_at_block: None,
             selected_block: blocks::GRASS,
+            look_ray_batch: PickerBatch::with_capacity(1),
+            look_ray_result: PickerBatchResult::with_capacity(1),
         }
     }
 
@@ -154,10 +159,13 @@ impl Gameplay {
     }
 
     fn handle_voxel_placement(&mut self, frame: &Frame, player: &Entity, world: &mut gamelogic::world::World) {
-        let mut batch = PickerBatch::new();
-        batch.add_ray(player.position, player.get_forward(), 30.0);
-        let batch_result = world.world_svo.raycast(batch);
-        let block_result = batch_result.rays[0];
+        self.look_ray_batch.reset();
+        self.look_ray_batch.add_ray(player.position, player.get_forward(), 30.0);
+
+        self.look_ray_result.reset();
+        world.world_svo.raycast(&mut self.look_ray_batch, &mut self.look_ray_result);
+
+        let block_result = self.look_ray_result.rays[0];
 
         if block_result.did_hit() {
             self.looking_at_block = Some(block_result);

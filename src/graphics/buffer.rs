@@ -152,4 +152,8 @@ impl<T> MappedBuffer<T> {
     pub fn as_slice(&self) -> &[T] {
         unsafe { std::slice::from_raw_parts(self.mapped_ptr, self.size) }
     }
+
+    pub fn size_in_bytes(&self) -> usize {
+        mem::size_of::<T>() * self.size
+    }
 }

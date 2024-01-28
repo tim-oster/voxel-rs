@@ -1,5 +1,5 @@
 use std::rc::Rc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use cgmath::{Point3, Vector3};
 use imgui::Condition;
@@ -7,6 +7,7 @@ use imgui::Condition;
 use crate::core::{Buffering, Config, Frame, Window};
 use crate::gamelogic::gameplay::Gameplay;
 use crate::gamelogic::world::World;
+use crate::global_allocated_bytes;
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{AABBDef, Entity};
 use crate::world::chunk::ChunkPos;
@@ -27,6 +28,13 @@ struct State {
 
     physics_target_fps: u32,
     physics_fps: u32,
+
+    render_debug_ui: bool,
+    plot_refresh: Instant,
+    plot_fps: Plot,
+    plot_frame_time: Plot,
+    plot_jobs: Plot,
+    plot_memory: Plot,
 }
 
 impl Game {
@@ -64,6 +72,12 @@ impl Game {
                 player,
                 physics_target_fps: 250,
                 physics_fps: 0,
+                render_debug_ui: true,
+                plot_refresh: Instant::now(),
+                plot_fps: Plot::new(),
+                plot_frame_time: Plot::new(),
+                plot_jobs: Plot::new(),
+                plot_memory: Plot::new(),
             },
         }
     }
@@ -141,8 +155,10 @@ impl State {
         self.world.render(frame.get_aspect());
         self.gameplay.render_ui(frame.size);
 
-        self.render_debug_window(frame);
-        self.world.render_debug_window(frame);
+        if self.render_debug_ui {
+            self.render_debug_window(frame);
+            self.world.render_debug_window(frame);
+        }
     }
 
     fn handle_window_resize(&mut self, width: i32, height: i32, aspect_ratio: f32) {
@@ -156,7 +172,7 @@ impl State {
         println!("tried reloading all resources");
     }
 
-    fn render_debug_window(&self, frame: &mut Frame) {
+    fn render_debug_window(&mut self, frame: &mut Frame) {
         let camera = &self.world.camera;
 
         imgui::Window::new("Debug")
@@ -222,27 +238,68 @@ impl State {
 
                 frame.ui.separator();
 
+                frame.ui.text(format!(
+                    "world chunks used: {}, total: {}, size: {:.3}mb",
+                    self.world.chunk_storage_allocator.used_count(),
+                    self.world.chunk_storage_allocator.allocated_count(),
+                    self.world.chunk_storage_allocator.allocated_bytes() as f32 / 1024f32 / 1024f32,
+                ));
+
+                let bytes = global_allocated_bytes();
+                frame.ui.text(format!(
+                    "engine memory: {:.3}mb",
+                    bytes as f32 / 1024f32 / 1024f32,
+                ));
+
+                frame.ui.separator();
+
                 let svo_stats = self.world.world_svo.get_stats();
                 frame.ui.text(format!(
-                    "svo size: {:.3}mb, depth: {}",
-                    svo_stats.size_bytes as f32 / 1024f32 / 1024f32,
+                    "gpu svo size: {:.3}mb / {:.3}mb, depth: {}",
+                    svo_stats.used_bytes as f32 / 1024f32 / 1024f32,
+                    svo_stats.capacity_bytes as f32 / 1024f32 / 1024f32,
                     svo_stats.depth,
                 ));
 
+                let alloc_stats = self.world.world_svo.get_alloc_stats();
                 frame.ui.text(format!(
-                    "queue length: {}",
-                    self.job_system.queue_len(),
+                    "cpu svo size: {:.3}mb",
+                    alloc_stats.world_svo_buffer_bytes as f32 / 1024f32 / 1024f32,
                 ));
+                frame.ui.text(format!(
+                    "chunk buffers used: {}, total: {}, size: {:.3}mb",
+                    alloc_stats.chunk_buffers_used,
+                    alloc_stats.chunk_buffers_allocated,
+                    alloc_stats.chunk_buffers_bytes_total as f32 / 1024f32 / 1024f32,
+                ));
+            });
 
-                frame.ui.text(format!(
-                    "chunk allocs used: {}, total: {}",
-                    self.world.chunk_storage_allocator.used_count(),
-                    self.world.chunk_storage_allocator.allocated_count(),
-                ));
+        let now = Instant::now();
+        if now > self.plot_refresh {
+            self.plot_refresh += Duration::from_secs_f32(1.0 / 60.0);
+
+            self.plot_fps.add(frame.stats.frames_per_second as f32);
+            self.plot_frame_time.add(frame.stats.avg_frame_time_per_second);
+            self.plot_jobs.add(self.job_system.queue_len() as f32);
+
+            let bytes = global_allocated_bytes();
+            self.plot_memory.add(bytes as f32 / 1024.0 / 1024.0);
+        }
+
+        imgui::Window::new("Graphs")
+            .size([300.0, 100.0], Condition::FirstUseEver)
+            .build(&frame.ui, || {
+                self.plot_fps.render(&frame.ui, "fps");
+                self.plot_frame_time.render(&frame.ui, "frame time");
+                self.plot_jobs.render(&frame.ui, "job queue");
+                self.plot_memory.render(&frame.ui, "memory");
             });
     }
 
     fn handle_debug_keys(&mut self, frame: &mut Frame) {
+        if frame.input.was_key_pressed(&glfw::Key::P) {
+            self.render_debug_ui = !self.render_debug_ui;
+        }
         if frame.input.was_key_pressed(&glfw::Key::E) {
             self.world.sun_direction = self.world.camera.forward;
         }
@@ -253,5 +310,30 @@ impl State {
             let is_grabbed = frame.is_cursor_grabbed();
             frame.request_grab_cursor(!is_grabbed);
         }
+    }
+}
+
+/// Plot is a convenience wrapper for drawing imgui plot lines.
+struct Plot<const N: usize = 90> {
+    data: [f32; N],
+}
+
+impl<const N: usize> Plot<N> {
+    fn new() -> Plot<N> {
+        Self {
+            data: [0.0; N],
+        }
+    }
+
+    fn add(&mut self, elem: f32) {
+        self.data.rotate_left(1);
+        self.data[N - 1] = elem;
+    }
+
+    fn render(&self, ui: &imgui::Ui, label: &str) {
+        ui.plot_lines(label, &self.data)
+            .scale_min(0.0)
+            .graph_size([0.0, 30.0])
+            .build();
     }
 }
