@@ -12,6 +12,7 @@ use indoc::formatdoc;
 use regex::Regex;
 use rustc_hash::FxHashMap;
 
+use crate::core::assets;
 use crate::graphics::resource::Bind;
 
 #[derive(Debug)]
@@ -110,7 +111,8 @@ impl ShaderProgramBuilder {
         let mut current_type = String::from("");
         let mut shader_types = FxHashMap::default();
 
-        let source = std::fs::read_to_string(path)?;
+        let source = assets::read(path)?;
+        let source = String::from_utf8_lossy(&source);
         for line in source.split('\n') {
             let line = line.trim_end();
 
@@ -145,10 +147,9 @@ impl ShaderProgramBuilder {
 
                 // join include path to current shader's path
                 let base_path = Path::new(path).parent().unwrap();
-                let include_path = base_path.join(rel_path);
-                let include_path = include_path.to_str().unwrap();
+                let include_path = format!("{}/{}", base_path.to_str().unwrap(), rel_path);
 
-                self.write_included_file_to(include_path, buffer)?;
+                self.write_included_file_to(&include_path, buffer)?;
 
                 continue;
             }

@@ -1,19 +1,27 @@
 #![allow(dead_code)]
 
 use std::ffi::c_void;
-use std::path::Path;
+use std::io;
 
 use gl::types::*;
-use image::{GenericImageView, ImageError};
+use image::{GenericImageView, ImageError, ImageFormat};
 use rustc_hash::FxHashMap;
 
+use crate::core::assets;
 use crate::gl_assert_no_error;
 use crate::graphics::resource::Bind;
 
 #[derive(Debug)]
 pub enum TextureArrayError {
+    Io(io::Error),
     ImageError(ImageError),
     Other(String),
+}
+
+impl From<io::Error> for TextureArrayError {
+    fn from(err: io::Error) -> Self {
+        TextureArrayError::Io(err)
+    }
 }
 
 impl From<ImageError> for TextureArrayError {
@@ -80,8 +88,9 @@ impl TextureArrayBuilder {
 
         match &self.content[0] {
             ImageContent::File(path) => {
-                let path = Path::new(&path);
-                image = Some(image::open(path)?);
+                let data = assets::read(path)?;
+                let format = ImageFormat::from_path(path)?;
+                image = Some(image::load_from_memory_with_format(&data, format)?.flipv());
                 width = image.as_ref().unwrap().width();
                 height = image.as_ref().unwrap().height();
             }
@@ -113,7 +122,9 @@ impl TextureArrayBuilder {
                 ImageContent::File(path) => {
                     if i > 0 {
                         // the first image was already loaded to fetch the dimensions of the array
-                        image = Some(image::open(path)?.flipv());
+                        let data = assets::read(path)?;
+                        let format = ImageFormat::from_path(path)?;
+                        image = Some(image::load_from_memory_with_format(&data, format)?.flipv());
                     }
 
                     let image = image.as_ref().unwrap();
