@@ -145,9 +145,15 @@ impl ShaderProgramBuilder {
                 let caps = re_include.captures(line).unwrap();
                 let rel_path = caps.get(1).map_or("", |m| m.as_str());
 
-                // join include path to current shader's path
-                let base_path = Path::new(path).parent().unwrap();
-                let include_path = format!("{}/{}", base_path.to_str().unwrap(), rel_path);
+                // if given include path is not absolute, join include path to current shader's path
+                let include_path = {
+                    if Path::new(rel_path).is_absolute() {
+                        rel_path.to_string()
+                    } else {
+                        let base_path = Path::new(path).parent().unwrap();
+                        format!("{}/{}", base_path.to_str().unwrap(), rel_path)
+                    }
+                };
 
                 self.write_included_file_to(&include_path, buffer)?;
 
