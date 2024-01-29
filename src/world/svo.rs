@@ -445,7 +445,7 @@ struct ChildEncodeParams<'a, T> {
 ///
 /// To encode a child the given encoder is called. Additionally, a level of detail can be specified. For every
 /// `lod` > 0, the recursion depth is limited to that lod. If no leaf could be found until the LOD is exceeded,
-/// [`breadth_first`] is used to find the first leaf in any octant at the last position.
+/// [`pick_leaf_for_lod`] is used to find the first leaf in any octant at the last position.
 fn serialize_octant<T, F, A1: Allocator, A2: Allocator>(octree: &Octree<T, A1>, octant_id: OctantId, dst: &mut Vec<u32, A2>, lod: u8, child_encoder: &F) -> SerializationResult
     where F: Fn(ChildEncodeParams<T>) {
     // keep track of the start position to determine how much data was added in this call
@@ -476,7 +476,7 @@ fn serialize_octant<T, F, A1: Allocator, A2: Allocator>(octree: &Octree<T, A1>, 
             // if NONE, find the first child if the child is an octant
             if content.is_none() && child.is_octant() {
                 let child_id = child.get_octant_value().unwrap();
-                content = breadth_first(octree, &octree.octants[child_id as usize]);
+                content = pick_leaf_for_lod(octree, &octree.octants[child_id as usize]);
             }
             // if nothing was found, skip
             if content.is_none() {
@@ -520,23 +520,27 @@ fn serialize_octant<T, F, A1: Allocator, A2: Allocator>(octree: &Octree<T, A1>, 
 }
 
 /// Iterates recursively through the given octant in breadth-first order. The goal is to find the first, highest level
-/// leaf value, if any.
-fn breadth_first<'a, T, A: Allocator>(octree: &'a Octree<T, A>, parent: &'a Octant<T>) -> Option<&'a T> {
-    for child in parent.children.iter() {
+/// leaf value, if any. It uses a custom iteration order to check for leaves from y=1 to y=0. This results in a better
+/// look in most scenarios.
+fn pick_leaf_for_lod<'a, T, A: Allocator>(octree: &'a Octree<T, A>, parent: &'a Octant<T>) -> Option<&'a T> {
+    const ORDER: [usize; 8] = [2, 3, 6, 7, 0, 1, 4, 5];
+    for index in ORDER {
+        let child = &parent.children[index];
         if !child.is_leaf() {
             continue;
         }
         let content = child.get_leaf_value();
         return content;
     }
-    for child in parent.children.iter() {
+    for index in ORDER {
+        let child = &parent.children[index];
         if !child.is_octant() {
             continue;
         }
 
         let child_id = child.get_octant_value().unwrap();
         let child = &octree.octants[child_id as usize];
-        let result = breadth_first(octree, child);
+        let result = pick_leaf_for_lod(octree, child);
         if result.is_some() {
             return result;
         }
