@@ -90,7 +90,7 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
     // Calcualte shadow by casting another ray from the previous hit location towards the sun. Skip if the hit is too
     // far away.
     float shadow = 1;
-    if (res.t < 100/octree_scale) {
+    if (res.t < 500) {
         OctreeResult shadow_res;
         intersect_octree(res.pos + normal*0.001, -u_light_dir, -1, true, u_texture, shadow_res);
         shadow = shadow_res.t < 0 ? 1.0 : 0.0;
