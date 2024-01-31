@@ -222,7 +222,9 @@ impl World {
 
     pub fn render_debug_window(&mut self, frame: &mut Frame) {
         imgui::Window::new("World Gen")
-            .size([300.0, 100.0], Condition::FirstUseEver)
+            .position([8.0, 290.0 + 2.0 * 8.0], Condition::Once)
+            .size([400.0, 400.0], Condition::Once)
+            .collapsed(true, Condition::Once)
             .build(&frame.ui, || {
                 frame.ui.input_int("sea level", &mut self.world_generator_cfg.sea_level).build();
 
