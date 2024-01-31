@@ -138,7 +138,9 @@ impl Svo {
 
             // wait for last draw call to finish so that updates and draws do not race and produce temporary "holes" in the world
             self.render_fence.borrow().wait();
-            svo.write_changes_to(self.world_buffer.offset(1), true);
+
+            let len = self.world_buffer.len() - 1;
+            svo.write_changes_to(self.world_buffer.offset(1), len, true);
 
             self.stats = Stats {
                 used_bytes: svo.size_in_bytes(),

@@ -321,7 +321,7 @@ impl<T: SvoSerializable, A: Allocator> Svo<T, A> {
     /// Writes all changes after the last reset to the given buffer. The implementation assumes that the same buffer,
     /// that was used in the initial call to [`Svo::write_to`] and previous calls to this method, is reused. If `reset`
     /// is true, the change tracker is reset. Must be called after [`Svo::serialize`].
-    pub unsafe fn write_changes_to(&mut self, dst: *mut u32, reset: bool) {
+    pub unsafe fn write_changes_to(&mut self, dst: *mut u32, dst_len: usize, reset: bool) {
         if self.root_info.is_none() {
             return;
         }
@@ -335,6 +335,13 @@ impl<T: SvoSerializable, A: Allocator> Svo<T, A> {
         for changed_range in &self.buffer.updated_ranges {
             let offset = changed_range.start as isize;
             let src = self.buffer.bytes.as_ptr().offset(offset);
+
+            if changed_range.start + changed_range.length >= dst_len {
+                // For now a simple implementation suffices instead of having a mechanism that grows the target buffer,
+                // as that involves doing so on the GPU. Panic instead to make it easy to spot and prefer a cheaper,
+                // over-sized buffer.
+                panic!("dst is not large enough: len={} range_start={} range_length={}", dst_len, changed_range.start, changed_range.length);
+            }
             ptr::copy(src, dst.offset(offset), changed_range.length);
         }
 
@@ -844,7 +851,7 @@ mod svo_tests {
             ]),
         });
 
-        unsafe { svo.write_changes_to(buffer.as_mut_ptr(), true); };
+        unsafe { svo.write_changes_to(buffer.as_mut_ptr(), buffer.capacity(), true); };
         assert_eq!(buffer[..size], [
             vec![
                 // preamble

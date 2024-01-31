@@ -88,7 +88,7 @@ impl<T> Buffer<T> {
 /// CPU & GPU, look into `Fences` and `Memory Barriers`.
 pub struct MappedBuffer<T> {
     handle: GLuint,
-    size: usize,
+    len: usize,
     mapped_ptr: *mut T,
 }
 
@@ -115,13 +115,13 @@ impl<T> DerefMut for MappedBuffer<T> {
 }
 
 impl<T> MappedBuffer<T> {
-    pub fn new(size: usize) -> MappedBuffer<T> {
+    pub fn new(len: usize) -> MappedBuffer<T> {
         let mut handle = 0;
         let mapped_ptr;
         unsafe {
             gl::CreateBuffers(1, &mut handle);
 
-            let size_bytes = mem::size_of::<T>() * size;
+            let size_bytes = mem::size_of::<T>() * len;
             gl::NamedBufferStorage(
                 handle,
                 size_bytes as GLsizeiptr,
@@ -135,7 +135,7 @@ impl<T> MappedBuffer<T> {
                 gl::MAP_READ_BIT | gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
             ) as *mut T;
         }
-        MappedBuffer { handle, size, mapped_ptr }
+        MappedBuffer { handle, len, mapped_ptr }
     }
 
     pub fn bind_as_storage_buffer(&self, index: u32) {
@@ -146,14 +146,18 @@ impl<T> MappedBuffer<T> {
 
     #[allow(clippy::mut_from_ref)]
     pub fn as_slice_mut(&self) -> &mut [T] {
-        unsafe { std::slice::from_raw_parts_mut(self.mapped_ptr, self.size) }
+        unsafe { std::slice::from_raw_parts_mut(self.mapped_ptr, self.len) }
     }
 
     pub fn as_slice(&self) -> &[T] {
-        unsafe { std::slice::from_raw_parts(self.mapped_ptr, self.size) }
+        unsafe { std::slice::from_raw_parts(self.mapped_ptr, self.len) }
     }
 
     pub fn size_in_bytes(&self) -> usize {
-        mem::size_of::<T>() * self.size
+        mem::size_of::<T>() * self.len
+    }
+
+    pub fn len(&self) -> usize {
+        self.len
     }
 }
