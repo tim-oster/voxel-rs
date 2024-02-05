@@ -59,10 +59,10 @@ impl Gameplay {
         }
         if frame.is_cursor_grabbed() {
             self.handle_mouse_movement(frame, player);
+            self.handle_voxel_placement(frame, player, world);
         }
 
         self.handle_movement(frame, player);
-        self.handle_voxel_placement(frame, player, world);
     }
 
     pub fn handle_window_resize(&mut self, width: i32, height: i32) {

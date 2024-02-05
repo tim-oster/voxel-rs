@@ -26,9 +26,14 @@ dhat = "0.3.2"
 [dev-dependencies]
 mockall = "0.11.2"
 
+[build-dependencies]
+walkdir = "2.4.0"
+rustc-hash = "1.1.0"
+
 [profile.release-dhat]
 inherits = "release"
 debug = 1
 
 [features]
 dhat-heap = []
+bundle-assets = []

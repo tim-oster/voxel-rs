@@ -59,7 +59,7 @@ impl Game {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let world = World::new(Rc::clone(&job_system), 15);
+        let world = World::new(Rc::clone(&job_system), 20);
         let gameplay = Gameplay::new();
 
         Game {
@@ -176,7 +176,9 @@ impl State {
         let camera = &self.world.camera;
 
         imgui::Window::new("Debug")
-            .size([300.0, 100.0], Condition::FirstUseEver)
+            .position([8.0, 8.0], Condition::Once)
+            .size([400.0, 290.0], Condition::Once)
+            .collapsed(false, Condition::Once)
             .build(&frame.ui, || {
                 frame.ui.text(format!(
                     "fps: {}, frame: {:.2}ms, update: {:.2}ms",
@@ -287,7 +289,9 @@ impl State {
         }
 
         imgui::Window::new("Graphs")
-            .size([300.0, 100.0], Condition::FirstUseEver)
+            .position([frame.size.0 as f32 - 400.0 - 8.0, 8.0], Condition::Once)
+            .size([400.0, 170.0], Condition::Once)
+            .collapsed(false, Condition::Once)
             .build(&frame.ui, || {
                 self.plot_fps.render(&frame.ui, "fps");
                 self.plot_frame_time.render(&frame.ui, "frame time");

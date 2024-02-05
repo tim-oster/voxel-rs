@@ -76,6 +76,8 @@ pub struct RenderParams {
     pub aspect_ratio: f32,
     /// selected_voxel is the position of the voxel to be highlighted.
     pub selected_voxel: Option<Point3<f32>>,
+    /// render_shadows enables secondary ray casting to check for sun light occlusion.
+    pub render_shadows: bool,
 }
 
 impl Svo {
@@ -138,7 +140,9 @@ impl Svo {
 
             // wait for last draw call to finish so that updates and draws do not race and produce temporary "holes" in the world
             self.render_fence.borrow().wait();
-            svo.write_changes_to(self.world_buffer.offset(1), true);
+
+            let len = self.world_buffer.len() - 1;
+            svo.write_changes_to(self.world_buffer.offset(1), len, true);
 
             self.stats = Stats {
                 used_bytes: svo.size_in_bytes(),
@@ -165,6 +169,7 @@ impl Svo {
         self.world_shader.set_f32("u_fovy", params.fov_y_rad);
         self.world_shader.set_f32("u_aspect", params.aspect_ratio);
         self.world_shader.set_texture("u_texture", 0, &self.tex_array);
+        self.world_shader.set_i32("u_render_shadows", params.render_shadows as i32);
 
         let mut selected_block = Vector3::new(f32::NAN, f32::NAN, f32::NAN);
         if let Some(pos) = params.selected_voxel {
@@ -188,14 +193,14 @@ impl Svo {
         let task_count = batch.serialize_tasks(in_data);
 
         unsafe {
-            gl::MemoryBarrier(gl::BUFFER_UPDATE_BARRIER_BIT);
             gl::DispatchCompute(task_count as u32, 1, 1);
 
-            // memory barrier + sync fence necessary to ensure that persistently mapped buffer changes
-            // are loaded from the server (https://www.khronos.org/opengl/wiki/Buffer_Object#Persistent_mapping)
-            gl::MemoryBarrier(gl::CLIENT_MAPPED_BUFFER_BARRIER_BIT);
+            // memory barrier is not required because buffer is mapped with gl::MAP_COHERENT_BIT
+            // gl::MemoryBarrier(gl::CLIENT_MAPPED_BUFFER_BARRIER_BIT);
         }
 
+        // sync fence necessary to ensure that persistently mapped buffer changes are loaded from the server
+        // (https://www.khronos.org/opengl/wiki/Buffer_Object#Persistent_mapping)
         self.picker_fence.borrow_mut().place();
         self.picker_fence.borrow().wait();
 
@@ -300,6 +305,7 @@ mod svo_tests {
             fov_y_rad: 72.0f32.to_radians(),
             aspect_ratio: width as f32 / height as f32,
             selected_voxel: Some(Point3::new(1.0, 1.0, 3.0)),
+            render_shadows: true,
         });
         fb.unbind();
         gl_assert_no_error!();
