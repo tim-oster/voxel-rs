@@ -117,9 +117,7 @@ impl Svo {
     pub fn update(&mut self, world_center: &ChunkPos) -> Vec<BorrowedChunk> {
         if self.svo_coord_space.center != *world_center {
             self.svo_coord_space.center = *world_center;
-            self.has_changed = true;
-
-            Self::shift_chunks(&self.svo_coord_space, &mut self.leaf_ids, &mut self.world_svo);
+            self.on_coord_space_change();
         }
 
         let results = self.processor.get_results(50);
@@ -134,6 +132,11 @@ impl Svo {
         self.graphics_svo.update(&mut self.world_svo);
 
         chunks
+    }
+
+    fn on_coord_space_change(&mut self) {
+        self.has_changed = true;
+        Self::shift_chunks(&self.svo_coord_space, &mut self.leaf_ids, &mut self.world_svo);
     }
 
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
@@ -196,6 +199,11 @@ impl Svo {
         }
 
         chunks
+    }
+
+    pub fn set_radius(&mut self, radius: u32) {
+        self.svo_coord_space.dst = radius;
+        self.on_coord_space_change();
     }
 }
 

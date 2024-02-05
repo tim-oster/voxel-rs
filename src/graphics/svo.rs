@@ -76,6 +76,8 @@ pub struct RenderParams {
     pub aspect_ratio: f32,
     /// selected_voxel is the position of the voxel to be highlighted.
     pub selected_voxel: Option<Point3<f32>>,
+    /// render_shadows enables secondary ray casting to check for sun light occlusion.
+    pub render_shadows: bool,
 }
 
 impl Svo {
@@ -167,6 +169,7 @@ impl Svo {
         self.world_shader.set_f32("u_fovy", params.fov_y_rad);
         self.world_shader.set_f32("u_aspect", params.aspect_ratio);
         self.world_shader.set_texture("u_texture", 0, &self.tex_array);
+        self.world_shader.set_i32("u_render_shadows", params.render_shadows as i32);
 
         let mut selected_block = Vector3::new(f32::NAN, f32::NAN, f32::NAN);
         if let Some(pos) = params.selected_voxel {
@@ -302,6 +305,7 @@ mod svo_tests {
             fov_y_rad: 72.0f32.to_radians(),
             aspect_ratio: width as f32 / height as f32,
             selected_voxel: Some(Point3::new(1.0, 1.0, 3.0)),
+            render_shadows: true,
         });
         fb.unbind();
         gl_assert_no_error!();

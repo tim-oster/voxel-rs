@@ -34,10 +34,10 @@ impl Camera {
 
     pub fn update_projection(&mut self, fov_y_deg: f32, aspect_ratio: f32, near: f32, far: f32) {
         self.fov_y_deg = fov_y_deg;
-        self.projection = cgmath::perspective(cgmath::Deg(fov_y_deg), aspect_ratio, near, far);
         self.aspect_ratio = aspect_ratio;
         self.near = near;
         self.far = far;
+        self.projection = cgmath::perspective(cgmath::Deg(fov_y_deg), aspect_ratio, near, far);
     }
 
     pub fn right(&self) -> Vector3<f32> {
@@ -46,6 +46,9 @@ impl Camera {
 
     pub fn get_fov_y_deg(&self) -> f32 {
         self.fov_y_deg
+    }
+    pub fn set_fov_y_deg(&mut self, fov: f32) {
+        self.update_projection(fov, self.aspect_ratio, self.near, self.far);
     }
 
     pub fn get_projection_matrix(&self) -> &Matrix4<f32> {

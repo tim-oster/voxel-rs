@@ -41,6 +41,7 @@ pub struct World {
     pub selected_voxel: Option<Point3<f32>>,
     pub ambient_intensity: f32,
     pub sun_direction: Vector3<f32>,
+    pub render_shadows: bool,
 }
 
 impl World {
@@ -86,6 +87,7 @@ impl World {
             selected_voxel: None,
             ambient_intensity: 0.3,
             sun_direction: Vector3::new(-1.0, -1.0, -1.0).normalize(),
+            render_shadows: true,
         }
     }
 
@@ -217,6 +219,7 @@ impl World {
             fov_y_rad: self.camera.get_fov_y_deg().to_radians(),
             aspect_ratio,
             selected_voxel: self.selected_voxel,
+            render_shadows: self.render_shadows,
         });
     }
 
@@ -310,6 +313,72 @@ impl World {
                 };
                 display_noise("continentalness", &mut self.world_generator_cfg.continentalness);
                 display_noise("erosion", &mut self.world_generator_cfg.erosion);
+            });
+
+        imgui::Window::new("Settings")
+            .position([frame.size.0 as f32 - 400.0 - 8.0, 170.0 + 2.0 * 8.0], Condition::Once)
+            .size([400.0, 320.0], Condition::Once)
+            .collapsed(true, Condition::Once)
+            .build(&frame.ui, || {
+                let old_rd = self.chunk_loader.get_radius() as i32;
+                let mut new_rd = old_rd;
+                frame.ui.input_int("render distance", &mut new_rd).build();
+                new_rd = new_rd.clamp(1, 50);
+                if new_rd != old_rd {
+                    self.chunk_loader.set_radius(new_rd as u32);
+                    self.world_svo.set_radius(new_rd as u32);
+                }
+
+                let old_fov = self.camera.get_fov_y_deg();
+                let mut new_fov = old_fov;
+                frame.ui.input_float("FOV", &mut new_fov).step(2.0).build();
+                new_fov = new_fov.clamp(1.0, 130.0);
+                if new_fov != old_fov {
+                    self.camera.set_fov_y_deg(new_fov);
+                }
+
+                frame.ui.checkbox("render shadows", &mut self.render_shadows);
+
+                frame.ui.new_line();
+                frame.ui.separator();
+                frame.ui.new_line();
+
+                fn render_control_list(ui: &imgui::Ui, header: &str, controls: &[&str]) {
+                    ui.text(header);
+                    ui.separator();
+
+                    ui.columns(2, header, true);
+
+                    for (i, c) in controls.iter().enumerate() {
+                        ui.text(c);
+                        if i == (controls.len() - 1) / 2 {
+                            ui.next_column();
+                        }
+                    }
+
+                    ui.columns(1, "", false);
+                }
+
+                render_control_list(&frame.ui, "Debug Controls", &[
+                    "P: toggle debug UI",
+                    "E: set sun to view dir",
+                    "R: reload assets",
+                    "T: toggle mouse grab",
+                    "Esc: close game"
+                ]);
+
+                frame.ui.new_line();
+
+                render_control_list(&frame.ui, "Game Controls", &[
+                    "L Click: break block",
+                    "R Click: place block",
+                    "M Click: select block",
+                    "0..9: select from item bar",
+                    "WASD: movement",
+                    "F: toggle fly mode",
+                    "LShift: sprint / descend",
+                    "Space: jump / ascend",
+                ]);
             });
     }
 }
