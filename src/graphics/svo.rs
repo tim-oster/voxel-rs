@@ -190,14 +190,14 @@ impl Svo {
         let task_count = batch.serialize_tasks(in_data);
 
         unsafe {
-            gl::MemoryBarrier(gl::BUFFER_UPDATE_BARRIER_BIT);
             gl::DispatchCompute(task_count as u32, 1, 1);
 
-            // memory barrier + sync fence necessary to ensure that persistently mapped buffer changes
-            // are loaded from the server (https://www.khronos.org/opengl/wiki/Buffer_Object#Persistent_mapping)
-            gl::MemoryBarrier(gl::CLIENT_MAPPED_BUFFER_BARRIER_BIT);
+            // memory barrier is not required because buffer is mapped with gl::MAP_COHERENT_BIT
+            // gl::MemoryBarrier(gl::CLIENT_MAPPED_BUFFER_BARRIER_BIT);
         }
 
+        // sync fence necessary to ensure that persistently mapped buffer changes are loaded from the server
+        // (https://www.khronos.org/opengl/wiki/Buffer_Object#Persistent_mapping)
         self.picker_fence.borrow_mut().place();
         self.picker_fence.borrow().wait();
 
