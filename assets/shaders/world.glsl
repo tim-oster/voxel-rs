@@ -32,6 +32,7 @@ uniform float u_ambient;// ambient light intensity - to fake global illumination
 uniform vec3 u_light_dir;// sun light direction
 uniform vec3 u_cam_pos;// world space position of the camera
 uniform bool u_render_shadows;// enables secondary ray casting
+uniform float u_shadow_distance;// distance until which shadows are rendered
 
 // block highlighting
 uniform vec3 u_highlight_pos;// world space position of the block the player is highlighting
@@ -91,7 +92,7 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
     // Calcualte shadow by casting another ray from the previous hit location towards the sun. Skip if the hit is too
     // far away.
     float shadow = 1;
-    if (u_render_shadows && res.t < 500) {
+    if (u_render_shadows && res.t < u_shadow_distance) {
         OctreeResult shadow_res;
         intersect_octree(res.pos + normal*0.001, -u_light_dir, -1, true, u_texture, shadow_res);
         shadow = shadow_res.t < 0 ? 1.0 : 0.0;
