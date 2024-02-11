@@ -18,6 +18,9 @@ void main() {
 
 #include "svo.glsl"
 
+const float PI = 3.141592;
+const float HALF_PI = PI / 2.0;
+
 in vec2 v_uv;
 
 layout (location = 0) out vec4 color;
@@ -37,9 +40,11 @@ uniform float u_shadow_distance;// distance until which shadows are rendered
 // block highlighting
 uniform vec3 u_highlight_pos;// world space position of the block the player is highlighting
 
-vec4 trace_ray(vec3 ro, vec3 rd) {
+vec4 trace_ray(vec3 ro, vec3 rd, out bool hit) {
     OctreeResult res;
     intersect_octree(ro, rd, -1, true, u_texture, res);
+
+    hit = res.t != -1;
 
     if (res.t < 0) {
         // return early on no hit
@@ -104,6 +109,24 @@ vec4 trace_ray(vec3 ro, vec3 rd) {
     return res.color;
 }
 
+vec3 get_sky_color(vec3 rd) {
+    const vec3 SKY_COLOR = vec3(135.0/255.0, 206.0/255.0, 235.0/255.0);// hex: #87CEEB
+    const vec3 HORIZON_COLOR = mix(vec3(1), SKY_COLOR, 0.3);
+
+    // get angle between xz plane and look dir
+    vec3 p = normalize(vec3(rd.x, 0, rd.z));
+    float a = acos(dot(rd, p) / (abs(length(rd))) * abs(length(p)));
+
+    // calcuate linear gradient based on angle
+    float grad = a / HALF_PI;
+
+    // use easing function to skew white part towards horizon
+    grad = 1 - pow(1 - grad, 3);
+
+    // interpolate between horizon and sky color
+    return mix(HORIZON_COLOR, SKY_COLOR, grad);
+}
+
 void main() {
     // convert uv from [0;1] to [-1;1], apply screen aspect ratio & vertical FoV
     vec2 uv = v_uv * 2.0 - 1.0;
@@ -123,5 +146,12 @@ void main() {
 
     // cast ray from origin to look_at
     vec3 rd = normalize(look_at - ro);
-    color = trace_ray(ro, rd);
+    bool hit = false;
+    color = trace_ray(ro, rd, hit);
+
+    // calculate sky color if nothing was hit
+    if (!hit) {
+        vec3 sky = get_sky_color(rd);
+        color = vec4(sky, 1.0);
+    }
 }
