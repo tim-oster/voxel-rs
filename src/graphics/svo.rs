@@ -78,6 +78,8 @@ pub struct RenderParams {
     pub selected_voxel: Option<Point3<f32>>,
     /// render_shadows enables secondary ray casting to check for sun light occlusion.
     pub render_shadows: bool,
+    /// shadow_distance defines the maximum distance to the primary hit, until which secondary rays are cast.
+    pub shadow_distance: f32,
 }
 
 impl Svo {
@@ -170,6 +172,7 @@ impl Svo {
         self.world_shader.set_f32("u_aspect", params.aspect_ratio);
         self.world_shader.set_texture("u_texture", 0, &self.tex_array);
         self.world_shader.set_i32("u_render_shadows", params.render_shadows as i32);
+        self.world_shader.set_f32("u_shadow_distance", params.shadow_distance);
 
         let mut selected_block = Vector3::new(f32::NAN, f32::NAN, f32::NAN);
         if let Some(pos) = params.selected_voxel {
@@ -306,6 +309,7 @@ mod svo_tests {
             aspect_ratio: width as f32 / height as f32,
             selected_voxel: Some(Point3::new(1.0, 1.0, 3.0)),
             render_shadows: true,
+            shadow_distance: 500.0,
         });
         fb.unbind();
         gl_assert_no_error!();

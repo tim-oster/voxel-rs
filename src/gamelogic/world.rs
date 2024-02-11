@@ -42,6 +42,7 @@ pub struct World {
     pub ambient_intensity: f32,
     pub sun_direction: Vector3<f32>,
     pub render_shadows: bool,
+    pub shadow_distance: f32,
 }
 
 impl World {
@@ -88,6 +89,7 @@ impl World {
             ambient_intensity: 0.3,
             sun_direction: Vector3::new(-1.0, -1.0, -1.0).normalize(),
             render_shadows: true,
+            shadow_distance: 500.0,
         }
     }
 
@@ -220,6 +222,7 @@ impl World {
             aspect_ratio,
             selected_voxel: self.selected_voxel,
             render_shadows: self.render_shadows,
+            shadow_distance: self.shadow_distance,
         });
     }
 
@@ -338,6 +341,7 @@ impl World {
                 }
 
                 frame.ui.checkbox("render shadows", &mut self.render_shadows);
+                frame.ui.input_float("shadow distance", &mut self.shadow_distance).step(1.0).build();
 
                 frame.ui.new_line();
                 frame.ui.separator();
