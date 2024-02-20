@@ -1,4 +1,10 @@
+use std::collections::VecDeque;
+use std::sync::{Arc, RwLock};
+use std::thread;
+use std::time::Duration;
+
 use noise::{NoiseFn, Perlin};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::gamelogic::content::blocks;
 use crate::systems::worldgen::ChunkGenerator;
@@ -126,9 +132,12 @@ mod noise_tests {
     }
 }
 
+/// Generator implements a world generator that uses cfg to generate a perlin noise heightmap and fills chunks with
+/// blocks accordingly.
 pub struct Generator {
-    perlin: Perlin,
     cfg: Config,
+    perlin: Perlin,
+    cache: RwLock<GeneratorCache>,
 }
 
 #[derive(Clone)]
@@ -144,59 +153,209 @@ pub struct Config {
     pub erosion: Noise,
 }
 
+struct GeneratorCache {
+    /// columns caches the terrain heightmap per (x, z) chunk column to reuse the noise calculation for every chunk
+    /// along the y-axis for the same column.
+    columns: FxHashMap<(i32, i32), Arc<ChunkColumn>>,
+    /// inflight is the set of columns that are currently calculated.
+    inflight: FxHashSet<(i32, i32)>,
+    /// keys_ordered is a list of generated chunk column keys, where the first element is the oldest.
+    keys_ordered: VecDeque<(i32, i32)>,
+}
+
+pub struct ChunkColumn {
+    pub min_y: i32,
+    pub max_y: i32,
+    pub height_map: [i16; 32 * 32],
+}
+
+impl ChunkColumn {
+    fn contains_chunk(&self, chunk_y: i32) -> bool {
+        self.min_y <= (chunk_y + 1) * 32 && self.max_y >= chunk_y * 32
+    }
+}
+
 impl Generator {
     pub fn new(seed: u32, cfg: Config) -> Generator {
-        let perlin = Perlin::new(seed);
-
-        Generator { perlin, cfg }
+        Generator {
+            cfg,
+            perlin: Perlin::new(seed),
+            cache: RwLock::new(GeneratorCache {
+                columns: FxHashMap::default(),
+                inflight: FxHashSet::default(),
+                keys_ordered: VecDeque::new(),
+            }),
+        }
     }
 
-    fn get_height_at(&self, pos: &ChunkPos, x: i32, z: i32) -> i32 {
-        let noise_x = pos.x as f64 * 32.0 + x as f64;
-        let noise_z = pos.z as f64 * 32.0 + z as f64;
+    fn get_height_at(&self, x: i32, z: i32) -> i32 {
+        let noise_x = x as f64;
+        let noise_z = z as f64;
 
         let height = self.cfg.continentalness.get(&self.perlin, noise_x, noise_z);
         let height = height + self.cfg.erosion.get(&self.perlin, noise_x, noise_z);
 
         height as i32
     }
-}
 
-// TODO calculate and cache heightmap per xz coord. get external notification form chunk loader when cache can be discarded
+    fn get_or_generate_chunk_column(&self, col_x: i32, col_z: i32) -> Arc<ChunkColumn> {
+        // fast path
+        let column = {
+            let cache = self.cache.read().unwrap();
+            cache.columns.get(&(col_x, col_z)).cloned()
+        };
+        if let Some(column) = column {
+            return column;
+        }
+
+        // slow path
+        let mut cache = self.cache.write().unwrap();
+        if let Some(column) = cache.columns.get(&(col_x, col_z)) {
+            // check if column already exists - in case of racing threads that tried to acquire the write lock
+            return Arc::clone(column);
+        }
+
+        // check if chunk column generation is already inflight
+        if cache.inflight.contains(&(col_x, col_z)) {
+            drop(cache); // release write lock - spin loop only needs to reacquire a read lock
+
+            loop {
+                // acquire read lock and check if column is set
+                let column = {
+                    let cache = self.cache.read().unwrap();
+                    cache.columns.get(&(col_x, col_z)).cloned()
+                };
+                if let Some(column) = column {
+                    return column;
+                }
+
+                // if not, sleep and retry
+                thread::sleep(Duration::from_millis(5));
+            }
+        }
+
+        // mark column generation as inflight
+        cache.inflight.insert((col_x, col_z));
+        cache.keys_ordered.push_back((col_x, col_z));
+        drop(cache); // release write lock for column generation
+
+        let column = self.generate_chunk_column(col_x, col_z);
+        let column = Arc::new(column);
+
+        let mut cache = self.cache.write().unwrap();
+        cache.columns.insert((col_x, col_z), Arc::clone(&column));
+        cache.inflight.remove(&(col_x, col_z));
+
+        // clean up old columns
+        if cache.keys_ordered.len() > 100 {
+            let key = cache.keys_ordered.pop_front().unwrap();
+            cache.columns.remove(&key);
+        }
+
+        column
+    }
+
+    fn generate_chunk_column(&self, col_x: i32, col_z: i32) -> ChunkColumn {
+        let mut min_y = i32::MAX;
+        let mut max_y = i32::MIN;
+        let mut height_map = [0; 32 * 32];
+
+        for z in 0..32 {
+            for x in 0..32 {
+                let y = self.get_height_at(col_x * 32 + x, col_z * 32 + z);
+                min_y = min_y.min(y);
+                max_y = max_y.max(y);
+                height_map[(x * 32 + z) as usize] = y as i16;
+            }
+        }
+
+        ChunkColumn { min_y, max_y, height_map }
+    }
+}
 
 impl ChunkGenerator for Generator {
     fn is_interested_in(&self, pos: &ChunkPos) -> bool {
-        let mut min_y = i32::MAX;
-        let mut max_y = i32::MIN;
-
-        // TODO do not run this twice
-        for z in 0..32 {
-            for x in 0..32 {
-                let height = self.get_height_at(pos, x, z);
-                min_y = min_y.min(height);
-                max_y = max_y.max(height);
-            }
-        }
-
-        min_y <= (pos.y + 1) * 32 && max_y >= pos.y * 32
+        let col = self.get_or_generate_chunk_column(pos.x, pos.z);
+        col.contains_chunk(pos.y)
     }
 
     fn generate_chunk(&self, chunk: &mut Chunk) {
+        let col = self.get_or_generate_chunk_column(chunk.pos.x, chunk.pos.z);
+
         for z in 0..32 {
             for x in 0..32 {
-                let height = self.get_height_at(&chunk.pos, x, z);
+                let height = col.height_map[x * 32 + z] as i32;
+                let height = (height - chunk.pos.y * 32).min(31);
 
-                for y in 0..32 {
-                    if chunk.pos.y * 32 + y <= height {
-                        let mut block = blocks::STONE;
-                        if chunk.pos.y * 32 + y >= height - 3 { block = blocks::DIRT; }
-                        if chunk.pos.y * 32 + y >= height { block = blocks::GRASS; }
+                for y in 0..=height {
+                    let mut block = blocks::STONE;
+                    if y >= height - 3 { block = blocks::DIRT; }
+                    if y >= height { block = blocks::GRASS; }
 
-                        chunk.set_block(x as u32, y as u32, z as u32, block);
-                        continue;
-                    }
+                    chunk.set_block(x as u32, y as u32, z as u32, block);
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod benches {
+    use test::Bencher;
+
+    use crate::gamelogic::worldgen;
+    use crate::gamelogic::worldgen::{Generator, Noise, SplinePoint};
+    use crate::systems::worldgen::ChunkGenerator;
+    use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
+
+    //noinspection DuplicatedCode
+    #[bench]
+    fn some_bench(b: &mut Bencher) {
+        // default worldgen configuration for testing
+        let cfg = worldgen::Config {
+            sea_level: 70,
+            continentalness: Noise {
+                frequency: 0.001,
+                octaves: 3,
+                spline_points: vec![
+                    SplinePoint { x: -1.0, y: 20.0 },
+                    SplinePoint { x: 0.4, y: 50.0 },
+                    SplinePoint { x: 0.6, y: 70.0 },
+                    SplinePoint { x: 0.8, y: 120.0 },
+                    SplinePoint { x: 0.9, y: 190.0 },
+                    SplinePoint { x: 1.0, y: 200.0 },
+                ],
+            },
+            erosion: Noise {
+                frequency: 0.01,
+                octaves: 4,
+                spline_points: vec![
+                    SplinePoint { x: -1.0, y: -10.0 },
+                    SplinePoint { x: 1.0, y: 4.0 },
+                ],
+            },
+        };
+        let gen = Generator::new(1, cfg);
+        let alloc = ChunkStorageAllocator::new();
+        let pos = ChunkPos::new(-1, 1, 5); // default, non-empty chunk
+
+        let _profiler = dhat::Profiler::builder().testing().build();
+
+        // iter code is similar to crate::systems::worldgen::Generator::enqueue_chunk
+        b.iter(|| {
+            if !gen.is_interested_in(&pos) {
+                return None;
+            }
+
+            let mut chunk = Chunk::new(pos, 5, alloc.allocate());
+            gen.generate_chunk(&mut chunk);
+
+            chunk.storage.as_mut().unwrap().compact();
+
+            Some(chunk)
+        });
+
+        let stats = dhat::HeapStats::get();
+        println!("{:?}", stats);
     }
 }

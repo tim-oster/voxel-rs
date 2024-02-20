@@ -1,9 +1,10 @@
-#![feature(allocator_api)]
+#![feature(allocator_api, test)]
 #![allow(dead_code, unused_variables)]
 
 extern crate gl;
 #[macro_use]
 extern crate memoffset;
+extern crate test;
 
 use crate::gamelogic::game::Game;
 
