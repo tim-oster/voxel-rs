@@ -128,26 +128,26 @@ impl<T, A: Allocator> Octree<T, A> {
 
         let size = 2f32.pow(depth as i32) as u32;
 
-        if let Some(result) = self.construct_octants_with_impl(size, 0, Position(0, 0, 0), &f) {
+        if let Some(result) = self.construct_octants_with_impl(size, Position(0, 0, 0), &f) {
             self.root = Some(result);
             self.depth = depth;
         }
     }
 
-    fn construct_octants_with_impl<F: Fn(Position) -> Option<T>>(&mut self, size: u32, index: usize, pos: Position, f: &F) -> Option<OctantId> {
+    fn construct_octants_with_impl<F: Fn(Position) -> Option<T>>(&mut self, size: u32, pos: Position, f: &F) -> Option<OctantId> {
         let size = size / 2;
 
         let mut new_parent = None;
 
         for i in 0u8..8 {
             let child_pos = Position(
-                pos.0 + size * ((i as u32 >> 0) & 1),
+                pos.0 + size * ((i as u32) & 1),
                 pos.1 + size * ((i as u32 >> 1) & 1),
                 pos.2 + size * ((i as u32 >> 2) & 1),
             );
 
             if size > 1 {
-                let child_id = self.construct_octants_with_impl(size, index, child_pos, f);
+                let child_id = self.construct_octants_with_impl(size, child_pos, f);
                 let Some(child_id) = child_id else {
                     continue;
                 };
