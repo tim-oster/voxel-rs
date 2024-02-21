@@ -120,6 +120,14 @@ impl Chunk {
             self.storage.as_mut().unwrap().set_leaf(Position(x, y, z), block);
         }
     }
+
+    /// Iterates through the whole chunk calling `f` for each block and sets it to the returned value. Any previous
+    /// block information is cleared.
+    pub fn fill_with<F: Fn(u32, u32, u32) -> Option<BlockId>>(&mut self, f: F) {
+        assert!(self.storage.is_some());
+
+        self.storage.as_mut().unwrap().construct_octants_with(5, |pos| f(pos.0, pos.1, pos.2));
+    }
 }
 
 // -------------------------------------------------------------------------------------------------

@@ -43,10 +43,6 @@ impl Generator {
             let mut chunk = Chunk::new(pos, lod, alloc.allocate());
             gen.generate_chunk(&mut chunk);
 
-            // try to compact the storage since it is cheap to do in a separate thread and might
-            // simplify the SVO to increase performance during raycast
-            chunk.storage.as_mut().unwrap().compact();
-
             Some(chunk)
         })
     }

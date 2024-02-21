@@ -120,6 +120,56 @@ impl<T, A: Allocator> Octree<T, A> {
         unreachable!("could not reach end of tree");
     }
 
+    /// Constructs the octree anew by building the deepest octants at `depth` first and filling them with leaf values
+    /// returned by `f`. It then merges those octants until the root octant is built. If no leaf values are returned
+    /// for an octant, that branch is skipped. The resulting octree is hence already optimized.
+    pub fn construct_octants_with<F: Fn(Position) -> Option<T>>(&mut self, depth: u8, f: F) {
+        self.reset();
+
+        let size = 2f32.pow(depth as i32) as u32;
+
+        if let Some(result) = self.construct_octants_with_impl(size, 0, Position(0, 0, 0), &f) {
+            self.root = Some(result);
+            self.depth = depth;
+        }
+    }
+
+    fn construct_octants_with_impl<F: Fn(Position) -> Option<T>>(&mut self, size: u32, index: usize, pos: Position, f: &F) -> Option<OctantId> {
+        let size = size / 2;
+
+        let mut new_parent = None;
+
+        for i in 0u8..8 {
+            let child_pos = Position(
+                pos.0 + size * ((i as u32 >> 0) & 1),
+                pos.1 + size * ((i as u32 >> 1) & 1),
+                pos.2 + size * ((i as u32 >> 2) & 1),
+            );
+
+            if size > 1 {
+                let child_id = self.construct_octants_with_impl(size, index, child_pos, f);
+                let Some(child_id) = child_id else {
+                    continue;
+                };
+
+                let parent_id = new_parent.get_or_insert_with(|| self.new_octant(None));
+                self.octants[*parent_id as usize].set_child(i, Child::Octant(child_id));
+
+                let child = &mut self.octants[child_id as usize];
+                child.parent = Some(*parent_id);
+
+                continue;
+            }
+
+            if let Some(value) = f(child_pos) {
+                let parent_id = new_parent.get_or_insert_with(|| self.new_octant(None));
+                self.octants[*parent_id as usize].set_child(i, Child::Leaf(value));
+            }
+        }
+
+        new_parent
+    }
+
     /// Moves the leaf at `leaf_id` to the given position. The original leaf will be set to an
     /// empty octant. It returns the new LeafId at the given position, as well as the overridden
     /// leaf value at the target position, if any was present.
@@ -726,6 +776,52 @@ mod tests {
             root: Some(1),
             depth: 2,
         });
+    }
+
+    /// Tests that the iterator constructor works and produced optimized octrees.
+    #[test]
+    fn octree_construct_octants() {
+        let mut octree = Octree::new();
+
+        // produce previous state to assert that it is cleared
+        octree.set_leaf(Position(1, 1, 3), 2);
+
+        // ensure that empty octree is produced if no leaf value is returned
+        octree.construct_octants_with(2, |pos| Option::None);
+        assert_eq!(octree, Octree {
+            octants: vec![],
+            free_list: vec![],
+            root: Option::None,
+            depth: 0,
+        });
+
+        // use again but this time actually set one leaf
+        octree.construct_octants_with(2, |pos| {
+            if pos.0 == 2 && pos.1 == 2 && pos.2 == 2 {
+                return Some(1);
+            }
+            Option::None
+        });
+        assert_eq!(octree, Octree {
+            octants: vec![
+                Octant {
+                    parent: Some(1),
+                    children: [Leaf(1), None, None, None, None, None, None, None],
+                    children_count: 1,
+                },
+                Octant {
+                    parent: Option::None,
+                    children: [None, None, None, None, None, None, None, Octant(0)],
+                    children_count: 1,
+                },
+            ],
+            free_list: vec![],
+            root: Some(1),
+            depth: 2,
+        });
+
+        assert_eq!(octree.get_leaf(Position(2, 2, 2)), Some(&1));
+        assert_eq!(octree.get_leaf(Position(1, 1, 1)), Option::None);
     }
 
     /// Tests that compacting an octree after removing all leaves works as expected.
