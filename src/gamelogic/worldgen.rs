@@ -209,50 +209,62 @@ impl Generator {
         }
 
         // slow path
-        let mut cache = self.cache.write().unwrap();
-        if let Some(column) = cache.columns.get(&(col_x, col_z)) {
-            // check if column already exists - in case of racing threads that tried to acquire the write lock
-            return Arc::clone(column);
-        }
-
-        // check if chunk column generation is already inflight
-        if cache.inflight.contains(&(col_x, col_z)) {
-            drop(cache); // release write lock - spin loop only needs to reacquire a read lock
-
-            loop {
-                // acquire read lock and check if column is set
-                let column = {
-                    let cache = self.cache.read().unwrap();
-                    cache.columns.get(&(col_x, col_z)).cloned()
-                };
-                if let Some(column) = column {
-                    return column;
-                }
-
-                // if not, sleep and retry
-                thread::sleep(Duration::from_millis(5));
+        'retry: loop {
+            let mut cache = self.cache.write().unwrap();
+            if let Some(column) = cache.columns.get(&(col_x, col_z)) {
+                // check if column already exists - in case of racing threads that tried to acquire the write lock
+                return Arc::clone(column);
             }
+
+            // check if chunk column generation is already inflight
+            if cache.inflight.contains(&(col_x, col_z)) {
+                drop(cache); // release write lock - spin loop only needs to reacquire a read lock
+
+                loop {
+                    // acquire read lock and check if column is set
+                    let (column, still_inflight) = {
+                        let cache = self.cache.read().unwrap();
+                        let column = cache.columns.get(&(col_x, col_z)).cloned();
+                        let still_inflight = cache.inflight.contains(&(col_x, col_z));
+                        (column, still_inflight)
+                    };
+                    if let Some(column) = column {
+                        return column;
+                    }
+
+                    if !still_inflight {
+                        // This can occur if the spin lock is active for too long and another thread has reached the
+                        // threshold of columns to keep in the cache and removes the cached column before the spin loop
+                        // can pick it up. Since the write lock is no longer acquired, jump back to the beginning of the
+                        // slow path and try to acquire the write lock again and repeat the process.
+                        continue 'retry;
+                    }
+
+                    // if not, sleep and retry
+                    thread::sleep(Duration::from_millis(5));
+                }
+            }
+
+            // mark column generation as inflight
+            cache.inflight.insert((col_x, col_z));
+            cache.keys_ordered.push_back((col_x, col_z));
+            drop(cache); // release write lock for column generation
+
+            let column = self.generate_chunk_column(col_x, col_z);
+            let column = Arc::new(column);
+
+            let mut cache = self.cache.write().unwrap();
+            cache.columns.insert((col_x, col_z), Arc::clone(&column));
+            cache.inflight.remove(&(col_x, col_z));
+
+            // clean up old columns
+            if cache.keys_ordered.len() > 500 {
+                let key = cache.keys_ordered.pop_front().unwrap();
+                cache.columns.remove(&key);
+            }
+
+            return column;
         }
-
-        // mark column generation as inflight
-        cache.inflight.insert((col_x, col_z));
-        cache.keys_ordered.push_back((col_x, col_z));
-        drop(cache); // release write lock for column generation
-
-        let column = self.generate_chunk_column(col_x, col_z);
-        let column = Arc::new(column);
-
-        let mut cache = self.cache.write().unwrap();
-        cache.columns.insert((col_x, col_z), Arc::clone(&column));
-        cache.inflight.remove(&(col_x, col_z));
-
-        // clean up old columns
-        if cache.keys_ordered.len() > 100 {
-            let key = cache.keys_ordered.pop_front().unwrap();
-            cache.columns.remove(&key);
-        }
-
-        column
     }
 
     fn generate_chunk_column(&self, col_x: i32, col_z: i32) -> ChunkColumn {
