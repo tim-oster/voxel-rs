@@ -1,8 +1,6 @@
 use std::cell::RefCell;
 
 use cgmath::{InnerSpace, Point3, Vector3};
-#[cfg(test)]
-use mockall::automock;
 
 use crate::graphics::svo::Svo;
 use crate::graphics::svo_picker::{Aabb, AabbResult, PickerBatch, PickerBatchResult};
@@ -87,7 +85,6 @@ impl AABBDef {
     }
 }
 
-#[cfg_attr(test, automock)]
 pub trait Raycaster {
     fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult);
 }
@@ -219,10 +216,35 @@ mod tests {
     use std::vec;
 
     use cgmath::{Point3, Vector3, Zero};
-    use mockall::predicate::eq;
 
     use crate::graphics::svo_picker::{Aabb, AabbResult, PickerBatch, PickerBatchResult};
-    use crate::systems::physics::{AABBDef, Entity, EntityCapabilities, EntityState, MockRaycaster, Physics};
+    use crate::systems::physics::{AABBDef, Entity, EntityCapabilities, EntityState, Physics, Raycaster};
+
+    struct MockRaycaster {
+        call: Option<(PickerBatch, Box<dyn Fn(&mut PickerBatchResult) + 'static>)>,
+    }
+
+    impl MockRaycaster {
+        fn new() -> Self {
+            Self {
+                call: None,
+            }
+        }
+
+        fn on<F: Fn(&mut PickerBatchResult) + 'static>(&mut self, expected_input: PickerBatch, f: F) {
+            self.call = Some((expected_input, Box::new(f)));
+        }
+    }
+
+    impl Raycaster for MockRaycaster {
+        fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult) {
+            assert!(self.call.is_some());
+
+            let call = self.call.as_ref().unwrap();
+            assert_eq!(batch, &call.0);
+            (call.1)(result);
+        }
+    }
 
     /// Asserts that the single entity implementation works. All edge cases are covered by the test for step_many.
     #[test]
@@ -245,10 +267,7 @@ mod tests {
         expected_batch.aabbs.push(Aabb::new(e.position, e.aabb_def.offset, e.aabb_def.extents));
 
         let mut mock = MockRaycaster::new();
-        mock.expect_raycast()
-            .with(eq(expected_batch), eq(PickerBatchResult::new()))
-            .times(1)
-            .returning(move |_, dst| *dst = PickerBatchResult { rays: Vec::new(), aabbs: vec![AabbResult::default()] });
+        mock.on(expected_batch, |dst| *dst = PickerBatchResult { rays: Vec::new(), aabbs: vec![AabbResult::default()] });
 
         let physics = Physics::new();
         physics.step(1.0, &mock, &mut e);
@@ -461,10 +480,7 @@ mod tests {
         }
 
         let mut mock = MockRaycaster::new();
-        mock.expect_raycast()
-            .with(eq(expected_batch), eq(PickerBatchResult::new()))
-            .times(1)
-            .returning(move |_, dst| *dst = PickerBatchResult { rays: Vec::new(), aabbs: aabb_results.clone() });
+        mock.on(expected_batch, move |dst| *dst = PickerBatchResult { rays: Vec::new(), aabbs: aabb_results.clone() });
 
         let physics = Physics::new();
         physics.step_many(1.0, &mock, &mut entities);
