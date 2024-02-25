@@ -20,8 +20,8 @@ pub struct Generator {
 }
 
 impl Generator {
-    pub fn new(job_system: Rc<JobSystem>, storage_allocator: Arc<ChunkStorageAllocator>, chunk_generator: impl ChunkGenerator + Send + Sync + 'static) -> Generator {
-        Generator {
+    pub fn new(job_system: Rc<JobSystem>, storage_allocator: Arc<ChunkStorageAllocator>, chunk_generator: impl ChunkGenerator + Send + Sync + 'static) -> Self {
+        Self {
             processor: ChunkProcessor::new(job_system),
             storage_allocator,
             gen: Arc::new(chunk_generator),
@@ -30,7 +30,7 @@ impl Generator {
 
     /// Enqueues a position for a chunk to be generated. The `lod` will be kept for the generated
     /// chunk. If the underlying chunk generator does not indicate interest in the chunk, no chunk
-    /// will be allocated! Use get_generated_chunks to retrieve generated chunks.
+    /// will be allocated! Use `get_generated_chunks` to retrieve generated chunks.
     pub fn enqueue_chunk(&mut self, pos: ChunkPos, lod: u8) {
         let alloc = self.storage_allocator.clone();
         let gen = Arc::clone(&self.gen);
@@ -44,7 +44,7 @@ impl Generator {
             gen.generate_chunk(&mut chunk);
 
             Some(chunk)
-        })
+        });
     }
 
     /// Allows removing the enqueued generation job, if it has not started yet. This will

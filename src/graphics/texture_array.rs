@@ -1,9 +1,8 @@
 #![allow(dead_code)]
 
-use std::ffi::c_void;
 use std::io;
 
-use gl::types::*;
+use gl::types::{GLenum, GLint, GLuint};
 use image::{GenericImageView, ImageError, ImageFormat};
 use rustc_hash::FxHashMap;
 
@@ -20,13 +19,13 @@ pub enum TextureArrayError {
 
 impl From<io::Error> for TextureArrayError {
     fn from(err: io::Error) -> Self {
-        TextureArrayError::Io(err)
+        Self::Io(err)
     }
 }
 
 impl From<ImageError> for TextureArrayError {
     fn from(err: ImageError) -> Self {
-        TextureArrayError::ImageError(err)
+        Self::ImageError(err)
     }
 }
 
@@ -37,8 +36,8 @@ enum ImageContent {
     RGB8(u32, u32, Vec<u8>),
 }
 
-/// TextureArrayBuilder allows for combining multiple ImageContent values into one texture array.
-/// The first ImageContent object decides the resolution of the texture array. All other images
+/// `TextureArrayBuilder` allows for combining multiple `ImageContent` values into one texture array.
+/// The first `ImageContent` object decides the resolution of the texture array. All other images
 /// must have the same dimensions. Adding a new image requires specifying a unique name which
 /// can later be used, to lookup the texture's index in the array.
 pub struct TextureArrayBuilder {
@@ -49,8 +48,8 @@ pub struct TextureArrayBuilder {
 }
 
 impl TextureArrayBuilder {
-    pub fn new(mip_levels: u8, max_anisotropy: f32) -> TextureArrayBuilder {
-        TextureArrayBuilder {
+    pub fn new(mip_levels: u8, max_anisotropy: f32) -> Self {
+        Self {
             mip_levels,
             max_anisotropy,
             textures: FxHashMap::default(),
@@ -58,15 +57,15 @@ impl TextureArrayBuilder {
         }
     }
 
-    pub fn add_file(&mut self, name: &str, path: &str) -> Result<&mut TextureArrayBuilder, TextureArrayError> {
+    pub fn add_file(&mut self, name: &str, path: &str) -> Result<&mut Self, TextureArrayError> {
         self.register_texture(name.to_owned())?;
         self.content.push(ImageContent::File(path.to_owned()));
         Ok(self)
     }
 
-    pub fn add_rgba8(&mut self, name: &str, w: u32, h: u32, bytes: Vec<u8>) -> Result<&mut TextureArrayBuilder, TextureArrayError> {
+    pub fn add_rgba8(&mut self, name: &str, w: u32, h: u32, bytes: Vec<u8>) -> Result<&mut Self, TextureArrayError> {
         let mut bytes = bytes;
-        TextureArrayBuilder::flip_image_v(&mut bytes, w, h, 4);
+        Self::flip_image_v(&mut bytes, w, h, 4);
 
         self.register_texture(String::from(name))?;
         self.content.push(ImageContent::RGB8(w, h, bytes));
@@ -75,7 +74,7 @@ impl TextureArrayBuilder {
 
     fn register_texture(&mut self, name: String) -> Result<(), TextureArrayError> {
         if self.textures.get(&name).is_some() {
-            return Err(TextureArrayError::Other(format!("name '{}' is already registered", name)));
+            return Err(TextureArrayError::Other(format!("name '{name}' is already registered")));
         }
         self.textures.insert(name, self.content.len() as u32);
         Ok(())
@@ -189,7 +188,7 @@ impl Drop for TextureArray {
 }
 
 impl TextureArray {
-    fn new(width: u32, height: u32, depth: u32, mip_levels: u8, max_anisotropy: f32, textures: FxHashMap<String, u32>) -> TextureArray {
+    fn new(width: u32, height: u32, depth: u32, mip_levels: u8, max_anisotropy: f32, textures: FxHashMap<String, u32>) -> Self {
         assert!(mip_levels > 0, "mip_levels must at least be 1, but is {}", mip_levels);
 
         let mut id = 0;
@@ -233,9 +232,10 @@ impl TextureArray {
             gl::BindTexture(gl::TEXTURE_2D_ARRAY, 0);
         }
 
-        TextureArray { gl_id: id, textures }
+        Self { gl_id: id, textures }
     }
 
+    #[allow(clippy::unused_self)]
     pub fn sub_image_3d(&mut self, depth: u32, width: u32, height: u32, data: &[u8]) {
         unsafe {
             gl::TexSubImage3D(
@@ -249,11 +249,12 @@ impl TextureArray {
                 1,
                 gl::RGBA,
                 gl::UNSIGNED_BYTE,
-                &data[0] as *const u8 as *const c_void,
+                std::ptr::addr_of!(data[0]).cast(),
             );
         }
     }
 
+    #[allow(clippy::unused_self)]
     pub fn generate_mipmaps(&self) {
         unsafe { gl::GenerateMipmap(gl::TEXTURE_2D_ARRAY); }
     }

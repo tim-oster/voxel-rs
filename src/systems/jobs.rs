@@ -13,7 +13,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::world::chunk::ChunkPos;
 
-/// JobSystem manages a configurable amount of worker threads to distribute jobs to.
+/// `JobSystem` manages a configurable amount of worker threads to distribute jobs to.
 pub struct JobSystem {
     worker_handles: FxHashMap<ThreadId, JoinHandle<()>>,
     is_running: Arc<AtomicBool>,
@@ -41,8 +41,8 @@ impl JobHandle {
 
 #[allow(dead_code)]
 impl JobSystem {
-    pub fn new(worker_count: usize) -> JobSystem {
-        let mut system = JobSystem {
+    pub fn new(worker_count: usize) -> Self {
+        let mut system = Self {
             worker_handles: FxHashMap::default(),
             is_running: Arc::new(AtomicBool::new(true)),
             currently_executing: Arc::new(AtomicU8::new(0)),
@@ -283,7 +283,7 @@ mod job_system_tests {
     }
 }
 
-/// ChunkProcessor is a decorator for [`JobSystem`]. It allows de-/queueing jobs per [`ChunkPos`].
+/// `ChunkProcessor` is a decorator for [`JobSystem`]. It allows de-/queueing jobs per [`ChunkPos`].
 /// Enqueuing multiple jobs for the same position will override previously enqueued jobs.
 /// Each job can produce a result of type [`T`] which is retrievable on the job producer's side.
 pub struct ChunkProcessor<T> {
@@ -300,9 +300,9 @@ pub struct ChunkResult<T> {
 }
 
 impl<T: Send + 'static> ChunkProcessor<T> {
-    pub fn new(job_system: Rc<JobSystem>) -> ChunkProcessor<T> {
+    pub fn new(job_system: Rc<JobSystem>) -> Self {
         let (tx, rx) = mpsc::channel();
-        ChunkProcessor { job_system, tx, rx, chunk_jobs: RefCell::new(FxHashMap::default()) }
+        Self { job_system, tx, rx, chunk_jobs: RefCell::new(FxHashMap::default()) }
     }
 
     /// Enqueues a new chunk job in either the prioritized or normal queue. If there is already
@@ -454,7 +454,7 @@ mod chunk_processor_tests {
         assert!(results.is_empty());
     }
 
-    /// Tests that has_pending handles externally cancelled jobs properly.
+    /// Tests that `has_pending` handles externally cancelled jobs properly.
     #[test]
     fn has_pending() {
         // only one worker to process one at a time

@@ -17,8 +17,8 @@ pub struct Camera {
 }
 
 impl Camera {
-    pub fn new(fov_y_deg: f32, aspect_ratio: f32, near: f32, far: f32) -> Camera {
-        let mut cam = Camera {
+    pub fn new(fov_y_deg: f32, aspect_ratio: f32, near: f32, far: f32) -> Self {
+        let mut cam = Self {
             position: Point3::new(0.0, 0.0, 0.0),
             forward: Vector3::new(0.0, 0.0, -1.0),
             up: Vector3::new(0.0, 1.0, 0.0),
@@ -67,7 +67,7 @@ impl Camera {
         self.projection * self.get_world_to_camera_matrix()
     }
 
-    /// is_in_frustum performs "radar frustum culling" to check if the given sphere is inside the
+    /// `is_in_frustum` performs "radar frustum culling" to check if the given sphere is inside the
     /// camera's frustum.
     /// It transforms the point into camera view space and uses the distance to the near plane
     /// and the FOV to figure out the frustum width and height at the point's depth. Using that

@@ -3,7 +3,7 @@
 use std::{mem, ptr};
 use std::ops::{Deref, DerefMut};
 
-use gl::types::{GLsizeiptr, GLuint, GLvoid};
+use gl::types::{GLsizeiptr, GLuint};
 
 // doc: https://registry.khronos.org/OpenGL-Refpages/gl4/html/glBufferData.xhtml
 type BufferUsage = u32;
@@ -47,18 +47,18 @@ impl<T> Drop for Buffer<T> {
 }
 
 impl<T> Buffer<T> {
-    pub fn new(data: Vec<T>, usage: BufferUsage) -> Buffer<T> {
+    pub fn new(data: Vec<T>, usage: BufferUsage) -> Self {
         let mut handle = 0;
         unsafe {
             gl::CreateBuffers(1, &mut handle);
             gl::NamedBufferData(
                 handle,
                 (mem::size_of::<T>() * data.len()) as GLsizeiptr,
-                &data[0] as *const T as *const GLvoid,
+                ptr::addr_of!(data[0]).cast(),
                 usage,
             );
         }
-        Buffer { data: Some(data), handle }
+        Self { data: Some(data), handle }
     }
 
     pub fn pull_data(&mut self) {
@@ -67,7 +67,7 @@ impl<T> Buffer<T> {
                 self.handle,
                 0,
                 (mem::size_of::<T>() * self.data.as_ref().unwrap().len()) as GLsizeiptr,
-                self.data.as_mut().unwrap().get_mut(0).unwrap() as *mut T as *mut GLvoid,
+                (self.data.as_mut().unwrap().get_mut(0).unwrap() as *mut T).cast(),
             );
         }
     }
@@ -83,7 +83,7 @@ impl<T> Buffer<T> {
     }
 }
 
-/// MappedBuffer is a wrapper for a persistently mapped OpenGL buffer. Both client and server
+/// `MappedBuffer` is a wrapper for a persistently mapped OpenGL buffer. Both client and server
 /// side changes are reflected in the buffer without pulling or flushing. For synchronizing
 /// CPU & GPU, look into `Fences` and `Memory Barriers`.
 pub struct MappedBuffer<T> {
@@ -115,7 +115,7 @@ impl<T> DerefMut for MappedBuffer<T> {
 }
 
 impl<T> MappedBuffer<T> {
-    pub fn new(len: usize) -> MappedBuffer<T> {
+    pub fn new(len: usize) -> Self {
         let mut handle = 0;
         let mapped_ptr;
         unsafe {
@@ -133,9 +133,9 @@ impl<T> MappedBuffer<T> {
                 0,
                 size_bytes as isize,
                 gl::MAP_READ_BIT | gl::MAP_WRITE_BIT | gl::MAP_PERSISTENT_BIT | gl::MAP_COHERENT_BIT,
-            ) as *mut T;
+            ).cast();
         }
-        MappedBuffer { handle, len, mapped_ptr }
+        Self { handle, len, mapped_ptr }
     }
 
     pub fn bind_as_storage_buffer(&self, index: u32) {

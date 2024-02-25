@@ -10,8 +10,8 @@ pub struct Fence {
 }
 
 impl Fence {
-    pub fn new() -> Fence {
-        Fence { handle: None }
+    pub fn new() -> Self {
+        Self { handle: None }
     }
 
     pub fn place(&mut self) {
@@ -32,11 +32,11 @@ impl Fence {
                 let result = gl::ClientWaitSync(lock, gl::SYNC_FLUSH_COMMANDS_BIT, 1);
                 if result == gl::TIMEOUT_EXPIRED {
                     continue;
-                } else if result == gl::ALREADY_SIGNALED || result == gl::CONDITION_SATISFIED {
-                    return;
-                } else {
-                    gl_assert_no_error!();
                 }
+                if result == gl::ALREADY_SIGNALED || result == gl::CONDITION_SATISFIED {
+                    return;
+                }
+                gl_assert_no_error!();
             }
         }
     }

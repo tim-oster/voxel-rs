@@ -1,14 +1,12 @@
-/// This module is inspired by https://github.com/K4ugummi/imgui-glfw-rs.
+/// This module is inspired by [glfw-rs](https://github.com/K4ugummi/imgui-glfw-rs).
 
 use std::ffi::{c_void, CStr, CString};
-
-use glfw::ffi::GLFWwindow;
 
 struct GlfwClipboardBackend(*mut c_void);
 
 impl imgui::ClipboardBackend for GlfwClipboardBackend {
     fn get(&mut self) -> Option<String> {
-        let char_ptr = unsafe { glfw::ffi::glfwGetClipboardString(self.0 as *mut GLFWwindow) };
+        let char_ptr = unsafe { glfw::ffi::glfwGetClipboardString(self.0.cast()) };
         let c_str = unsafe { CStr::from_ptr(char_ptr) };
         Some(c_str.to_str().unwrap().to_owned())
     }
@@ -16,7 +14,7 @@ impl imgui::ClipboardBackend for GlfwClipboardBackend {
     fn set(&mut self, value: &str) {
         let c_str = CString::new(value).unwrap();
         unsafe {
-            glfw::ffi::glfwSetClipboardString(self.0 as *mut GLFWwindow, c_str.as_ptr());
+            glfw::ffi::glfwSetClipboardString(self.0.cast(), c_str.as_ptr());
         };
     }
 }
@@ -27,7 +25,7 @@ pub struct Wrapper {
 }
 
 impl Wrapper {
-    pub fn new(window: &mut glfw::Window) -> Wrapper {
+    pub fn new(window: &mut glfw::Window) -> Self {
         let mut context = imgui::Context::create();
 
         let io = context.io_mut();
@@ -54,15 +52,15 @@ impl Wrapper {
         io.key_map[imgui::Key::Z as usize] = glfw::Key::Z as u32;
 
         unsafe {
-            let ptr = glfw::ffi::glfwGetCurrentContext() as *mut c_void;
+            let ptr = glfw::ffi::glfwGetCurrentContext().cast();
             context.set_clipboard_backend(GlfwClipboardBackend(ptr));
         }
 
         let renderer = imgui_opengl_renderer::Renderer::new(
             &mut context,
-            |s| window.get_proc_address(s) as _,
+            |s| window.get_proc_address(s).cast(),
         );
-        Wrapper {
+        Self {
             context,
             renderer,
         }

@@ -40,8 +40,8 @@ pub(super) struct MaterialInstance {
 }
 
 impl Material {
-    pub fn new() -> Material {
-        Material {
+    pub fn new() -> Self {
+        Self {
             specular_pow: 0.0,
             specular_strength: 0.0,
             tex_top: None,
@@ -54,35 +54,35 @@ impl Material {
     }
 
     /// specular set specular material properties for this material.
-    pub fn specular(mut self, pow: f32, strength: f32) -> Material {
+    pub fn specular(mut self, pow: f32, strength: f32) -> Self {
         self.specular_pow = pow;
         self.specular_strength = strength;
         self
     }
 
-    /// all_sides applies the same texture to all sides of the material.
-    pub fn all_sides(self, name: &'static str) -> Material {
+    /// `all_sides` applies the same texture to all sides of the material.
+    pub fn all_sides(self, name: &'static str) -> Self {
         self.top(name).side(name).bottom(name)
     }
 
-    pub fn top(mut self, name: &'static str) -> Material {
+    pub fn top(mut self, name: &'static str) -> Self {
         self.tex_top = Some(String::from(name));
         self
     }
 
-    pub fn side(mut self, name: &'static str) -> Material {
+    pub fn side(mut self, name: &'static str) -> Self {
         self.tex_side = Some(String::from(name));
         self
     }
 
-    pub fn bottom(mut self, name: &'static str) -> Material {
+    pub fn bottom(mut self, name: &'static str) -> Self {
         self.tex_bottom = Some(String::from(name));
         self
     }
 
-    /// with_normals adds normal textures to all sides a texture was set for. The path is the
+    /// `with_normals` adds normal textures to all sides a texture was set for. The path is the
     /// same as the side's texture with a "_normal" suffix.
-    pub fn with_normals(mut self) -> Material {
+    pub fn with_normals(mut self) -> Self {
         if let Some(tex) = &self.tex_top {
             self.tex_top_normal = Some(tex.clone() + "_normal");
         }
@@ -102,19 +102,19 @@ pub struct VoxelRegistry {
 }
 
 impl VoxelRegistry {
-    pub fn new() -> VoxelRegistry {
-        VoxelRegistry {
+    pub fn new() -> Self {
+        Self {
             materials: Vec::new(),
             textures: Vec::new(),
         }
     }
 
-    pub fn add_texture(&mut self, name: &'static str, path: &'static str) -> &mut VoxelRegistry {
+    pub fn add_texture(&mut self, name: &'static str, path: &'static str) -> &mut Self {
         self.textures.push(Texture { name: String::from(name), path: String::from(path) });
         self
     }
 
-    pub fn add_material(&mut self, block: BlockId, material: Material) -> &mut VoxelRegistry {
+    pub fn add_material(&mut self, block: BlockId, material: Material) -> &mut Self {
         self.materials.push(MaterialEntry { block, material });
         self
     }
@@ -145,7 +145,7 @@ impl VoxelRegistry {
             .unwrap()
             .block;
 
-        let mut materials = vec![Default::default(); max_block_id as usize + 1];
+        let mut materials = vec![MaterialInstance::default(); max_block_id as usize + 1];
 
         for entry in &self.materials {
             let mat = &entry.material;

@@ -46,7 +46,7 @@ pub struct World {
 }
 
 impl World {
-    pub fn new(job_system: Rc<JobSystem>, loading_radius: u32) -> World {
+    pub fn new(job_system: Rc<JobSystem>, loading_radius: u32) -> Self {
         let world_cfg = worldgen::Config {
             sea_level: 70,
             continentalness: Noise {
@@ -72,15 +72,15 @@ impl World {
         };
         let chunk_allocator = Arc::new(ChunkStorageAllocator::new());
         let chunk_generator = Generator::new(1, world_cfg.clone());
-        let graphics_svo = graphics::Svo::new(blocks::new_registry());
+        let graphics_svo = graphics::Svo::new(&blocks::new_registry());
 
-        World {
+        Self {
             job_system: Rc::clone(&job_system),
             chunk_loader: ChunkLoader::new(loading_radius, 0, 8),
             chunk_storage_allocator: chunk_allocator.clone(),
             storage: Storage::new(),
             world: world::World::new(),
-            world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_allocator.clone(), chunk_generator),
+            world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_allocator, chunk_generator),
             world_generator_cfg: world_cfg,
             world_svo: worldsvo::Svo::new(job_system, graphics_svo, loading_radius),
             physics: Physics::new(),
@@ -97,7 +97,7 @@ impl World {
         self.physics.step(delta_time, &self.world_svo, entity);
     }
 
-    pub fn update(&mut self, entity: &mut Entity) {
+    pub fn update(&mut self, entity: &Entity) {
         self.camera.position = entity.position;
         self.camera.forward = entity.get_forward();
 
@@ -149,7 +149,7 @@ impl World {
                 }
             }
             if !chunk_events.is_empty() {
-                println!("generate {} new chunks", generate_count);
+                println!("generate {generate_count} new chunks");
             }
         }
         for chunk in self.world_generator.get_generated_chunks(400) {
@@ -181,7 +181,7 @@ impl World {
         }
     }
 
-    /// sort_chunks_by_view_frustum sorts the given chunk event to contain all chunks that are in
+    /// `sort_chunks_by_view_frustum` sorts the given chunk event to contain all chunks that are in
     /// the camera's view first first. All other chunks are sorted radially from forward to backward
     /// camera vector.
     fn sort_chunks_by_view_frustum(events: Vec<ChunkEvent>, camera: &Camera) -> Vec<ChunkEvent> {
@@ -234,7 +234,7 @@ impl World {
 
     pub fn render_debug_window(&mut self, frame: &mut Frame) {
         imgui::Window::new("World Gen")
-            .position([8.0, 290.0 + 2.0 * 8.0], Condition::Once)
+            .position([8.0, 2.0f32.mul_add(8.0, 290.0)], Condition::Once)
             .size([400.0, 400.0], Condition::Once)
             .collapsed(true, Condition::Once)
             .build(&frame.ui, || {
@@ -248,7 +248,7 @@ impl World {
                     self.job_system.wait_until_processed();
 
                     let chunk_generator = Generator::new(1, self.world_generator_cfg.clone());
-                    let graphics_svo = graphics::Svo::new(blocks::new_registry());
+                    let graphics_svo = graphics::Svo::new(&blocks::new_registry());
 
                     self.chunk_loader = ChunkLoader::new(self.chunk_loader.get_radius(), 0, 8);
                     self.storage = Storage::new();
@@ -283,7 +283,7 @@ impl World {
                     while i < noise.spline_points.len() {
                         let stack = frame.ui.push_id(Id::Int(i as i32));
 
-                        frame.ui.text(format!("#{}", i));
+                        frame.ui.text(format!("#{i}"));
                         frame.ui.same_line();
                         if frame.ui.small_button("del") {
                             noise.spline_points.remove(i);
@@ -325,34 +325,10 @@ impl World {
             });
 
         imgui::Window::new("Settings")
-            .position([frame.size.0 as f32 - 400.0 - 8.0, 170.0 + 2.0 * 8.0], Condition::Once)
+            .position([frame.size.0 as f32 - 400.0 - 8.0, 2.0f32.mul_add(8.0, 170.0)], Condition::Once)
             .size([400.0, 320.0], Condition::Once)
             .collapsed(true, Condition::Once)
             .build(&frame.ui, || {
-                let old_rd = self.chunk_loader.get_radius() as i32;
-                let mut new_rd = old_rd;
-                frame.ui.input_int("render distance", &mut new_rd).build();
-                new_rd = new_rd.clamp(1, 50);
-                if new_rd != old_rd {
-                    self.chunk_loader.set_radius(new_rd as u32);
-                    self.world_svo.set_radius(new_rd as u32);
-                }
-
-                let old_fov = self.camera.get_fov_y_deg();
-                let mut new_fov = old_fov;
-                frame.ui.input_float("FOV", &mut new_fov).step(2.0).build();
-                new_fov = new_fov.clamp(1.0, 130.0);
-                if new_fov != old_fov {
-                    self.camera.set_fov_y_deg(new_fov);
-                }
-
-                frame.ui.checkbox("render shadows", &mut self.render_shadows);
-                frame.ui.input_float("shadow distance", &mut self.shadow_distance).step(1.0).build();
-
-                frame.ui.new_line();
-                frame.ui.separator();
-                frame.ui.new_line();
-
                 fn render_control_list(ui: &imgui::Ui, header: &str, controls: &[&str]) {
                     ui.text(header);
                     ui.separator();
@@ -368,6 +344,30 @@ impl World {
 
                     ui.columns(1, "", false);
                 }
+
+                let old_rd = self.chunk_loader.get_radius() as i32;
+                let mut new_rd = old_rd;
+                frame.ui.input_int("render distance", &mut new_rd).build();
+                new_rd = new_rd.clamp(1, 50);
+                if new_rd != old_rd {
+                    self.chunk_loader.set_radius(new_rd as u32);
+                    self.world_svo.set_radius(new_rd as u32);
+                }
+
+                let old_fov = self.camera.get_fov_y_deg();
+                let mut new_fov = old_fov;
+                frame.ui.input_float("FOV", &mut new_fov).step(2.0).build();
+                new_fov = new_fov.clamp(1.0, 130.0);
+                if (new_fov - old_fov).abs() > f32::EPSILON {
+                    self.camera.set_fov_y_deg(new_fov);
+                }
+
+                frame.ui.checkbox("render shadows", &mut self.render_shadows);
+                frame.ui.input_float("shadow distance", &mut self.shadow_distance).step(1.0).build();
+
+                frame.ui.new_line();
+                frame.ui.separator();
+                frame.ui.new_line();
 
                 render_control_list(&frame.ui, "Debug Controls", &[
                     "P: toggle debug UI",
@@ -427,7 +427,7 @@ mod tests {
         world.handle_window_resize(aspect_ratio);
 
         loop {
-            world.update(&mut player);
+            world.update(&player);
 
             if !world.world_generator.has_pending_jobs() && !world.world_svo.has_pending_jobs() {
                 break;

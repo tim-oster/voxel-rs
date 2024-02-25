@@ -14,7 +14,7 @@ impl<X, T, E> Constructor<T, E> for X
 impl<T, E> Resource<T, E> {
     pub fn new<F: Constructor<T, E>>(constructor: F) -> Result<Self, E> {
         match constructor() {
-            Ok(content) => Ok(Resource {
+            Ok(content) => Ok(Self {
                 constructor: Box::new(constructor),
                 content,
             }),

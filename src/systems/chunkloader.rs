@@ -24,17 +24,15 @@ pub enum ChunkEvent {
 impl ChunkEvent {
     pub fn get_pos(&self) -> &ChunkPos {
         match self {
-            ChunkEvent::Load { pos, .. } => pos,
-            ChunkEvent::Unload { pos, .. } => pos,
-            ChunkEvent::LodChange { pos, .. } => pos,
+            Self::Load { pos, .. } | Self::Unload { pos, .. } | Self::LodChange { pos, .. } => pos,
         }
     }
 }
 
 impl ChunkLoader {
-    pub fn new(radius: u32, start_y: i32, end_y: i32) -> ChunkLoader {
+    pub fn new(radius: u32, start_y: i32, end_y: i32) -> Self {
         assert!(start_y < end_y);
-        ChunkLoader {
+        Self {
             radius,
             start_y,
             end_y,
@@ -75,7 +73,7 @@ impl ChunkLoader {
                 }
 
                 let mut pos = ChunkPos::new(current_pos.x + dx, 0, current_pos.z + dz);
-                let lod = ChunkLoader::calculate_lod(&current_pos, &pos);
+                let lod = Self::calculate_lod(&current_pos, &pos);
 
                 for y in self.start_y..self.end_y {
                     // ensure that y is still within loading radius
@@ -101,12 +99,13 @@ impl ChunkLoader {
 
         // create delete events for chunks outside the loading radius
         let mut delete_list = Vec::new();
+        let r_squared = r * r;
         for pos in self.loaded_chunks.keys() {
             let dx = (pos.x - current_pos.x).abs();
             let dy = (pos.y - current_pos.y).abs();
             let dz = (pos.z - current_pos.z).abs();
 
-            if (dy < -r || dy > r) || dx * dx + dz * dz > r * r {
+            if (dy < -r || dy > r) || dx * dx + dz * dz > r_squared {
                 delete_list.push(*pos);
                 events.push(ChunkEvent::Unload { pos: *pos });
             }
@@ -258,7 +257,7 @@ mod tests {
         }
 
         let mut scale = Vec::new();
-        let mut xs = columns.keys().map(|x| *x).collect::<Vec<i32>>();
+        let mut xs = columns.keys().copied().collect::<Vec<i32>>();
         xs.sort();
         for x in xs {
             scale.push(columns[&x]);

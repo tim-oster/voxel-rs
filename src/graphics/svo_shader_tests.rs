@@ -66,9 +66,9 @@ mod tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, storage_alloc.allocate());
         builder(&mut chunk);
 
-        let buffer_alloc = Pool::new_in(Box::new(|alloc| ChunkBuffer::new_in(alloc)), None, StatsAllocator::new());
+        let buffer_alloc = Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new());
 
-        let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), Arc::new(buffer_alloc));
+        let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(buffer_alloc));
         let mut svo = Svo::<SerializedChunk>::new();
         svo.set_leaf(svo_pos, chunk, true);
         svo.serialize();
@@ -573,7 +573,7 @@ mod tests {
     }
 
     /// Tests if translucency is properly accounted for during ray casting. Assert that identical,
-    /// adjacent voxels are skipped and make sure that cast_translucent flag is respected.
+    /// adjacent voxels are skipped and make sure that `cast_translucent` flag is respected.
     #[test]
     fn casting_against_translucent_leafs() {
         // This setup has to small rows of adjacent blocks. The first row consists of the same

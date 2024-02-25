@@ -6,7 +6,8 @@ use cgmath::num_traits::Pow;
 
 pub type OctantId = u32;
 
-/// LeafId describes a leaf's position inside the octree by storing the child's `idx` inside its `parent` octant.
+/// `LeafId` describes a leaf's position inside the octree by storing the child's `idx` inside its
+/// `parent` octant.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 pub struct LeafId {
     pub parent: OctantId,
@@ -28,10 +29,10 @@ impl Position {
 }
 
 impl std::ops::Div<u32> for Position {
-    type Output = Position;
+    type Output = Self;
 
     fn div(self, rhs: u32) -> Self::Output {
-        Position(
+        Self(
             self.0 / rhs,
             self.1 / rhs,
             self.2 / rhs,
@@ -60,11 +61,11 @@ pub struct Octree<T, A: Allocator = Global> {
 }
 
 impl<T> Octree<T> {
-    pub fn new() -> Octree<T> {
+    pub fn new() -> Self {
         Self::new_in(Global)
     }
 
-    pub fn with_capacity(capacity: usize) -> Octree<T> {
+    pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_in(capacity, Global)
     }
 }
@@ -79,11 +80,11 @@ impl<T: PartialEq, A: Allocator> PartialEq for Octree<T, A> {
 }
 
 impl<T, A: Allocator> Octree<T, A> {
-    pub fn new_in(alloc: A) -> Octree<T, A> {
+    pub fn new_in(alloc: A) -> Self {
         Self::with_capacity_in(0, alloc)
     }
 
-    pub fn with_capacity_in(capacity: usize, alloc: A) -> Octree<T, A> {
+    pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         Self { root: None, octants: Vec::with_capacity_in(capacity, alloc), free_list: Vec::new(), depth: 0 }
     }
 
@@ -96,7 +97,7 @@ impl<T, A: Allocator> Octree<T, A> {
 
     /// Adds the given leaf value at the given position. If the tree is not big enough yet,
     /// it is expanded. Children along the path are overridden, if any exist. Returns the
-    /// new LeafId, that holds the leaf value, as well as any previous value that was overridden.
+    /// new `LeafId`, that holds the leaf value, as well as any previous value that was overridden.
     pub fn set_leaf(&mut self, pos: Position, leaf: T) -> (LeafId, Option<T>) {
         self.expand_to(pos.required_depth());
 
@@ -171,7 +172,7 @@ impl<T, A: Allocator> Octree<T, A> {
     }
 
     /// Moves the leaf at `leaf_id` to the given position. The original leaf will be set to an
-    /// empty octant. It returns the new LeafId at the given position, as well as the overridden
+    /// empty octant. It returns the new `LeafId` at the given position, as well as the overridden
     /// leaf value at the target position, if any was present.
     pub fn move_leaf(&mut self, leaf_id: LeafId, to_pos: Position) -> (LeafId, Option<T>) {
         self.expand_to(to_pos.required_depth());
@@ -234,7 +235,7 @@ impl<T, A: Allocator> Octree<T, A> {
 
     /// Removes the leaf at the given position, if it exists. Empty parents are *not* removed from
     /// the tree. [`Octree::compact`] can be used for that. Returns the removed value and its
-    /// LeafId.
+    /// `LeafId`.
     pub fn remove_leaf(&mut self, pos: Position) -> (Option<T>, Option<LeafId>) {
         if pos.required_depth() > self.depth {
             return (None, None);
@@ -265,11 +266,10 @@ impl<T, A: Allocator> Octree<T, A> {
         (None, None)
     }
 
-    /// Removes the leaf for the given LeafId and returns its value.
+    /// Removes the leaf for the given `LeafId` and returns its value.
     pub fn remove_leaf_by_id(&mut self, leaf_id: LeafId) -> Option<T> {
         match &self.octants[leaf_id.parent as usize].children[leaf_id.idx as usize] {
-            Child::None => None,
-            Child::Octant(_) => None,
+            Child::None | Child::Octant(_) => None,
             Child::Leaf(_) => {
                 match self.octants[leaf_id.parent as usize].set_child(leaf_id.idx, Child::None) {
                     Child::None => None,
@@ -320,7 +320,7 @@ impl<T, A: Allocator> Octree<T, A> {
             self.root = Some(new_root_id);
         }
 
-        self.depth += by
+        self.depth += by;
     }
 
     /// Expands the octant's depth to by equal to the given value. If the depth is already larger,
@@ -428,41 +428,41 @@ pub(super) enum Child<T> {
 
 impl<T> Child<T> {
     pub fn is_none(&self) -> bool {
-        matches!(self, Child::None)
+        matches!(self, Self::None)
     }
 
     pub fn is_octant(&self) -> bool {
-        matches!(self, Child::Octant(_))
+        matches!(self, Self::Octant(_))
     }
 
     pub fn get_octant_value(&self) -> Option<OctantId> {
         match self {
-            Child::Octant(id) => Some(*id),
+            Self::Octant(id) => Some(*id),
             _ => None,
         }
     }
 
     pub fn is_leaf(&self) -> bool {
-        matches!(self, Child::Leaf(_))
+        matches!(self, Self::Leaf(_))
     }
 
     pub fn get_leaf_value(&self) -> Option<&T> {
         match self {
-            Child::Leaf(value) => Some(value),
+            Self::Leaf(value) => Some(value),
             _ => None,
         }
     }
 
     pub fn get_leaf_value_mut(&mut self) -> Option<&mut T> {
         match self {
-            Child::Leaf(value) => Some(value),
+            Self::Leaf(value) => Some(value),
             _ => None,
         }
     }
 
     pub fn into_leaf_value(self) -> Option<T> {
         match self {
-            Child::Leaf(value) => Some(value),
+            Self::Leaf(value) => Some(value),
             _ => None,
         }
     }
@@ -471,9 +471,9 @@ impl<T> Child<T> {
 impl<T: PartialEq> PartialEq for Child<T> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Child::None, Child::None) => true,
-            (Child::Octant(l), Child::Octant(r)) => l == r,
-            (Child::Leaf(l), Child::Leaf(r)) => l == r,
+            (Self::None, Self::None) => true,
+            (Self::Octant(l), Self::Octant(r)) => l == r,
+            (Self::Leaf(l), Self::Leaf(r)) => l == r,
             _ => false,
         }
     }

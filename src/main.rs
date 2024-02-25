@@ -1,6 +1,16 @@
 #![feature(allocator_api, test)]
 #![allow(dead_code, unused_variables)]
 
+#![warn(clippy::all, clippy::nursery, clippy::pedantic)]
+
+// from nursery
+#![allow(clippy::missing_const_for_fn, clippy::significant_drop_tightening)]
+
+// from pedantic
+#![allow(clippy::cast_possible_truncation, clippy::cast_possible_wrap, clippy::cast_sign_loss, clippy::cast_lossless, clippy::cast_precision_loss)]
+#![allow(clippy::similar_names, clippy::many_single_char_names, clippy::struct_field_names, clippy::module_name_repetitions)]
+#![allow(clippy::too_many_lines)]
+
 extern crate gl;
 #[macro_use]
 extern crate memoffset;

@@ -27,7 +27,7 @@ impl Entity {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq)]
 pub struct EntityState {
     /// If the entity is colliding in -y direction.
     pub is_grounded: bool,
@@ -47,7 +47,7 @@ pub struct EntityCapabilities {
 
 impl Default for EntityCapabilities {
     fn default() -> Self {
-        EntityCapabilities {
+        Self {
             wall_clip: false,
             flying: false,
             gravity: 60.0,
@@ -57,8 +57,8 @@ impl Default for EntityCapabilities {
 }
 
 impl Entity {
-    pub fn new(position: Point3<f32>, aabb_def: AABBDef) -> Entity {
-        Entity {
+    pub fn new(position: Point3<f32>, aabb_def: AABBDef) -> Self {
+        Self {
             position,
             velocity: Vector3::new(0.0, 0.0, 0.0),
             euler_rotation: Vector3::new(0.0, 0.0, 0.0),
@@ -80,8 +80,8 @@ pub struct AABBDef {
 }
 
 impl AABBDef {
-    pub fn new(offset: Vector3<f32>, extents: Vector3<f32>) -> AABBDef {
-        AABBDef { offset, extents }
+    pub fn new(offset: Vector3<f32>, extents: Vector3<f32>) -> Self {
+        Self { offset, extents }
     }
 }
 
@@ -100,8 +100,8 @@ pub struct Physics {
 }
 
 impl Physics {
-    pub fn new() -> Physics {
-        Physics {
+    pub fn new() -> Self {
+        Self {
             reusable_batch: RefCell::new(EntityBatch::new()),
         }
     }
@@ -114,7 +114,7 @@ impl Physics {
         batch.add_entity(entity);
 
         let results = batch.raycast(raycaster);
-        Physics::update_entity(entity, &results[0], delta_time);
+        Self::update_entity(entity, &results[0], delta_time);
     }
 
     /// Simulates the next step for all `entities` for the given delta time. `raycaster` is used
@@ -130,10 +130,11 @@ impl Physics {
         let results = batch.raycast(raycaster);
 
         for i in 0..entities.len() {
-            Physics::update_entity(&mut entities[i], &results[i], delta_time);
+            Self::update_entity(&mut entities[i], &results[i], delta_time);
         }
     }
 
+    #[allow(clippy::float_cmp)]
     fn update_entity(entity: &mut Entity, result: &AabbResult, delta_time: f32) {
         // apply gravity
         if !entity.caps.flying {
@@ -157,16 +158,17 @@ impl Physics {
         // constraint velocity by nearby collisions
         if !entity.caps.flying {
             if !entity.caps.wall_clip {
-                velocity.x = Physics::apply_axial_physics(velocity.x, result.pos.x, result.neg.x);
-                velocity.z = Physics::apply_axial_physics(velocity.z, result.pos.z, result.neg.z);
+                velocity.x = Self::apply_axial_physics(velocity.x, result.pos.x, result.neg.x);
+                velocity.z = Self::apply_axial_physics(velocity.z, result.pos.z, result.neg.z);
             }
-            velocity.y = Physics::apply_axial_physics(velocity.y, result.pos.y, result.neg.y);
+            velocity.y = Self::apply_axial_physics(velocity.y, result.pos.y, result.neg.y);
         }
 
         // apply velocity
         entity.position += velocity;
     }
 
+    #[allow(clippy::float_cmp)]
     fn apply_axial_physics(speed: f32, dst_pos: f32, dst_neg: f32) -> f32 {
         let dst = if speed > 0.0 { dst_pos } else { dst_neg };
         if dst == -1.0 {
@@ -188,8 +190,8 @@ struct EntityBatch {
 }
 
 impl EntityBatch {
-    fn new() -> EntityBatch {
-        EntityBatch {
+    fn new() -> Self {
+        Self {
             batch: PickerBatch::new(),
             result: PickerBatchResult::new(),
         }
@@ -246,7 +248,8 @@ mod tests {
         }
     }
 
-    /// Asserts that the single entity implementation works. All edge cases are covered by the test for step_many.
+    /// Asserts that the single entity implementation works. All edge cases are covered by the test
+    /// for `step_many`.
     #[test]
     fn step() {
         let mut e = Entity {

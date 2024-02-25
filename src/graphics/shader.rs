@@ -7,7 +7,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 use cgmath::{Array, Matrix};
-use gl::types::*;
+use gl::types::{GLchar, GLenum, GLint, GLsizei, GLuint};
 use indoc::formatdoc;
 use regex::Regex;
 use rustc_hash::FxHashMap;
@@ -26,7 +26,7 @@ pub enum ShaderError {
 
 impl From<io::Error> for ShaderError {
     fn from(err: io::Error) -> Self {
-        ShaderError::Io(err)
+        Self::Io(err)
     }
 }
 
@@ -47,15 +47,15 @@ impl GlError {
 
         let mut length = 0;
         let mut info_log = [0; 512];
-        log_fn(id, info_log.len() as GLsizei, &mut length, info_log.as_mut_ptr() as *mut GLchar);
+        log_fn(id, info_log.len() as GLsizei, &mut length, info_log.as_mut_ptr().cast());
 
-        Some(GlError {
+        Some(Self {
             details: String::from_utf8_lossy(&info_log[..(length as usize)]).to_string(),
         })
     }
 }
 
-/// ShaderProgramBuilder allows for loading multiple GLSL source files and compiling them into one
+/// `ShaderProgramBuilder` allows for loading multiple GLSL source files and compiling them into one
 /// OpenGL shader program.
 pub struct ShaderProgramBuilder {
     shaders: FxHashMap<ShaderType, Shader>,
@@ -63,8 +63,8 @@ pub struct ShaderProgramBuilder {
 }
 
 impl ShaderProgramBuilder {
-    pub fn new() -> ShaderProgramBuilder {
-        ShaderProgramBuilder {
+    pub fn new() -> Self {
+        Self {
             shaders: FxHashMap::default(),
             include_cache: FxHashMap::default(),
         }
@@ -75,7 +75,7 @@ impl ShaderProgramBuilder {
     /// Special directives:
     /// - `#inlucde "file.glsl"` can be used to include other file's contents
     /// - Adds `SHADER_COMPILE_TYPE` definition
-    pub fn load_shader(&mut self, type_: ShaderType, path: &str) -> Result<&mut ShaderProgramBuilder, ShaderError> {
+    pub fn load_shader(&mut self, type_: ShaderType, path: &str) -> Result<&mut Self, ShaderError> {
         let mut src = self.load_file(path)?;
         if src.len() != 1 || !src.keys().next().unwrap().is_empty() {
             return Err(ShaderError::Other(String::from("file must not contain any #shader_type directives")));
@@ -89,7 +89,7 @@ impl ShaderProgramBuilder {
     /// - `#inlucde "file.glsl"` can be used to include other file's contents
     /// - `#shader_type <vertex|fragment|compute>` will use all lines until the next type directive for compiling the given shader type
     /// - Adds `SHADER_COMPILE_TYPE` definition
-    pub fn load_shader_bundle(&mut self, path: &str) -> Result<&mut ShaderProgramBuilder, ShaderError> {
+    pub fn load_shader_bundle(&mut self, path: &str) -> Result<&mut Self, ShaderError> {
         let src = self.load_file(path)?;
         for (type_, src) in src {
             let type_ = match type_.as_str() {
@@ -97,7 +97,7 @@ impl ShaderProgramBuilder {
                 "fragment" => ShaderType::Fragment,
                 "compute" => ShaderType::Compute,
                 _ => {
-                    return Err(ShaderError::Other(format!("unsupported shader type: {}", type_)));
+                    return Err(ShaderError::Other(format!("unsupported shader type: {type_}")));
                 }
             };
             self.add_shader(type_, src)?;
@@ -108,7 +108,7 @@ impl ShaderProgramBuilder {
     fn load_file(&mut self, path: &str) -> Result<FxHashMap<String, String>, ShaderError> {
         let re_include = Regex::new("^#include\\s\"(.*)\"$").unwrap();
 
-        let mut current_type = String::from("");
+        let mut current_type = String::new();
         let mut shader_types = FxHashMap::default();
 
         let source = assets::read(path)?;
@@ -121,14 +121,14 @@ impl ShaderProgramBuilder {
                 let parts: Vec<_> = line.split(' ').collect();
                 if parts.len() != 2 {
                     return Err(ShaderError::Other(format!(
-                        "invalid shader type directive: {}", line,
+                        "invalid shader type directive: {line}",
                     )));
                 }
 
                 current_type = parts[1].to_lowercase();
                 if shader_types.contains_key(&current_type) {
                     return Err(ShaderError::Other(format!(
-                        "same shader type used a second time: {}", line,
+                        "same shader type used a second time: {line}",
                     )));
                 }
 
@@ -174,7 +174,7 @@ impl ShaderProgramBuilder {
         if let Some(ok) = include_src {
             if ok.is_empty() {
                 return Err(ShaderError::Other(
-                    format!("cyclic include of {}", path),
+                    format!("cyclic include of {path}"),
                 ));
             }
 
@@ -192,7 +192,7 @@ impl ShaderProgramBuilder {
         if let Err(err) = src {
             return Err(ShaderError::Wrapped(
                 Box::new(err),
-                format!("while loading included file {}", path),
+                format!("while loading included file {path}"),
             ));
         }
 
@@ -200,7 +200,7 @@ impl ShaderProgramBuilder {
         let mut src = src.unwrap();
         if src.len() != 1 || !src.keys().next().unwrap().is_empty() {
             return Err(ShaderError::Other(
-                format!("error including {}: included files must not contain any #shader_type directives", path),
+                format!("error including {path}: included files must not contain any #shader_type directives"),
             ));
         }
 
@@ -215,9 +215,9 @@ impl ShaderProgramBuilder {
         Ok(())
     }
 
-    pub fn add_shader(&mut self, type_: ShaderType, src: String) -> Result<&mut ShaderProgramBuilder, ShaderError> {
+    pub fn add_shader(&mut self, type_: ShaderType, src: String) -> Result<&mut Self, ShaderError> {
         if self.shaders.get(&type_).is_some() {
-            return Err(ShaderError::Other(format!("type {:?} is already registered", type_)));
+            return Err(ShaderError::Other(format!("type {type_:?} is already registered")));
         }
 
         let mut src = src;
@@ -353,6 +353,7 @@ impl ShaderProgram {
         unsafe { gl::UseProgram(self.gl_id) }
     }
 
+    #[allow(clippy::unused_self)]
     pub fn unbind(&self) {
         unsafe { gl::UseProgram(0) }
     }
@@ -386,9 +387,9 @@ impl ShaderProgram {
     }
 
     //noinspection RsSelfConvention
-    pub fn set_f32vec3s(&self, name: &'static str, values: Vec<cgmath::Vector3<f32>>) {
+    pub fn set_f32vec3s(&self, name: &'static str, values: &[cgmath::Vector3<f32>]) {
         unsafe {
-            gl::Uniform3fv(self.get_uniform_location(name), values.len() as GLsizei, values.as_ptr() as *const f32);
+            gl::Uniform3fv(self.get_uniform_location(name), values.len() as GLsizei, values.as_ptr().cast());
         }
     }
 
@@ -427,11 +428,11 @@ pub enum ShaderType {
 }
 
 impl ShaderType {
-    fn string(&self) -> &'static str {
+    fn string(self) -> &'static str {
         match self {
-            ShaderType::Vertex => "VERTEX",
-            ShaderType::Fragment => "FRAGMENT",
-            ShaderType::Compute => "COMPUTE",
+            Self::Vertex => "VERTEX",
+            Self::Fragment => "FRAGMENT",
+            Self::Compute => "COMPUTE",
         }
     }
 }
@@ -453,7 +454,7 @@ impl Shader {
             ShaderType::Fragment => gl::FRAGMENT_SHADER,
             ShaderType::Compute => gl::COMPUTE_SHADER,
         };
-        let shader = Shader {
+        let shader = Self {
             gl_id: unsafe { gl::CreateShader(type_) },
         };
         unsafe {

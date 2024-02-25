@@ -45,7 +45,7 @@ impl Noise {
 
         let mut v = 0.0;
         for _ in 0..self.octaves {
-            v += perlin.get([x * f + 0.5, z * f + 0.5]) * a;
+            v += perlin.get([x.mul_add(f, 0.5), z.mul_add(f, 0.5)]) * a;
             f *= 2.0;
             a *= 0.5;
         }
@@ -73,7 +73,7 @@ impl Noise {
         let v_start = lhs.y as f64;
         let v_diff = (rhs.y - lhs.y) as f64;
         let factor = (x as f32 - lhs.x) / (rhs.x - lhs.x);
-        v_start + v_diff * factor as f64
+        v_diff.mul_add(factor as f64, v_start)
     }
 }
 
@@ -176,8 +176,8 @@ impl ChunkColumn {
 }
 
 impl Generator {
-    pub fn new(seed: u32, cfg: Config) -> Generator {
-        Generator {
+    pub fn new(seed: u32, cfg: Config) -> Self {
+        Self {
             cfg,
             perlin: Perlin::new(seed),
             cache: RwLock::new(GeneratorCache {
@@ -301,9 +301,13 @@ impl ChunkGenerator for Generator {
 
             let y = y as i32;
             if y <= height {
-                let mut block = blocks::STONE;
-                if y >= height - 3 { block = blocks::DIRT; }
-                if y >= height { block = blocks::GRASS; }
+                let block = if y >= height {
+                    blocks::GRASS
+                } else if y >= height - 3 {
+                    blocks::DIRT
+                } else {
+                    blocks::STONE
+                };
                 return Some(block);
             }
 
@@ -325,7 +329,7 @@ mod benches {
     ///
     /// Result history (measured on AMD Ryzen 9 7950X 32 Threads)
     /// - naive for loop:               253700 ns/iter (+/- 1478)
-    /// - using fill_with iterator:      53381 ns/iter (+/- 1458)
+    /// - using `fill_with` iterator:   53381 ns/iter (+/- 1458)
     //noinspection DuplicatedCode
     #[bench]
     fn some_bench(b: &mut Bencher) {

@@ -48,7 +48,7 @@ pub struct AllocStats {
 }
 
 impl Svo {
-    pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo, render_distance: u32) -> Svo {
+    pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo, render_distance: u32) -> Self {
         let world_svo_alloc = StatsAllocator::new();
 
         let chunk_buffer_pool = Pool::new_in(
@@ -57,10 +57,10 @@ impl Svo {
             // an average size is taken so that it is sufficient in most cases and at worst, the storage is expanded a few
             // times until it fits. This is still more stable than and safes a lot of allocations.
             Box::new(|alloc| ChunkBuffer::with_capacity_in(100_000, alloc)),
-            Some(Box::new(|buffer| buffer.reset())),
+            Some(Box::new(ChunkBuffer::reset)),
             StatsAllocator::new(),
         );
-        Svo {
+        Self {
             processor: ChunkProcessor::new(job_system),
             world_svo_alloc: world_svo_alloc.clone(),
             world_svo: world::Svo::new_in(world_svo_alloc),
@@ -79,7 +79,7 @@ impl Svo {
     /// ownerships can be reclaimed by calling [`Svo::update`].
     pub fn set_chunk(&mut self, chunk: BorrowedChunk) {
         let alloc = self.chunk_buffer_pool.clone();
-        self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(chunk, alloc));
+        self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(chunk, &alloc));
     }
 
     pub fn remove_chunk(&mut self, pos: &ChunkPos) {
@@ -392,7 +392,7 @@ impl Svo {
             params.selected_voxel = Some(self.svo_coord_space.cnv_block_pos(pos));
         }
 
-        self.graphics_svo.render(params);
+        self.graphics_svo.render(&params);
     }
 
     /// Calls [`graphics::Svo::get_stats`].
@@ -431,8 +431,8 @@ type SvoPos = Point3<f32>;
 
 #[allow(dead_code)]
 impl SvoCoordSpace {
-    fn new(center: ChunkPos, dst: u32) -> SvoCoordSpace {
-        SvoCoordSpace { center, dst }
+    fn new(center: ChunkPos, dst: u32) -> Self {
+        Self { center, dst }
     }
 
     /// Converts a block position from world space to SVO space.
@@ -481,7 +481,7 @@ impl SvoCoordSpace {
         // perform radial check for x and z
         let dcx = pos.x - r;
         let dcz = pos.z - r;
-        if dcx * dcx + dcz * dcz > r * r {
+        if dcx.mul_add(dcx, dcz * dcz) > r * r {
             return None;
         }
 
@@ -502,9 +502,9 @@ mod coord_space_tests {
     fn coord_space_positive() {
         let cs = SvoCoordSpace::new(ChunkPos::new(4, 5, 12), 2);
 
-        let world_pos = Point3::new(32.0 * 5.0 + 16.25, 32.0 * 3.0 + 4.25, 32.0 * 10.0 + 20.5);
+        let world_pos = Point3::new(32.0f32.mul_add(5.0, 16.25), 32.0f32.mul_add(3.0, 4.25), 32.0f32.mul_add(10.0, 20.5));
         let svo_pos = cs.cnv_block_pos(world_pos);
-        assert_eq!(svo_pos, Point3::new(32.0 * 3.0 + 16.25, 32.0 * 0.0 + 4.25, 32.0 * 0.0 + 20.5));
+        assert_eq!(svo_pos, Point3::new(32.0f32.mul_add(3.0, 16.25), 32.0f32.mul_add(0.0, 4.25), 32.0f32.mul_add(0.0, 20.5)));
 
         let cnv_back = cs.cnv_svo_pos(svo_pos);
         assert_eq!(cnv_back, world_pos);
@@ -517,7 +517,7 @@ mod coord_space_tests {
 
         let world_pos = Point3::new(-16.25, -4.25, -20.5);
         let svo_pos = cs.cnv_block_pos(world_pos);
-        assert_eq!(svo_pos, Point3::new(32.0 * 2.0 + 15.75, 32.0 * 2.0 + 27.75, 32.0 * 2.0 + 11.5));
+        assert_eq!(svo_pos, Point3::new(32.0f32.mul_add(2.0, 15.75), 32.0f32.mul_add(2.0, 27.75), 32.0f32.mul_add(2.0, 11.5)));
 
         let cnv_back = cs.cnv_svo_pos(svo_pos);
         assert_eq!(cnv_back, world_pos);

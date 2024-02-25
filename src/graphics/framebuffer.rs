@@ -2,7 +2,7 @@
 
 use std::ptr;
 
-use gl::types::{GLint, GLuint, GLvoid};
+use gl::types::{GLint, GLuint};
 use image::{DynamicImage, GenericImageView};
 
 use crate::gl_assert_no_error;
@@ -16,7 +16,7 @@ pub struct Framebuffer {
 /// Framebuffer is a wrapper around a OpenGL framebuffer object. It attaches color, depth & stencil
 /// buffer for the given resolution. No multi-sampling is applied.
 impl Framebuffer {
-    pub fn new(width: i32, height: i32) -> Framebuffer {
+    pub fn new(width: i32, height: i32) -> Self {
         let mut handle = 0;
         unsafe {
             gl::GenFramebuffers(1, &mut handle);
@@ -44,7 +44,7 @@ impl Framebuffer {
 
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
         }
-        Framebuffer { handle, width, height }
+        Self { handle, width, height }
     }
 
     pub fn width(&self) -> i32 {
@@ -59,10 +59,12 @@ impl Framebuffer {
         unsafe { gl::BindFramebuffer(gl::FRAMEBUFFER, self.handle); }
     }
 
+    #[allow(clippy::unused_self)]
     pub fn unbind(&self) {
         unsafe { gl::BindFramebuffer(gl::FRAMEBUFFER, 0); }
     }
 
+    #[allow(clippy::unused_self)]
     pub fn clear(&self, r: f32, g: f32, b: f32, a: f32) {
         unsafe {
             gl::ClearColor(r, g, b, a);
@@ -74,7 +76,7 @@ impl Framebuffer {
         let mut bytes = vec![0; (self.width * self.height * 4) as usize];
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, self.handle);
-            gl::ReadPixels(0, 0, self.width, self.height, gl::RGBA, gl::UNSIGNED_BYTE, &mut bytes[0] as *mut u8 as *mut GLvoid);
+            gl::ReadPixels(0, 0, self.width, self.height, gl::RGBA, gl::UNSIGNED_BYTE, ptr::addr_of_mut!(bytes[0]).cast());
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
         }
         bytes

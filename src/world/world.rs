@@ -8,7 +8,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::world::chunk;
 use crate::world::chunk::{Chunk, ChunkPos};
 
-/// BorrowedChunk wraps around an actual chunks which temporarily got its ownership transferred
+/// `BorrowedChunk` wraps around an actual chunks which temporarily got its ownership transferred
 /// to the borrowed chunk. It is intended to be returned to the [`World`] by calling
 /// [`World::return_chunk`] but dropping it is also valid, in case the chunk should be removed.
 pub struct BorrowedChunk {
@@ -17,8 +17,8 @@ pub struct BorrowedChunk {
 }
 
 impl BorrowedChunk {
-    pub fn from(chunk: Chunk) -> BorrowedChunk {
-        BorrowedChunk {
+    pub fn from(chunk: Chunk) -> Self {
+        Self {
             chunk: Some(chunk),
             was_dropped: Arc::new(AtomicBool::new(false)),
         }
@@ -60,8 +60,8 @@ pub struct World {
 }
 
 impl World {
-    pub fn new() -> World {
-        World {
+    pub fn new() -> Self {
+        Self {
             chunks: FxHashMap::default(),
             changed_chunks_set: FxHashSet::default(),
             changed_chunks: VecDeque::new(),
@@ -247,8 +247,8 @@ mod tests {
         ]);
 
         // assert that changed chunks are empty after get_changed_chunks
-        assert_eq!(true, world.changed_chunks_set.is_empty());
-        assert_eq!(true, world.changed_chunks.is_empty());
+        assert!(world.changed_chunks_set.is_empty());
+        assert!(world.changed_chunks.is_empty());
 
         // modify world
         let mut_chunk = world.get_chunk_mut(&ChunkPos::new(2, 0, 0));
@@ -287,14 +287,14 @@ mod tests {
             assert!(world.borrow_chunk(&ChunkPos::new(0, 0, 0)).is_none());
             assert!(world.get_chunk(&ChunkPos::new(0, 0, 0)).is_none());
             assert_eq!(world.get_block(0, 0, 0), chunk::NO_BLOCK);
-            assert_eq!(world.set_block(0, 0, 0, 1), false);
+            assert!(!world.set_block(0, 0, 0, 1));
 
             world.return_chunk(borrow.unwrap());
             assert!(world.borrowed_chunks.is_empty());
 
             assert!(world.get_chunk(&ChunkPos::new(0, 0, 0)).is_some());
             assert_eq!(world.get_block(0, 0, 0), 1);
-            assert_eq!(world.set_block(0, 0, 0, 1), true);
+            assert!(world.set_block(0, 0, 0, 1));
 
             world.get_changed_chunks(10); // drain changes
         }
@@ -307,7 +307,7 @@ mod tests {
 
             drop(borrow);
             let chunk_ref = world.borrowed_chunks.get(&ChunkPos::new(0, 0, 0)).unwrap();
-            assert_eq!(chunk_ref.was_dropped.load(Ordering::Relaxed), true);
+            assert!(chunk_ref.was_dropped.load(Ordering::Relaxed));
 
             assert!(world.get_changed_chunks(10).is_empty());
             assert!(world.borrowed_chunks.is_empty());
