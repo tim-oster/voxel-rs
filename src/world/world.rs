@@ -81,12 +81,18 @@ impl World {
     /// also overridden.
     pub fn set_chunk(&mut self, chunk: Chunk) {
         let pos = chunk.pos;
+        self.set_chunk_unchanged(chunk);
+        self.mark_chunk_as_changed(&pos);
+    }
+
+    /// Sets a chunk similar to [`World::set_chunk`] but does not flag the chunk as changed.
+    pub fn set_chunk_unchanged(&mut self, chunk: Chunk) {
+        let pos = chunk.pos;
 
         // remove it from borrowed chunks to prevent the old, borrowed chunk from being returned
         self.borrowed_chunks.remove(&pos);
 
         self.chunks.insert(pos, chunk);
-        self.mark_chunk_as_changed(&pos);
     }
 
     /// Removes the chunk at the given position and marks that position as changed. If the chunk at

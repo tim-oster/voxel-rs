@@ -120,7 +120,7 @@ impl Svo {
             self.on_coord_space_change();
         }
 
-        let results = self.processor.get_results(50);
+        let results = self.processor.get_results(400);
         let chunks = self.process_serialized_chunks(results);
 
         if !self.has_changed {

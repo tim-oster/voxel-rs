@@ -152,12 +152,18 @@ impl World {
                 println!("generate {} new chunks", generate_count);
             }
         }
-        for chunk in self.world_generator.get_generated_chunks(40) {
+        for chunk in self.world_generator.get_generated_chunks(400) {
             if self.chunk_loader.is_loaded(&chunk.pos) {
-                self.world.set_chunk(chunk);
+                let pos = chunk.pos;
+
+                // set chunk to world but shortcut the change detection mechanism to avoid unnecessary iterations
+                self.world.set_chunk_unchanged(chunk);
+
+                let chunk = self.world.borrow_chunk(&pos).unwrap();
+                self.world_svo.set_chunk(chunk);
             }
         }
-        for pos in self.world.get_changed_chunks(40) {
+        for pos in self.world.get_changed_chunks(400) {
             if let Some(chunk) = self.world.get_chunk(&pos) {
                 if chunk.storage.is_some() {
                     let chunk = self.world.borrow_chunk(&pos).unwrap();
