@@ -67,7 +67,7 @@ impl<T> Buffer<T> {
                 self.handle,
                 0,
                 (mem::size_of::<T>() * self.data.as_ref().unwrap().len()) as GLsizeiptr,
-                (self.data.as_mut().unwrap().get_mut(0).unwrap() as *mut T).cast(),
+                ptr::from_mut(self.data.as_mut().unwrap().get_mut(0).unwrap()).cast(),
             );
         }
     }
