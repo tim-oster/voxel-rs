@@ -17,8 +17,8 @@ pub struct Input {
 
 #[allow(dead_code)]
 impl Input {
-    pub(super) fn new() -> Input {
-        Input {
+    pub(super) fn new() -> Self {
+        Self {
             pressed_keys: FxHashSet::default(),
             released_keys: FxHashSet::default(),
             last_key_modifiers: glfw::Modifiers::empty(),
@@ -43,8 +43,8 @@ impl Input {
         self.last_button_state = self.pressed_buttons.clone();
     }
 
-    pub(super) fn handle_event(&mut self, event: glfw::WindowEvent) {
-        match event {
+    pub(super) fn handle_event(&mut self, event: &glfw::WindowEvent) {
+        match *event {
             glfw::WindowEvent::Key(key, _, action, modifiers) => match action {
                 glfw::Action::Press => {
                     self.last_key_modifiers = modifiers;
@@ -55,7 +55,7 @@ impl Input {
                     self.released_keys.insert(key);
                     self.pressed_keys.remove(&key);
                 }
-                _ => (),
+                glfw::Action::Repeat => ()
             },
             glfw::WindowEvent::Char(character) => {
                 self.char_input_buffer.push(character);
@@ -79,38 +79,38 @@ impl Input {
                     self.released_buttons.insert(button);
                     self.pressed_buttons.remove(&button);
                 }
-                _ => (),
+                glfw::Action::Repeat => (),
             },
             _ => (),
         }
     }
 
-    /// is_key_pressed returns true if the key is currently pressed down.
-    pub fn is_key_pressed(&self, key: &glfw::Key) -> bool {
-        self.pressed_keys.contains(key)
+    /// `is_key_pressed` returns true if the key is currently pressed down.
+    pub fn is_key_pressed(&self, key: glfw::Key) -> bool {
+        self.pressed_keys.contains(&key)
     }
 
-    /// was_key_pressed returns true if the key was released in the last update.
-    pub fn was_key_pressed(&self, key: &glfw::Key) -> bool {
-        self.released_keys.contains(key)
+    /// `was_key_pressed` returns true if the key was released in the last update.
+    pub fn was_key_pressed(&self, key: glfw::Key) -> bool {
+        self.released_keys.contains(&key)
     }
 
-    /// is_button_pressed returns true if the mouse button is currently being held.
-    pub fn is_button_pressed(&self, button: &glfw::MouseButton) -> bool {
-        self.pressed_buttons.contains(button)
+    /// `is_button_pressed` returns true if the mouse button is currently being held.
+    pub fn is_button_pressed(&self, button: glfw::MouseButton) -> bool {
+        self.pressed_buttons.contains(&button)
     }
 
-    /// is_button_pressed_once returns true if this is the first update the mouse button was pressed.
-    pub fn is_button_pressed_once(&self, button: &glfw::MouseButton) -> bool {
-        self.pressed_buttons.contains(button) && !self.last_button_state.contains(button)
+    /// `is_button_pressed_once` returns true if this is the first update the mouse button was pressed.
+    pub fn is_button_pressed_once(&self, button: glfw::MouseButton) -> bool {
+        self.pressed_buttons.contains(&button) && !self.last_button_state.contains(&button)
     }
 
-    /// was_button_pressed returns true if the mouse button was released in the last update.
-    pub fn was_button_pressed(&self, button: &glfw::MouseButton) -> bool {
-        self.released_buttons.contains(button)
+    /// `was_button_pressed` returns true if the mouse button was released in the last update.
+    pub fn was_button_pressed(&self, button: glfw::MouseButton) -> bool {
+        self.released_buttons.contains(&button)
     }
 
-    /// get_mouse_delta returns the distance the mouse has moved since the last update.
+    /// `get_mouse_delta` returns the distance the mouse has moved since the last update.
     pub fn get_mouse_delta(&self) -> cgmath::Vector2<f32> {
         self.mouse_delta
     }
@@ -121,7 +121,7 @@ impl Input {
             io.mouse_delta = [self.mouse_delta.x, self.mouse_delta.y];
             io.mouse_wheel = self.mouse_wheel_delta;
 
-            for ch in self.char_input_buffer.iter() {
+            for ch in &self.char_input_buffer {
                 io.add_input_character(*ch);
             }
         } else {
@@ -132,30 +132,27 @@ impl Input {
             io.clear_input_characters();
         }
 
-        for key in self.pressed_keys.iter() {
+        for key in &self.pressed_keys {
             io.keys_down[*key as usize] = forward_input_events;
         }
-        for key in self.released_keys.iter() {
+        for key in &self.released_keys {
             io.keys_down[*key as usize] = false;
         }
 
-        for button in self.pressed_buttons.iter() {
+        for button in &self.pressed_buttons {
             let idx = *button as usize;
             if idx < io.mouse_down.len() {
                 io.mouse_down[idx] = forward_input_events;
             }
         }
-        for button in self.released_buttons.iter() {
+        for button in &self.released_buttons {
             let idx = *button as usize;
             if idx < io.mouse_down.len() {
                 io.mouse_down[idx] = false;
             }
         }
 
-        let mut mods = self.last_key_modifiers;
-        if !forward_input_events {
-            mods = glfw::Modifiers::empty();
-        }
+        let mods = if forward_input_events { self.last_key_modifiers } else { glfw::Modifiers::empty() };
         io.key_ctrl = mods.intersects(glfw::Modifiers::Control);
         io.key_alt = mods.intersects(glfw::Modifiers::Alt);
         io.key_shift = mods.intersects(glfw::Modifiers::Shift);

@@ -31,14 +31,14 @@ pub(super) struct PickerResult {
     pub normal: AlignedVec3<f32>,
 }
 
-/// PickerBatch keeps tracks of Rays and AABBs, serializes and deserializes them when raycast
+/// `PickerBatch` keeps tracks of Rays and AABBs, serializes and deserializes them when raycast
 /// again a SVO.
 impl PickerBatch {
-    pub fn new() -> PickerBatch {
+    pub fn new() -> Self {
         Self::with_capacity(MAX_SVO_PICKER_JOBS)
     }
 
-    pub fn with_capacity(capacity: usize) -> PickerBatch {
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
             rays: Vec::with_capacity(capacity),
             aabbs: Vec::with_capacity(capacity),
@@ -58,7 +58,7 @@ impl PickerBatch {
         self.aabbs.push(aabb);
     }
 
-    /// serialize_tasks transforms all tasks on this batch into actual PickerTasks and writes them
+    /// `serialize_tasks` transforms all tasks on this batch into actual `PickerTasks` and writes them
     /// to the given task buffer.
     pub(super) fn serialize_tasks(&self, tasks: &mut [PickerTask]) -> usize {
         let mut offset = 0;
@@ -79,7 +79,7 @@ impl PickerBatch {
         offset
     }
 
-    /// deserialize_results reads all results from the given result buffer and parses the results
+    /// `deserialize_results` reads all results from the given result buffer and parses the results
     /// for all jobs on this batch.
     pub(super) fn deserialize_results(&self, results: &[PickerResult], dst: &mut PickerBatchResult) {
         let mut offset = 0;
@@ -111,11 +111,11 @@ pub struct PickerBatchResult {
 }
 
 impl PickerBatchResult {
-    pub fn new() -> PickerBatchResult {
+    pub fn new() -> Self {
         Self::with_capacity(MAX_SVO_PICKER_JOBS)
     }
 
-    pub fn with_capacity(capacity: usize) -> PickerBatchResult {
+    pub fn with_capacity(capacity: usize) -> Self {
         Self {
             rays: Vec::with_capacity(capacity),
             aabbs: Vec::with_capacity(capacity),
@@ -135,7 +135,7 @@ pub struct Ray {
     pub max_dst: f32,
 }
 
-/// RayResult represent a ray intersection with a voxel. Only if dst != -1.0, are any of the other
+/// `RayResult` represent a ray intersection with a voxel. Only if dst != -1.0, are any of the other
 /// fields valid. If a ray is cast from within a voxel, no intersection is returned for the voxel
 /// from within the cast originates.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -147,6 +147,7 @@ pub struct RayResult {
 }
 
 impl RayResult {
+    #[allow(clippy::float_cmp)]
     pub fn did_hit(&self) -> bool {
         self.dst != -1.0
     }
@@ -167,7 +168,7 @@ pub struct AabbResult {
 
 impl Default for AabbResult {
     fn default() -> Self {
-        AabbResult {
+        Self {
             neg: Vector3::new(-1.0, -1.0, -1.0),
             pos: Vector3::new(-1.0, -1.0, -1.0),
         }
@@ -175,8 +176,8 @@ impl Default for AabbResult {
 }
 
 impl Aabb {
-    pub fn new(pos: Point3<f32>, offset: Vector3<f32>, extents: Vector3<f32>) -> Aabb {
-        Aabb { pos, offset, extents }
+    pub fn new(pos: Point3<f32>, offset: Vector3<f32>, extents: Vector3<f32>) -> Self {
+        Self { pos, offset, extents }
     }
 
     fn generate_picker_tasks(&self, dst: &mut [PickerTask]) -> usize {
@@ -276,11 +277,15 @@ impl Aabb {
 
                         let dst = data[res_index].dst;
                         res_index += 1;
+
+                        #[allow(clippy::float_cmp)]
                         if dst == -1.0 {
                             continue;
                         }
 
-                        let ref_index = i * 2 + if v == 0 { 1 } else { 0 };
+                        let ref_index = i * 2 + usize::from(v == 0);
+
+                        #[allow(clippy::float_cmp)]
                         if *references[ref_index] == -1.0 {
                             *references[ref_index] = dst;
                         } else {

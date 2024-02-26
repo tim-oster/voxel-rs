@@ -12,13 +12,13 @@ pub const NO_BLOCK: BlockId = 0;
 
 // -------------------------------------------------------------------------------------------------
 
-/// ChunkStorageAllocator is an allocator for ChunkStorage objects.
+/// `ChunkStorageAllocator` is an allocator for `ChunkStorage` objects.
 pub struct ChunkStorageAllocator {
     pool: Pool<ChunkStorage, StatsAllocator>,
 }
 
 impl ChunkStorageAllocator {
-    pub fn new() -> ChunkStorageAllocator {
+    pub fn new() -> Self {
         let pool = Pool::new_in(
             Box::new(|alloc| {
                 // It is difficult to choose the correct capacity for the octree storage, as octrees can differ a lot.
@@ -34,7 +34,7 @@ impl ChunkStorageAllocator {
             })),
             StatsAllocator::new(),
         );
-        ChunkStorageAllocator { pool }
+        Self { pool }
     }
 
     pub fn allocated_bytes(&self) -> usize {
@@ -100,8 +100,8 @@ pub struct Chunk {
 }
 
 impl Chunk {
-    pub fn new(pos: ChunkPos, lod: u8, storage: Pooled<ChunkStorage>) -> Chunk {
-        Chunk { pos, lod, storage: Some(storage) }
+    pub fn new(pos: ChunkPos, lod: u8, storage: Pooled<ChunkStorage>) -> Self {
+        Self { pos, lod, storage: Some(storage) }
     }
 
     pub fn get_block(&self, x: u32, y: u32, z: u32) -> BlockId {
@@ -120,11 +120,19 @@ impl Chunk {
             self.storage.as_mut().unwrap().set_leaf(Position(x, y, z), block);
         }
     }
+
+    /// Iterates through the whole chunk calling `f` for each block and sets it to the returned value. Any previous
+    /// block information is cleared.
+    pub fn fill_with<F: Fn(u32, u32, u32) -> Option<BlockId>>(&mut self, f: F) {
+        assert!(self.storage.is_some());
+
+        self.storage.as_mut().unwrap().construct_octants_with(5, |pos| f(pos.0, pos.1, pos.2));
+    }
 }
 
 // -------------------------------------------------------------------------------------------------
 
-/// ChunkPos represents a chunk's position in world space. One increment in chunk coord space is
+/// `ChunkPos` represents a chunk's position in world space. One increment in chunk coord space is
 /// equal to 32 increments in block coord space.
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug, Ord, PartialOrd)]
 pub struct ChunkPos {
@@ -135,28 +143,28 @@ pub struct ChunkPos {
 
 #[allow(dead_code)]
 impl ChunkPos {
-    pub fn new(x: i32, y: i32, z: i32) -> ChunkPos {
-        ChunkPos { x, y, z }
+    pub fn new(x: i32, y: i32, z: i32) -> Self {
+        Self { x, y, z }
     }
 
-    pub fn from_block_pos(x: i32, y: i32, z: i32) -> ChunkPos {
-        ChunkPos { x: x >> 5, y: y >> 5, z: z >> 5 }
+    pub fn from_block_pos(x: i32, y: i32, z: i32) -> Self {
+        Self { x: x >> 5, y: y >> 5, z: z >> 5 }
     }
 
     /// Returns the squared distance between this and the other chunk position.
-    pub fn dst_sq(&self, other: &ChunkPos) -> f32 {
+    pub fn dst_sq(&self, other: &Self) -> f32 {
         let dx = (other.x - self.x) as f32;
         let dy = (other.y - self.y) as f32;
         let dz = (other.z - self.z) as f32;
-        dx * dx + dy * dy + dz * dz
+        dz.mul_add(dz, dx.mul_add(dx, dy * dy))
     }
 
     /// Returns the squared distance between this and the other chunk position, but ignores the difference on the
     /// y-axis.
-    pub fn dst_2d_sq(&self, other: &ChunkPos) -> f32 {
+    pub fn dst_2d_sq(&self, other: &Self) -> f32 {
         let dx = (other.x - self.x) as f32;
         let dz = (other.z - self.z) as f32;
-        dx * dx + dz * dz
+        dx.mul_add(dx, dz * dz)
     }
 
     pub fn as_block_pos(&self) -> Point3<i32> {
@@ -166,7 +174,7 @@ impl ChunkPos {
 
 impl<T: num_traits::AsPrimitive<i32>> From<Point3<T>> for ChunkPos {
     fn from(value: Point3<T>) -> Self {
-        ChunkPos::from_block_pos(value.x.as_(), value.y.as_(), value.z.as_())
+        Self::from_block_pos(value.x.as_(), value.y.as_(), value.z.as_())
     }
 }
 
@@ -174,7 +182,7 @@ impl Sub for ChunkPos {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        ChunkPos {
+        Self {
             x: self.x - rhs.x,
             y: self.y - rhs.y,
             z: self.z - rhs.z,
@@ -237,7 +245,7 @@ mod chunk_pos_test {
 
 // -------------------------------------------------------------------------------------------------
 
-/// BlockPos represents a block's position relative to the chunk it is in. Negative coordinates are
+/// `BlockPos` represents a block's position relative to the chunk it is in. Negative coordinates are
 /// special because a block position of x=-1 is x=31 inside the actual chunk.
 #[derive(Debug, PartialEq)]
 pub struct BlockPos {
@@ -249,8 +257,8 @@ pub struct BlockPos {
 
 #[allow(dead_code)]
 impl BlockPos {
-    pub fn new(x: i32, y: i32, z: i32) -> BlockPos {
-        BlockPos {
+    pub fn new(x: i32, y: i32, z: i32) -> Self {
+        Self {
             chunk: ChunkPos::from_block_pos(x, y, z),
             rel_x: (x & 31) as f32,
             rel_y: (y & 31) as f32,
@@ -258,7 +266,7 @@ impl BlockPos {
         }
     }
 
-    pub fn from(pos: Point3<f32>) -> BlockPos {
+    pub fn from(pos: Point3<f32>) -> Self {
         let (x, y, z) = (pos.x.floor() as i32, pos.y.floor() as i32, pos.z.floor() as i32);
         let (mut fx, mut fy, mut fz) = (pos.x.fract(), pos.y.fract(), pos.z.fract());
 
@@ -266,7 +274,7 @@ impl BlockPos {
         if fy != 0.0 && pos.y < 0.0 { fy += 1.0; }
         if fz != 0.0 && pos.z < 0.0 { fz += 1.0; }
 
-        BlockPos {
+        Self {
             chunk: ChunkPos::from_block_pos(x, y, z),
             rel_x: (x & 31) as f32 + fx,
             rel_y: (y & 31) as f32 + fy,

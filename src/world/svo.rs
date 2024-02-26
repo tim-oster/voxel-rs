@@ -13,27 +13,27 @@ use crate::world::world::BorrowedChunk;
 
 pub type ChunkBufferPool<A = StatsAllocator> = Pool<ChunkBuffer<A>, A>;
 
-/// ChunkBuffer abstracts the temporary storage used for serializing octants into the SVO format.
+/// `ChunkBuffer` abstracts the temporary storage used for serializing octants into the SVO format.
 pub struct ChunkBuffer<A: Allocator = Global> {
     data: Vec<u32, A>,
 }
 
 impl ChunkBuffer {
-    pub fn new() -> ChunkBuffer {
+    pub fn new() -> Self {
         Self::new_in(Global)
     }
 
-    pub fn with_capacity(capacity: usize) -> ChunkBuffer {
+    pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_in(capacity, Global)
     }
 }
 
 impl<A: Allocator> ChunkBuffer<A> {
-    pub fn new_in(alloc: A) -> ChunkBuffer<A> {
+    pub fn new_in(alloc: A) -> Self {
         Self::with_capacity_in(0, alloc)
     }
 
-    pub fn with_capacity_in(capacity: usize, alloc: A) -> ChunkBuffer<A> {
+    pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         Self { data: Vec::with_capacity_in(capacity, alloc) }
     }
 
@@ -42,7 +42,7 @@ impl<A: Allocator> ChunkBuffer<A> {
     }
 }
 
-/// OctantChange describes if an octant was added (and where), or if it was removed.
+/// `OctantChange` describes if an octant was added (and where), or if it was removed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
 enum OctantChange {
     Add(u64, LeafId),
@@ -58,7 +58,7 @@ pub trait SvoSerializable {
     fn serialize(&mut self, dst: &mut Vec<u32>, lod: u8) -> SerializationResult;
 }
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct SerializationResult {
     /// One bit per child to describe if the octant contains anything or is empty.
     pub child_mask: u8,
@@ -149,11 +149,11 @@ struct LeafInfo {
 }
 
 impl<T: SvoSerializable> Svo<T> {
-    pub fn new() -> Svo<T> {
+    pub fn new() -> Self {
         Self::new_in(Global)
     }
 
-    pub fn with_capacity(capacity: usize) -> Svo<T> {
+    pub fn with_capacity(capacity: usize) -> Self {
         Self::with_capacity_in(capacity, Global)
     }
 }
@@ -162,11 +162,11 @@ impl<T: SvoSerializable, A: Allocator> Svo<T, A> {
     /// Static size of the serialized data required for wrapping the root octant into a traversable format.
     const PREAMBLE_LENGTH: u32 = 5;
 
-    pub fn new_in(alloc: A) -> Svo<T, A> {
+    pub fn new_in(alloc: A) -> Self {
         Self::with_capacity_in(0, alloc)
     }
 
-    pub fn with_capacity_in(capacity: usize, alloc: A) -> Svo<T, A> {
+    pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
         Self {
             octree: Octree::new(),
             change_set: FxHashSet::default(),
@@ -336,12 +336,14 @@ impl<T: SvoSerializable, A: Allocator> Svo<T, A> {
             let offset = changed_range.start as isize;
             let src = self.buffer.bytes.as_ptr().offset(offset);
 
-            if changed_range.start + changed_range.length >= dst_len {
-                // For now a simple implementation suffices instead of having a mechanism that grows the target buffer,
-                // as that involves doing so on the GPU. Panic instead to make it easy to spot and prefer a cheaper,
-                // over-sized buffer.
-                panic!("dst is not large enough: len={} range_start={} range_length={}", dst_len, changed_range.start, changed_range.length);
-            }
+            // For now a simple implementation suffices instead of having a mechanism that grows the target buffer,
+            // as that involves doing so on the GPU. Panic instead to make it easy to spot and prefer a cheaper,
+            // over-sized buffer.
+            assert!(changed_range.start + changed_range.length < dst_len,
+                    "dst is not large enough: len={} range_start={} range_length={}",
+                    dst_len, changed_range.start, changed_range.length,
+            );
+
             ptr::copy(src, dst.offset(offset), changed_range.length);
         }
 
@@ -364,7 +366,7 @@ impl<T: SvoSerializable, A: Allocator> Svo<T, A> {
     }
 }
 
-/// SerializedChunk is a wrapper that serializes the given chunk on creation and stores the results.
+/// `SerializedChunk` is a wrapper that serializes the given chunk on creation and stores the results.
 pub struct SerializedChunk {
     pub pos: ChunkPos,
     pos_hash: u64,
@@ -375,7 +377,7 @@ pub struct SerializedChunk {
 }
 
 impl SerializedChunk {
-    pub fn new(chunk: BorrowedChunk, alloc: Arc<ChunkBufferPool>) -> SerializedChunk {
+    pub fn new(chunk: BorrowedChunk, alloc: &Arc<ChunkBufferPool>) -> Self {
         let pos = chunk.pos;
         let lod = chunk.lod;
 
@@ -388,7 +390,7 @@ impl SerializedChunk {
         let mut buffer = alloc.allocate();
         let result = Self::serialize(storage, &mut buffer.data, lod);
         let buffer = if result.depth > 0 { Some(buffer) } else { None };
-        SerializedChunk { pos, pos_hash, lod, borrowed_chunk: Some(chunk), buffer, result }
+        Self { pos, pos_hash, lod, borrowed_chunk: Some(chunk), buffer, result }
     }
 
     fn serialize<A1: Allocator, A2: Allocator>(octree: &Octree<BlockId, A1>, dst: &mut Vec<u32, A2>, lod: u8) -> SerializationResult {
@@ -566,7 +568,7 @@ mod svo_tests {
     use crate::world::octree::{LeafId, Octree, Position};
     use crate::world::svo::{ChunkBuffer, LeafInfo, Range, SerializationResult, SerializedChunk, Svo, SvoBuffer};
 
-    /// Tests that serializing an SVO with SerializedChunk values produces the expected result buffer.
+    /// Tests that serializing an SVO with `SerializedChunk` values produces the expected result buffer.
     #[test]
     fn serialize() {
         let mut octree = Octree::new();
@@ -576,7 +578,7 @@ mod svo_tests {
         octree.expand_to(5);
         octree.compact();
 
-        let alloc = Pool::new_in(Box::new(|alloc| ChunkBuffer::new_in(alloc)), None, StatsAllocator::new());
+        let alloc = Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new());
         let mut buffer = alloc.allocate();
         let result = SerializedChunk::serialize(&octree, &mut buffer.data, 0);
         let sc = SerializedChunk {
@@ -720,7 +722,7 @@ mod svo_tests {
             0,
             0,
             // outer octree, first node body
-            0, 0 + preamble_length, 0, 0,
+            0, preamble_length, 0, 0,
             0, 0, 0, 0,
         ];
         assert_eq!(svo.buffer, SvoBuffer {
@@ -1176,7 +1178,7 @@ mod svo_tests {
             16 << 8 | 16,
             0,
             // core octant body
-            0, (1 << 31) | 7, (1 << 31) | (6 + 1 * 12), 0,
+            0, (1 << 31) | 7, (1 << 31) | (6 + 12), 0,
             (1 << 31) | (4 + 2 * 12), 0, 0, 0,
 
             // subtree for (1,0,0)
@@ -1242,7 +1244,7 @@ pub struct Range {
     pub length: usize,
 }
 
-/// SvoBuffer allows for copying data to an internal buffer and keeping track of the range the data was copied to using
+/// `SvoBuffer` allows for copying data to an internal buffer and keeping track of the range the data was copied to using
 /// unique ids. Those ids can be used to remove data from the buffer again.
 ///
 /// Removing data does not free up the already allocated memory but instead marks the range inside the buffer as free.
@@ -1266,18 +1268,18 @@ impl<A: Allocator> PartialEq for SvoBuffer<A> {
 }
 
 impl<A: Allocator> SvoBuffer<A> {
-    fn with_capacity_in(initial_capacity: usize, alloc: A) -> SvoBuffer<A> {
+    fn with_capacity_in(initial_capacity: usize, alloc: A) -> Self {
         let mut bytes = Vec::with_capacity_in(initial_capacity, alloc);
         bytes.extend(std::iter::repeat(0).take(initial_capacity));
 
-        let mut buffer = SvoBuffer {
+        let mut buffer = Self {
             bytes,
             free_ranges: Vec::new(),
             updated_ranges: Vec::new(),
             octant_to_range: FxHashMap::default(),
         };
         if initial_capacity > 0 {
-            buffer.free_ranges.push(Range { start: 0, length: initial_capacity })
+            buffer.free_ranges.push(Range { start: 0, length: initial_capacity });
         }
         buffer
     }

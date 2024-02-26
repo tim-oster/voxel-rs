@@ -23,9 +23,6 @@ tempfile = "3.8.1"
 rustc-hash = "1.1.0"
 dhat = "0.3.2"
 
-[dev-dependencies]
-mockall = "0.11.2"
-
 [build-dependencies]
 walkdir = "2.4.0"
 rustc-hash = "1.1.0"

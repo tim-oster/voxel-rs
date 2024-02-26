@@ -37,8 +37,8 @@ impl Gameplay {
     const JUMP_SPEED: f32 = 13.0;
     const ROTATION_SPEED: f32 = 0.002;
 
-    pub fn new() -> Gameplay {
-        Gameplay {
+    pub fn new() -> Self {
+        Self {
             ui_view: Matrix4::identity(),
             crosshair_shader: Resource::new(
                 || ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/crosshair.glsl")?.build()
@@ -54,11 +54,11 @@ impl Gameplay {
     }
 
     pub fn update(&mut self, frame: &mut Frame, player: &mut Entity, world: &mut gamelogic::world::World) {
-        if frame.input.was_key_pressed(&glfw::Key::Escape) {
+        if frame.input.was_key_pressed(glfw::Key::Escape) {
             frame.request_close();
         }
         if frame.is_cursor_grabbed() {
-            self.handle_mouse_movement(frame, player);
+            Self::handle_mouse_movement(frame, player);
             self.handle_voxel_placement(frame, player, world);
         }
 
@@ -71,7 +71,7 @@ impl Gameplay {
 
     pub fn reload_resources(&mut self) {
         if let Err(e) = self.crosshair_shader.reload() {
-            println!("error reloading crosshair shader: {:?}", e);
+            println!("error reloading crosshair shader: {e:?}");
         }
     }
 
@@ -83,7 +83,7 @@ impl Gameplay {
 
         let speed = if player.caps.flying {
             Self::FLY_SPEED
-        } else if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
+        } else if frame.input.is_key_pressed(glfw::Key::LeftShift) {
             Self::NORMAL_SPEED * Self::SPRINT_FACTOR
         } else {
             Self::NORMAL_SPEED
@@ -91,19 +91,19 @@ impl Gameplay {
 
         let mut impulse = Vector3::new(0.0, 0.0, 0.0);
 
-        if frame.input.is_key_pressed(&glfw::Key::W) {
+        if frame.input.is_key_pressed(glfw::Key::W) {
             let speed = forward * speed;
             impulse += speed;
         }
-        if frame.input.is_key_pressed(&glfw::Key::S) {
+        if frame.input.is_key_pressed(glfw::Key::S) {
             let speed = -forward * speed;
             impulse += speed;
         }
-        if frame.input.is_key_pressed(&glfw::Key::A) {
+        if frame.input.is_key_pressed(glfw::Key::A) {
             let speed = -right * speed;
             impulse += speed;
         }
-        if frame.input.is_key_pressed(&glfw::Key::D) {
+        if frame.input.is_key_pressed(glfw::Key::D) {
             let speed = right * speed;
             impulse += speed;
         }
@@ -114,13 +114,25 @@ impl Gameplay {
         player.velocity.x = impulse.x;
         player.velocity.z = impulse.z;
 
-        if frame.input.was_key_pressed(&glfw::Key::F) {
+        if frame.input.was_key_pressed(glfw::Key::F) {
             player.caps.flying = !player.caps.flying;
         }
-        if !player.caps.flying {
+        if player.caps.flying {
+            self.is_jumping = false;
+            self.was_grounded = false;
+
+            player.velocity.y = 0.0;
+
+            if frame.input.is_key_pressed(glfw::Key::Space) {
+                player.velocity.y = speed;
+            }
+            if frame.input.is_key_pressed(glfw::Key::LeftShift) {
+                player.velocity.y = -speed;
+            }
+        } else {
             let is_grounded = player.get_state().is_grounded;
 
-            if frame.input.is_key_pressed(&glfw::Key::Space) && self.was_grounded {
+            if frame.input.is_key_pressed(glfw::Key::Space) && self.was_grounded {
                 if !self.is_jumping {
                     self.is_jumping = true;
                     player.velocity.y = Self::JUMP_SPEED;
@@ -130,22 +142,10 @@ impl Gameplay {
             }
 
             self.was_grounded = is_grounded;
-        } else {
-            self.is_jumping = false;
-            self.was_grounded = false;
-
-            player.velocity.y = 0.0;
-
-            if frame.input.is_key_pressed(&glfw::Key::Space) {
-                player.velocity.y = speed;
-            }
-            if frame.input.is_key_pressed(&glfw::Key::LeftShift) {
-                player.velocity.y = -speed;
-            }
         }
     }
 
-    fn handle_mouse_movement(&mut self, frame: &Frame, player: &mut Entity) {
+    fn handle_mouse_movement(frame: &Frame, player: &mut Entity) {
         let delta = frame.input.get_mouse_delta();
         if delta.x.abs() > 0.01 {
             player.euler_rotation.y += delta.x * Self::ROTATION_SPEED;
@@ -176,8 +176,8 @@ impl Gameplay {
         let hot_bar = [blocks::GRASS, blocks::DIRT, blocks::STONE, blocks::STONE_BRICKS, blocks::GLASS];
         for i in 1..=hot_bar.len() {
             let key = glfw::Key::Num1 as c_int + (i - 1) as c_int;
-            let key = &key as *const c_int as *const glfw::Key;
-            let key = unsafe { &*key };
+            let key = std::ptr::addr_of!(key).cast();
+            let key = unsafe { *key };
 
             if frame.input.was_key_pressed(key) {
                 self.selected_block = i as BlockId;
@@ -185,7 +185,7 @@ impl Gameplay {
         }
 
         // removing blocks
-        if frame.input.is_button_pressed_once(&glfw::MouseButton::Button1) && block_result.did_hit() {
+        if frame.input.is_button_pressed_once(glfw::MouseButton::Button1) && block_result.did_hit() {
             let x = block_result.pos.x.floor() as i32;
             let y = block_result.pos.y.floor() as i32;
             let z = block_result.pos.z.floor() as i32;
@@ -193,7 +193,7 @@ impl Gameplay {
         }
 
         // block picking
-        if frame.input.is_button_pressed_once(&glfw::MouseButton::Button3) && block_result.did_hit() {
+        if frame.input.is_button_pressed_once(glfw::MouseButton::Button3) && block_result.did_hit() {
             let x = block_result.pos.x.floor() as i32;
             let y = block_result.pos.y.floor() as i32;
             let z = block_result.pos.z.floor() as i32;
@@ -201,7 +201,7 @@ impl Gameplay {
         }
 
         // adding blocks
-        if frame.input.is_button_pressed_once(&glfw::MouseButton::Button2) && block_result.did_hit() {
+        if frame.input.is_button_pressed_once(glfw::MouseButton::Button2) && block_result.did_hit() {
             let block_normal = block_result.normal;
             let block_pos = block_result.pos.add(block_normal);
             let x = block_pos.x.floor() as i32 as f32;

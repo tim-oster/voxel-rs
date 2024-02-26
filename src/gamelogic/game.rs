@@ -38,8 +38,8 @@ struct State {
 }
 
 impl Game {
-    pub fn new() -> Game {
-        let mut window = Window::new(Config {
+    pub fn new() -> Self {
+        let mut window = Window::new(&Config {
             width: 1024,
             height: 768,
             title: "voxel engine",
@@ -62,7 +62,7 @@ impl Game {
         let world = World::new(Rc::clone(&job_system), 20);
         let gameplay = Gameplay::new();
 
-        Game {
+        Self {
             window,
             job_system: Rc::clone(&job_system),
             state: State {
@@ -146,7 +146,7 @@ impl State {
     fn update(&mut self, frame: &mut Frame) {
         self.handle_debug_keys(frame);
 
-        self.world.update(&mut self.player);
+        self.world.update(&self.player);
         self.gameplay.update(frame, &mut self.player, &mut self.world);
         self.world.selected_voxel = self.gameplay.looking_at_block.map(|result| result.pos);
     }
@@ -301,16 +301,16 @@ impl State {
     }
 
     fn handle_debug_keys(&mut self, frame: &mut Frame) {
-        if frame.input.was_key_pressed(&glfw::Key::P) {
+        if frame.input.was_key_pressed(glfw::Key::P) {
             self.render_debug_ui = !self.render_debug_ui;
         }
-        if frame.input.was_key_pressed(&glfw::Key::E) {
+        if frame.input.was_key_pressed(glfw::Key::E) {
             self.world.sun_direction = self.world.camera.forward;
         }
-        if frame.input.was_key_pressed(&glfw::Key::R) {
+        if frame.input.was_key_pressed(glfw::Key::R) {
             self.handle_resource_reload();
         }
-        if frame.input.was_key_pressed(&glfw::Key::T) {
+        if frame.input.was_key_pressed(glfw::Key::T) {
             let is_grabbed = frame.is_cursor_grabbed();
             frame.request_grab_cursor(!is_grabbed);
         }
@@ -323,7 +323,7 @@ struct Plot<const N: usize = 90> {
 }
 
 impl<const N: usize> Plot<N> {
-    fn new() -> Plot<N> {
+    fn new() -> Self {
         Self {
             data: [0.0; N],
         }

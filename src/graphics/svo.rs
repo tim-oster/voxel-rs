@@ -26,7 +26,7 @@ pub mod buffer_indices {
 }
 
 /// Svo can be used to render an SVO of [`SerializedChunk`]. It is initialised
-/// with a VoxelRegistry with textures and materials to render the actual chunks.
+/// with a `VoxelRegistry` with textures and materials to render the actual chunks.
 ///
 /// Note that all coordinates passed must be in SVO coordinate space (\[0;size\] along all axes).
 pub struct Svo {
@@ -83,7 +83,7 @@ pub struct RenderParams {
 }
 
 impl Svo {
-    pub fn new(registry: VoxelRegistry) -> Svo {
+    pub fn new(registry: &VoxelRegistry) -> Self {
         let tex_array = registry.build_texture_array().unwrap();
         let material_buffer = registry.build_material_buffer(&tex_array);
         material_buffer.bind_as_storage_buffer(buffer_indices::MATERIALS);
@@ -105,7 +105,7 @@ impl Svo {
         let picker_out_buffer = MappedBuffer::<PickerResult>::new(100);
         picker_out_buffer.bind_as_storage_buffer(buffer_indices::PICKER_OUT);
 
-        Svo {
+        Self {
             tex_array,
             _material_buffer: material_buffer,
             world_shader,
@@ -124,13 +124,13 @@ impl Svo {
 
     pub fn reload_resources(&mut self) {
         if let Err(e) = self.tex_array.reload() {
-            println!("error reloading texture array: {:?}", e);
+            println!("error reloading texture array: {e:?}");
         }
         if let Err(e) = self.world_shader.reload() {
-            println!("error reloading world shader: {:?}", e);
+            println!("error reloading world shader: {e:?}");
         }
         if let Err(e) = self.picker_shader.reload() {
-            println!("error reloading picker shader: {:?}", e);
+            println!("error reloading picker shader: {e:?}");
         }
     }
 
@@ -159,7 +159,7 @@ impl Svo {
     }
 
     /// Draws a full-screen quad on which the raytracing shader is executed.
-    pub fn render(&self, params: RenderParams) {
+    pub fn render(&self, params: &RenderParams) {
         let view_mat = Matrix4::look_to_rh(params.cam_pos, params.cam_fwd, params.cam_up).invert().unwrap();
 
         self.world_shader.bind();
@@ -189,7 +189,7 @@ impl Svo {
 
     /// Uploads the given `batch` to the GPU and runs a compute shader on it to calculate
     /// SVO interceptions without rendering anything.
-    pub fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult) {
+    pub fn raycast(&self, batch: &PickerBatch, result: &mut PickerBatchResult) {
         self.picker_shader.bind();
 
         let in_data = self.picker_in_buffer.as_slice_mut();
@@ -240,9 +240,9 @@ mod svo_tests {
         let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, storage_alloc.allocate());
         builder(&mut chunk);
 
-        let buffer_alloc = Pool::new_in(Box::new(|alloc| ChunkBuffer::new_in(alloc)), None, StatsAllocator::new());
+        let buffer_alloc = Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new());
 
-        let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), Arc::new(buffer_alloc));
+        let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(buffer_alloc));
         let mut svo = world::svo::Svo::<SerializedChunk>::new();
         svo.set_leaf(Position(0, 0, 0), chunk, true);
         svo.serialize();
@@ -290,7 +290,7 @@ mod svo_tests {
             chunk.set_block(3, 3, 3, 2);
         });
 
-        let mut svo = Svo::new(create_voxel_registry());
+        let mut svo = Svo::new(&create_voxel_registry());
         svo.update(&mut world_svo);
 
         let fb = Framebuffer::new(width as i32, height as i32);
@@ -299,7 +299,7 @@ mod svo_tests {
         fb.clear(0.0, 0.0, 0.0, 1.0);
 
         let cam_pos = Point3::new(2.5, 2.5, 7.5);
-        svo.render(RenderParams {
+        svo.render(&RenderParams {
             ambient_intensity: 0.3,
             light_dir: Vector3::new(-1.0, -1.0, -1.0).normalize(),
             cam_pos,
@@ -332,7 +332,7 @@ mod svo_tests {
             chunk.set_block(1, 0, 0, 1);
         });
 
-        let mut svo = Svo::new(create_voxel_registry());
+        let mut svo = Svo::new(&create_voxel_registry());
         svo.update(&mut world_svo);
 
         let mut batch = PickerBatch::new();

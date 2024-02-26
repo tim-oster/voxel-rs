@@ -15,9 +15,10 @@ pub enum StoreError {}
 // TODO should storage system reference count chunks and automatically free & store them once they are
 //      unused? or should other components return their chunks back to the storage layer instead?
 
+#[allow(clippy::pedantic)]
 impl Storage {
-    pub fn new() -> Storage {
-        Storage {}
+    pub fn new() -> Self {
+        Self {}
     }
 
     pub fn load(&mut self, _pos: &ChunkPos) -> Result<Chunk, LoadError> {

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 pub type ConstructorFn<T, A> = Box<dyn Fn(A) -> T + Send + Sync + 'static>;
-pub type ResetFn<T> = Box<dyn Fn(&mut T)>;
+pub type ResetFn<T> = Box<dyn Fn(&mut T) + Send>;
 
 /// Pool allocates new instances using `constructor` on demand, if no previous instance is
 /// available for reuse. Every allocated object has an [`Pooled`] guard, that returns the
@@ -22,14 +22,14 @@ pub struct Pool<T, A: Allocator = Global> {
 }
 
 impl<T> Pool<T> {
-    pub fn new(constructor: ConstructorFn<T, Global>, reset: Option<ResetFn<T>>) -> Pool<T> {
+    pub fn new(constructor: ConstructorFn<T, Global>, reset: Option<ResetFn<T>>) -> Self {
         Self::new_in(constructor, reset, Global)
     }
 }
 
 impl<T, A: Allocator + Clone> Pool<T, A> {
-    pub fn new_in(constructor: ConstructorFn<T, A>, reset: Option<ResetFn<T>>, alloc: A) -> Pool<T, A> {
-        Pool {
+    pub fn new_in(constructor: ConstructorFn<T, A>, reset: Option<ResetFn<T>>, alloc: A) -> Self {
+        Self {
             alloc,
             pool: Arc::new(crossbeam_queue::SegQueue::new()),
             total_allocated: AtomicUsize::new(0),
@@ -68,9 +68,9 @@ impl<T, A: Allocator + Clone> Pool<T, A> {
     }
 }
 
-unsafe impl<T: Send, A: Allocator> Send for Pool<T, A> {}
+unsafe impl<T: Send, A: Allocator + Send> Send for Pool<T, A> {}
 
-unsafe impl<T: Sync, A: Allocator> Sync for Pool<T, A> {}
+unsafe impl<T: Sync, A: Allocator + Sync> Sync for Pool<T, A> {}
 
 pub trait AllocatorStats {
     fn allocated_bytes(&self) -> usize;
@@ -91,14 +91,14 @@ pub struct Pooled<T> {
 }
 
 impl<T> Pooled<T> {
-    fn new(pool: Arc<crossbeam_queue::SegQueue<T>>, value: T) -> Pooled<T> {
-        Pooled { pool, value: Some(value) }
+    fn new(pool: Arc<crossbeam_queue::SegQueue<T>>, value: T) -> Self {
+        Self { pool, value: Some(value) }
     }
 }
 
 impl<T> Drop for Pooled<T> {
     fn drop(&mut self) {
-        self.pool.push(self.value.take().unwrap())
+        self.pool.push(self.value.take().unwrap());
     }
 }
 
@@ -152,18 +152,18 @@ mod pool_tests {
 
 // -------------------------------------------------------------------------------------------------
 
-/// StatsAllocator is a custom rust allocator that keeps track of how much memory it allocated and freed. Its allocation
-/// behaviour is implemented by [Global].
+/// `StatsAllocator` is a custom rust allocator that keeps track of how much memory it allocated and freed. Its allocation
+/// behaviour is implemented by [`Global`].
 ///
 /// It is safe to Clone, all clones of the an instance contribute to the same metric.
-/// It is safe to use across multiple threads. It uses an AtomicUsize to avoid race conditions.
+/// It is safe to use across multiple threads. It uses an `AtomicUsize` to avoid race conditions.
 #[derive(Clone, Default, Debug)]
 pub struct StatsAllocator {
     allocated_bytes: Arc<AtomicUsize>,
 }
 
 impl StatsAllocator {
-    pub fn new() -> StatsAllocator {
+    pub fn new() -> Self {
         Self {
             allocated_bytes: Arc::new(AtomicUsize::new(0)),
         }
@@ -178,7 +178,7 @@ unsafe impl Allocator for StatsAllocator {
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
         self.allocated_bytes.fetch_sub(layout.size(), Ordering::Relaxed);
-        Global.deallocate(ptr, layout)
+        Global.deallocate(ptr, layout);
     }
 }
 
@@ -190,7 +190,7 @@ impl AllocatorStats for StatsAllocator {
 
 // -------------------------------------------------------------------------------------------------
 
-/// GlobalStatsAllocator is identical to StatsAllocator but implements the GlobalAlloc trait, allowing it to be used
+/// `GlobalStatsAllocator` is identical to `StatsAllocator` but implements the `GlobalAlloc` trait, allowing it to be used
 /// as a replacement allocator for the whole rust runtime.
 pub struct GlobalStatsAllocator {
     pub allocated_bytes: AtomicUsize,
@@ -204,6 +204,6 @@ unsafe impl GlobalAlloc for GlobalStatsAllocator {
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
         self.allocated_bytes.fetch_sub(layout.size(), Ordering::Relaxed);
-        System.dealloc(ptr, layout)
+        System.dealloc(ptr, layout);
     }
 }

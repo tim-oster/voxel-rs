@@ -28,7 +28,7 @@ pub enum Buffering {
     Adaptive,
 }
 
-/// GlContext holds the native OpenGL rendering context for glfw as well as the associated event
+/// `GlContext` holds the native OpenGL rendering context for glfw as well as the associated event
 /// queue. Unless for headless testing, creating it directly is discouraged. Use [`Window`]
 /// instead.
 pub struct GlContext {
@@ -36,7 +36,7 @@ pub struct GlContext {
     events: mpsc::Receiver<(f64, glfw::WindowEvent)>,
 }
 
-/// True if GL_ARB_texture_filter_anisotropic extension is loaded.
+/// True if `GL_ARB_texture_filter_anisotropic` extension is loaded.
 pub static mut SUPPORTS_GL_ARB_TEXTURE_FILTER_ANISOTROPIC: bool = false;
 
 // GLFW_CONTEXT is represented as a singleton because it can only be created once per process.
@@ -52,7 +52,7 @@ static GLFW_CONTEXT: Lazy<Mutex<glfw::Glfw>> = Lazy::new(|| {
 
 #[allow(dead_code)]
 impl GlContext {
-    fn new(cfg: Config) -> GlContext {
+    fn new(cfg: &Config) -> Self {
         let mut context = GLFW_CONTEXT.lock().unwrap();
 
         if cfg.msaa_samples > 0 {
@@ -67,7 +67,7 @@ impl GlContext {
 
         window.make_current();
 
-        gl::load_with(|symbol| window.get_proc_address(symbol) as *const _);
+        gl::load_with(|symbol| window.get_proc_address(symbol).cast());
 
         context.set_swap_interval(match cfg.buffering {
             Buffering::Single => SwapInterval::None,
@@ -90,11 +90,11 @@ impl GlContext {
             }
         }
 
-        GlContext { window, events }
+        Self { window, events }
     }
 
-    pub fn new_headless(width: u32, height: u32) -> GlContext {
-        GlContext::new(Config {
+    pub fn new_headless(width: u32, height: u32) -> Self {
+        Self::new(&Config {
             width,
             height,
             title: "",
@@ -134,7 +134,7 @@ pub struct FrameStats {
 }
 
 impl Window {
-    pub fn new(cfg: Config) -> Self {
+    pub fn new(cfg: &Config) -> Self {
         let target_fps = cfg.target_fps;
         let mut context = GlContext::new(cfg);
 
@@ -143,7 +143,7 @@ impl Window {
 
         let imgui = imgui_wrapper::Wrapper::new(&mut context.window);
 
-        Window {
+        Self {
             context: RefCell::new(context),
             imgui,
             target_fps,
@@ -196,7 +196,7 @@ impl Window {
 
             self.imgui.renderer.render(frame.ui);
         }
-        if let Some(true) = request_close {
+        if request_close == Some(true) {
             self.request_close();
         }
         if let Some(grab) = request_grab_cursor {
@@ -214,7 +214,7 @@ impl Window {
 
         // if enabled, limit fps to target
         if let Some(target) = self.target_fps {
-            let target_delta = 1.0 / target as f64;
+            let target_delta = 1.0 / f64::from(target);
             let actual_delta = self.current_stats.last_frame.elapsed().as_secs_f64();
             let diff = target_delta - actual_delta;
             if diff > 0.0 {
@@ -253,7 +253,7 @@ impl Window {
                     unsafe { gl::Viewport(0, 0, width, height); }
                     was_resized = true;
                 }
-                _ => self.input.handle_event(event),
+                _ => self.input.handle_event(&event),
             }
         }
 
@@ -267,12 +267,12 @@ impl Window {
         (size, was_resized)
     }
 
-    /// should_close returns true, if a close was requested on this window.
+    /// `should_close` returns true, if a close was requested on this window.
     pub fn should_close(&self) -> bool {
         self.context.borrow_mut().window.should_close()
     }
 
-    /// request_close will cause the window to close in the next update cycle.
+    /// `request_close` will cause the window to close in the next update cycle.
     pub fn request_close(&self) {
         self.context.borrow_mut().window.set_should_close(true);
     }
@@ -287,12 +287,12 @@ impl Window {
         }
     }
 
-    /// get_size returns the current window's width and height in pixels.
+    /// `get_size` returns the current window's width and height in pixels.
     pub fn get_size(&self) -> (i32, i32) {
         self.context.borrow().window.get_size()
     }
 
-    /// get_aspect returns the current window's aspect ration in (width / height).
+    /// `get_aspect` returns the current window's aspect ration in (width / height).
     pub fn get_aspect(&self) -> f32 {
         let (w, h) = self.get_size();
         w as f32 / h as f32

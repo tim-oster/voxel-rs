@@ -95,7 +95,7 @@ pub struct AlignedBool(pub u32);
 
 impl From<bool> for AlignedBool {
     fn from(value: bool) -> Self {
-        AlignedBool(value as u32)
+        Self(value as u32)
     }
 }
 
@@ -143,7 +143,7 @@ pub fn gl_check_error_(file: &str, line: u32) -> bool {
             _ => "unknown GL error code",
         };
 
-        println!("{} | {} ({})", error, file, line);
+        println!("{error} | {file} ({line})");
 
         error_code = unsafe { gl::GetError() };
     }

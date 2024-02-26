@@ -13,7 +13,7 @@ struct Vertex {
     normal: AlignedVec3<f32>,
 }
 
-/// ScreenQuad creates a OpenGL VAO for a full-screen quad in clip space/normalized device coordinates.
+/// `ScreenQuad` creates a OpenGL VAO for a full-screen quad in clip space/normalized device coordinates.
 pub struct ScreenQuad {
     vao: GLuint,
     vbo: GLuint,
@@ -21,7 +21,7 @@ pub struct ScreenQuad {
 }
 
 impl ScreenQuad {
-    pub fn new() -> ScreenQuad {
+    pub fn new() -> Self {
         let vertices = [
             Vertex { position: AlignedPoint3::new(1.0, 1.0, -1.0), uv: AlignedPoint2::new(1.0, 1.0), normal: AlignedVec3::new(0.0, 0.0, 1.0) },
             Vertex { position: AlignedPoint3::new(-1.0, 1.0, -1.0), uv: AlignedPoint2::new(0.0, 1.0), normal: AlignedVec3::new(0.0, 0.0, 1.0) },
@@ -42,7 +42,7 @@ impl ScreenQuad {
             gl::BufferData(
                 gl::ARRAY_BUFFER,
                 (vertices.len() * mem::size_of::<Vertex>()) as GLsizeiptr,
-                &vertices[0] as *const Vertex as *const c_void,
+                ptr::addr_of!(vertices[0]).cast(),
                 gl::STATIC_DRAW,
             );
 
@@ -50,7 +50,7 @@ impl ScreenQuad {
             gl::BufferData(
                 gl::ELEMENT_ARRAY_BUFFER,
                 (indices.len() * mem::size_of::<GLint>()) as GLsizeiptr,
-                &indices[0] as *const i32 as *const c_void,
+                ptr::addr_of!(indices[0]).cast(),
                 gl::STATIC_DRAW,
             );
 
@@ -68,7 +68,7 @@ impl ScreenQuad {
             gl::BindBuffer(gl::ARRAY_BUFFER, 0);
             gl::BindVertexArray(0);
 
-            ScreenQuad { vao, vbo, ebo }
+            Self { vao, vbo, ebo }
         }
     }
 
