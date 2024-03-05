@@ -118,28 +118,85 @@ Jobs are created to perform the work, but the main thread joins all results toge
 
 ### Octree
 
-- octree data structure
-  - implementation details and runtime complexity
-  - optimization decisions (e.g. z-ordering inserts)
+All chunks store their voxel content as octrees. This allows for efficient SVO construction and compression of empty
+space compared to a flat array. The main downside is that reading or writing along the x,y,z axes produces overhead
+to find the actual leaf nodes.
+
+An Octree is stored as an array of Octants and a pointer to the root Octant. Each Octant is defined by a fixed-size
+array of 8 children, each either being empty, a child octant or a leaf node. Additionally, octants keep a pointer to
+their parent octant to allow for bidirectional traversal.
+
+Pointers are the octant's position inside the octree's octant array. Removing an octant does not remove the array
+element but adds it to a free list instead to be reused later.
+
+All read / write operations recursively descend and optionally extend the octree until they reach the required depth.
+Hence, the runtime complexity is `O(n) = log n`, where n is the depth of the octree.
+
+The main reason for using pointers instead of actually moving values in memory is that whole sub-octrees can be moved
+inside the parent octree at the same cost as moving single leaf values.
+
+To mitigate the performance issue of writing axis-aligned voxel data (e.g. `for x, y, z in (32,32,32)`) into an octree,
+the implementation supports a custom iterator constructor that iterates in z-ordering at the leaf level first and
+ascends through the octree combining children into new octants until an octree is formed. This reduces the worst case
+of `O(n) = n * log n` to `O(n) = n`. (TODO double check)
 
 ### SVO
 
-- svo data structure
-  - data layout
-  - advantages of pointers
-  - empty space & reuse (ring buffer)
-  - space efficiency compared to flat arrays or other structures
-  - infinite octrees - how does shifting/rotation work?
+The Sparse Voxel Octree implementation is similar to the Octree one described above. It uses a linear memory buffer
+to encode octants and their children using bitmasks and pointers. As opposed to the Octree, it does not store parent
+pointers and other data useful for traversing and modifying the structure, as it is predominantly used for read-only
+operations. Pointers can be defined as relative and absolute pointers, allowing for encoding nested octree structures
+cache-efficiently while maintaining the option to move larger subtrees by swapping pointers.
+
+SVOs keep a list of empty buffer regions for reuse to act similar to a ring buffer. Since empty octants take up almost
+no space (at most 5 bytes), Sparse Octrees are more space efficient than linear arrays.
+
+### Octree Shifting
+
+-- TODO figure out runtime complexity
+
+The final world is stored as an octree of octrees, where every chunk is one octree encoded using relative pointers in
+a larger world octree using absolut pointers to each chunk octree. This allows for serializing each chunk as an SVO
+independently and copying them to the final SVO buffer without impacting the actual SVO renderer. Only when the newly
+serialized SVO pointer is actually set in the world SVO, will it be rendered.
+
+To achieve an "infinite" world, swapping pointers can be used as well. In addition to the absolute player position in
+the world, an additional position at the center of the octree is calculated. Whenever the player leaves the center-most
+octant (across all axes) of the octree, the relative position is reset to the new center octant and all chunk octants
+are shifted one position into the opposite direction of the player movement. This way, chunks are essentially rotated
+through the octree making space for new chunks to be loaded in.
 
 ### Raytracer
 
-- svo raytracer
-  - explain actual implementation (and give reference to original papers)
-  - runtime complexity
-  - using ssbo in persistent, coherent mapping
-  - why is the algo a good choice and what makes it fast?
-  - "prove" constant runtime on different screen resolutions
-  - used by physics in compute shader
+This is a high level overview of the raytracer implementation.
+It is explained in-depth in the [GLSL Shader](assets/shaders/svo.glsl).
+
+At its core, the algorithm traverses the SVO data structure described above. Upon calculating the intersection octant,
+using precomputed ray direction coefficients for ray-plane intersections (one plane per axis), it uses the current SVO
+octant pointer to resolve children & leaf bitmasks to decide whether a nothing, another octant or a leaf was hit.
+
+If nothing was hit, it steps through the octant and continues. In case an octant boundary is crossed while stepping, it
+ascends to the top most parent octant that is to be iterated next. If a leaf is hit, it calculates intersection point, normals, uvs, etc. In case of an octant, it descends into the octant
+and repeats from the top.
+
+The implementation uses a local stack of up to 23 entries, which also limits the maximum depth of the SVO. This is a
+result of the many optimisations of the implementation relying on direct float32 bit manipulation of the mantissa, which
+is encoded as 23bits for float32 IEEE.
+
+-- TODO figure out runtime complexities (average, worst, best) as the ray might step through all octants, hitting nothing
+-- TODO "prove" constant runtime on different screen resolutions
+
+Given the algorithm's nature, it is a good fit for sparse voxel worlds as it efficiently skips through empty space
+without wasting cycles on unnecessary ascents / descends. The most noteworthy part is the ascend implementation, which
+can skip multiple parents at once.
+
+At runtime, the SVO buffer is mapped as a persistent, coherent OpenGL buffer to avoid inefficient BIND draw calls. This
+has the downside of having to use immutable storage, which makes resizing the buffer difficult, but since the SVO data
+is compressed and the ring-buffer approach reuses empty space, a static size can be chosen at allocation time.
+
+In the actual renderer, a screen-sized quad is used to invoke a fragment shader per screen pixel to render the world.
+Additionally, a compute shader is used with the same algorithm to perform mouse ray-casts and basic collision
+simulation.
 
 ### World Generator
 
