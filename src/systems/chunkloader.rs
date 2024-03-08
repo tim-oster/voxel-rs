@@ -258,7 +258,7 @@ mod tests {
 
         let mut scale = Vec::new();
         let mut xs = columns.keys().copied().collect::<Vec<i32>>();
-        xs.sort();
+        xs.sort_unstable();
         for x in xs {
             scale.push(columns[&x]);
         }

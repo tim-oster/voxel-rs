@@ -159,7 +159,7 @@ struct GeneratorCache {
     columns: FxHashMap<(i32, i32), Arc<ChunkColumn>>,
     /// inflight is the set of columns that are currently calculated.
     inflight: FxHashSet<(i32, i32)>,
-    /// keys_ordered is a list of generated chunk column keys, where the first element is the oldest.
+    /// `keys_ordered` is a list of generated chunk column keys, where the first element is the oldest.
     keys_ordered: VecDeque<(i32, i32)>,
 }
 
@@ -376,6 +376,6 @@ mod benches {
         });
 
         let stats = dhat::HeapStats::get();
-        println!("{:?}", stats);
+        println!("{stats:?}");
     }
 }

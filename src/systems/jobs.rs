@@ -196,7 +196,7 @@ mod job_system_tests {
         let s0 = signal.clone();
         js.push(false, move || {
             s0.store(true, Ordering::Relaxed);
-            thread::sleep(Duration::from_millis(250))
+            thread::sleep(Duration::from_millis(250));
         });
         wait(signal);
 
@@ -226,7 +226,7 @@ mod job_system_tests {
         let s0 = signal.clone();
         js.push(false, move || {
             s0.store(true, Ordering::Relaxed);
-            thread::sleep(Duration::from_millis(250))
+            thread::sleep(Duration::from_millis(250));
         });
         wait(signal);
 
@@ -257,7 +257,7 @@ mod job_system_tests {
         let s0 = signal.clone();
         js.push(false, move || {
             s0.store(true, Ordering::Relaxed);
-            thread::sleep(Duration::from_millis(250))
+            thread::sleep(Duration::from_millis(250));
         });
         wait(signal);
 

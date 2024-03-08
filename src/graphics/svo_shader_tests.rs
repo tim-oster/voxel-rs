@@ -566,7 +566,7 @@ mod tests {
             let buffer_out = cast_ray(&setup.shader, case.pos, case.dir, 32.0, false);
             let case_name = format!("#{} (pos={:?}, dir={:?})", i, case.pos, case.dir);
 
-            println!("{}", case_name);
+            println!("{case_name}");
             assert_vec2_eq!(buffer_out.result.uv, case.expected_uv);
             assert_vec4_eq!(buffer_out.result.color, case.expected_color);
         }
