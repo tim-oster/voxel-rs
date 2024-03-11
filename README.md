@@ -1,7 +1,5 @@
 # voxel-rs
 
--- TODO table of contents
-
 This project is a rendering engine for displaying interactive, infinite voxel terrains at interactive frame rates.
 Instead of using a traditional rasterization approach, the engine relies on a Sparse Voxel Octree (SVO) as its
 acceleration structure for raytracing voxels instead. The implementation is a derivative work of 
@@ -26,18 +24,20 @@ Recent advances have made it possible to use triangular geometry as an accelerat
 in on top of a rasterized scene (e.g. Nvidia RTX). Even though, casting at least one ray per screen pixel is costly for
 high triangle count games.
 
-As a result, voxel games (e.g. Mincecraft, Terrasology, MineTest, CubeWorld) render their worlds by breaking it up into
+As a result, voxel games (e.g. Mincecraft, Terasology, MineTest, CubeWorld) render their worlds by breaking it up into
 smaller chunks and constructing a triangle mesh per chunk. Choosing the right chunk size is important, as it impacts
 the cost of regenerating a mesh upon change, the efficiency of managing those chunks in memory (loading / storing /
 generating / etc.), and especially the overall frame time as the engine tries to figure out which meshes to draw per
 frame and how much of a chunk mesh is outside the viewport.
 
-Constructing meshes using a greedy meshing (TODO reference) implementation is both quick and results in low triangle
+Constructing meshes using a greedy meshing (good writeup [here](https://0fps.net/2012/06/30/meshing-in-a-minecraft-game/))
+implementation is both quick and results in low triangle
 count in common scenarios, while having drawbacks such as visual artifacts (e.g. "holes") along shared edges.
 Additionally, depending on the properties of the voxel world, it might have caves or other structures in it, that 
 are only visible when the camera is within the chunk. Since a mesh cannot be partially drawn, overdraw can happen
 that leads to meshes being rendered that might not be visible. This is fixable by implementing flood-fill algorithms
-or other detection approaches (TODO reference minecraft post), but comes at the cost of higher frame times.
+or other detection approaches ([Minecraft's Implementation](https://tomcc.github.io/2014/08/31/visibility-1.html)),
+but comes at the cost of higher frame times.
 
 Depending on the size of the voxel world, some concept of LoD and hierarchical lookup structure is necessary to speed
 up the frustum culling / visibility calculation to determine the set of meshes to draw. This usually has the shape of
@@ -130,7 +130,7 @@ Pointers are the octant's position inside the octree's octant array. Removing an
 element but adds it to a free list instead to be reused later.
 
 All read / write operations recursively descend and optionally extend the octree until they reach the required depth.
-Hence, the runtime complexity is `O(n) = log n`, where n is the depth of the octree.
+Hence, the runtime complexity is `O(log N)`.
 
 The main reason for using pointers instead of actually moving values in memory is that whole sub-octrees can be moved
 inside the parent octree at the same cost as moving single leaf values.
@@ -138,7 +138,7 @@ inside the parent octree at the same cost as moving single leaf values.
 To mitigate the performance issue of writing axis-aligned voxel data (e.g. `for x, y, z in (32,32,32)`) into an octree,
 the implementation supports a custom iterator constructor that iterates in z-ordering at the leaf level first and
 ascends through the octree combining children into new octants until an octree is formed. This reduces the worst case
-of `O(n) = n * log n` to `O(n) = n`. (TODO double check)
+of `O(N * log N)` to `O(log N)`.
 
 ### SVO
 
@@ -153,8 +153,6 @@ no space (at most 5 bytes), Sparse Octrees are more space efficient than linear 
 
 ### Octree Shifting
 
--- TODO figure out runtime complexity
-
 The final world is stored as an octree of octrees, where every chunk is one octree encoded using relative pointers in
 a larger world octree using absolut pointers to each chunk octree. This allows for serializing each chunk as an SVO
 independently and copying them to the final SVO buffer without impacting the actual SVO renderer. Only when the newly
@@ -164,7 +162,8 @@ To achieve an "infinite" world, swapping pointers can be used as well. In additi
 the world, an additional position at the center of the octree is calculated. Whenever the player leaves the center-most
 octant (across all axes) of the octree, the relative position is reset to the new center octant and all chunk octants
 are shifted one position into the opposite direction of the player movement. This way, chunks are essentially rotated
-through the octree making space for new chunks to be loaded in.
+through the octree making space for new chunks to be loaded in. This operation grows linearly with the number of chunks
+in the world. 
 
 ### Raytracer
 
@@ -176,15 +175,16 @@ using precomputed ray direction coefficients for ray-plane intersections (one pl
 octant pointer to resolve children & leaf bitmasks to decide whether a nothing, another octant or a leaf was hit.
 
 If nothing was hit, it steps through the octant and continues. In case an octant boundary is crossed while stepping, it
-ascends to the top most parent octant that is to be iterated next. If a leaf is hit, it calculates intersection point, normals, uvs, etc. In case of an octant, it descends into the octant
-and repeats from the top.
+ascends to the top most parent octant that is to be iterated next. If a leaf is hit, it calculates intersection point,
+normals, uvs, etc. In case of an octant, it descends into the octant and repeats from the top.
+
+This results in a worst-case complexity of `O(4 ^ (log N))`, if every possible octant inside an octree contains only
+one leaf, which would cause the algorithm to visit at most 4 child octants per octant without hitting anything. In
+normal voxel worlds, this scenario is very unlikely to occur.
 
 The implementation uses a local stack of up to 23 entries, which also limits the maximum depth of the SVO. This is a
 result of the many optimisations of the implementation relying on direct float32 bit manipulation of the mantissa, which
 is encoded as 23bits for float32 IEEE.
-
--- TODO figure out runtime complexities (average, worst, best) as the ray might step through all octants, hitting nothing
--- TODO "prove" constant runtime on different screen resolutions
 
 Given the algorithm's nature, it is a good fit for sparse voxel worlds as it efficiently skips through empty space
 without wasting cycles on unnecessary ascents / descends. The most noteworthy part is the ascend implementation, which
@@ -200,9 +200,10 @@ simulation.
 
 ### World Generator
 
-World generation is inspired by Minecraft (TODO youtube video link). There are no biomes or climates in this
-implementation. All chunks are generated using two layers of perlin noises with several octaves each:
-one for _continentalness_ (i.e. how far in the inland a point is), and _erosion_ (i.e. how mountainous a point is).
+World generation is inspired by Minecraft ([Talk by Henrik Kniberg](https://www.youtube.com/watch?v=CSa5O6knuwI)).
+There are no biomes or climates in this implementation. All chunks are generated using two layers of perlin noises with
+several octaves each: one for _continentalness_ (i.e. how far in the inland a point is), and _erosion_
+(i.e. how mountainous a point is).
 
 To make the terrain visually appealing, spline point curves are used to map the linear -1..1 noise value to actual
 terrain height values.
