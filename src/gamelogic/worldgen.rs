@@ -333,7 +333,7 @@ mod benches {
     //noinspection DuplicatedCode
     #[bench]
     fn some_bench(b: &mut Bencher) {
-        // default worldgen configuration for testing
+        // default world gen configuration for testing
         let cfg = worldgen::Config {
             sea_level: 70,
             continentalness: Noise {

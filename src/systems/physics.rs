@@ -284,7 +284,7 @@ mod tests {
         }, e);
     }
 
-    /// Asserts that all entities are raycasted and updated. The test contains different entities
+    /// Asserts that all entities are raycast and updated. The test contains different entities
     /// in different positions and configurations.
     #[test]
     fn step_many() {

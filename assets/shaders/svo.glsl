@@ -46,7 +46,7 @@ layout (std430, binding = 0) readonly buffer RootNode {
     uint descriptors[];// Serialized octree bytes. See `src/world/svo.rs` for details on the format.
 };
 
-// Material contains rendering properties for which textures to load per side and what paramteres to use for lighting.
+// Material contains rendering properties for which textures to load per side and what parameters to use for lighting.
 struct Material {
     float specular_pow;
     float specular_strength;
@@ -108,7 +108,7 @@ layout (std430, binding = 2) readonly buffer MaterialRegistry {
 //  max_dst             if > 0, limits the distance the ray travels
 //  cast_translucent    if true, rays can pass trough translucent texels on a voxel
 //  textures            texture array to lookup material textures from
-//  out res             returns ray hit result - no hit occured when res.t == -1
+//  out res             returns ray hit result - no hit occurred when res.t == -1
 //
 // List of sources:
 //  - Samuli Laine and Tero Karras. 2010 "Efficient sparse voxel octrees"
@@ -137,8 +137,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     res.color = vec4(0);
     res.inside_voxel = false;
 
-    // Shift input coordinate system so that the octree spans from [1;2). Doing so allows the alogrithm to work directly
-    // on the mantiassa/fractional bits of the float bits.
+    // Shift input coordinate system so that the octree spans from [1;2). Doing so allows the algorithm to work directly
+    // on the mantissa/fractional bits of the float bits.
     ro += 1;
 
     // stacks to implement PUSH & POP for step into and out of the child octants
@@ -149,17 +149,17 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     uint ptr = 0;// current pointer inside the SVO data structure
     uint parent_octant_idx = 0;// the child index [0;7] of the current octant's parent octant
 
-    // Scale is the mantiassa bit of the current ray step size. A more intuitive representation would be a
+    // Scale is the mantissa bit of the current ray step size. A more intuitive representation would be a
     // scale that increments from 0..22 as the algorithm descends into the octree, but choosing the inverted form allows
     // for optimizing the POP implementation below.
     int scale = MAX_SCALE - 1;
     float scale_exp2 = 0.5;// = exp2(scale - MAX_SCALE)
 
     // In case a leaf has a texture with transparency, the ray can pass through several leaf voxels. When that happens,
-    // these variables keep track of how many adjecent leafs of the same type/value the ray has passed through. Every
+    // these variables keep track of how many adjacent leafs of the same type/value the ray has passed through. Every
     // identical leaf after the first one is skipped.
     uint last_leaf_value = -1;
-    int adjecent_leaf_count = 0;
+    int adjacent_leaf_count = 0;
 
     // Prevent division by zero by making sure that rd is never less than epsilon, both in positive and negative
     // direction. Use bit-magic to copy the rd sign to the epsilon value.
@@ -177,9 +177,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     //
     // To optimize calculations, the result can be rewritten as `tx(x) = x * (1/dx) - (rx/dx)` allowing for
     // pre-calculating the coefficient of x and the bias. This means that calculating the next interception
-    // distnance is one FMA-operation (fused multiply-add) per axis: `x * tx_coef - tx_bias`.
+    // distance is one FMA-operation (fused multiply-add) per axis: `x * tx_coef - tx_bias`.
     //
-    // Because t always increases but is never reset, the bias only has to be caclculated once with the ray origin
+    // Because t always increases but is never reset, the bias only has to be calculated once with the ray origin
     // position.
     //
     // Ensure that ray directions are always negative, this is required so that the mirroring logic below works.
@@ -194,12 +194,12 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // through the octree without having to keep the sign of the direction into account. Whenever information about a
     // voxel is interpreted, the calculated octant_mask is used to undo the mirroring.
     //
-    // To mirror correctly, the equestion from above needs to be altered as well. Given that the octree positions are
+    // To mirror correctly, the question from above needs to be altered as well. Given that the octree positions are
     // within [1;2), `tx(x) = x * tx_coef - tx_bias` can be rewritten as `tx'(x) = (3 - x) * tx_coef - tx_bias`.
     // This can be simplified to only adjust the bias `tx'(x) = x * tx_coef - (3 * tx_coef - tx_bias)`. Hence,
     // to mirror the equation for one axis, the bias has to be rewritten as `tx_bias = x * tx_coef - tx_bias`.
     //
-    // Using negative directions has the advantegous property that the pos (see below) vector decreases over time. This
+    // Using negative directions has the advantageous property that the pos (see below) vector decreases over time. This
     // allows the POP phase implementation to round down floats using bit operations, which is more efficient than
     // alternative implementations. The negative property also simplifies the calculation of corner points, which
     // happens frequently.
@@ -273,7 +273,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 // fetch leaf value
                 uint value = descriptors[next_ptr];
 
-                // Use current pos + scale_exp2 to get the lower bound, i.e. the entry distinace for the ray.
+                // Use current pos + scale_exp2 to get the lower bound, i.e. the entry distance for the ray.
                 float tx_corner = (pos.x + scale_exp2) * tx_coef - tx_bias;
                 float ty_corner = (pos.y + scale_exp2) * ty_coef - ty_bias;
                 float tz_corner = (pos.z + scale_exp2) * tz_coef - tz_bias;
@@ -317,7 +317,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 float tex_lod = smoothstep(15, 25, dst) * (dst-15) * 0.05;
 
                 #if SHADER_COMPILE_TYPE != SHADER_TYPE_COMPUTE
-                // use deriviate of t because uv is not continuous (resets after every voxel)
+                // use derivative of t because uv is not continuous (resets after every voxel)
                 vec4 tex_color_a = textureGrad(textures, vec3(uv, float(tex_id)), vec2(dFdx(dst), 0), vec2(dFdy(dst), 0));
                 vec4 tex_color_b = textureLod(textures, vec3(uv, float(tex_id)), tex_lod);
                 vec4 tex_color = mix(tex_color_b, tex_color_b, smoothstep(15, 25, dst));
@@ -327,7 +327,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
 
                 // If texel is not translucent, or cast_translucent = false, calculate the result and stop the
                 // algorithm. Ignore the leaf if it is not the first of its kind, when casting translucent voxels.
-                bool first_of_kind = adjecent_leaf_count == 0 || value != last_leaf_value;
+                bool first_of_kind = adjacent_leaf_count == 0 || value != last_leaf_value;
                 if ((tex_color.a > 0 || !cast_translucent) && first_of_kind) {
                     res.t = dst;
                     res.face_id = face_id;
@@ -336,7 +336,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                     res.color = tex_color;
                     res.lod = tex_lod;
 
-                    // Clamp final `ro + t_min * rd` between octant start & end position to mitigature floating point
+                    // Clamp final `ro + t_min * rd` between octant start & end position to mitigate floating point
                     // errors.
                     res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + epsilon), pos.x + scale_exp2 - epsilon);
                     res.pos.y = min(max(ro.y + t_min * rd.y, pos.y + epsilon), pos.y + scale_exp2 - epsilon);
@@ -350,13 +350,13 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 }
 
                 // If the texel is translucent and cast_translucent=true, keep track of adjacent leaves.
-                ++adjecent_leaf_count;
+                ++adjacent_leaf_count;
                 last_leaf_value = value;
             } else {
                 // intersect with octant and descend into it
 
                 // When intersecting with a child octant (that is not a leaf), it is required to know which child of
-                // that octant the ray intercects with in order to calculate the new idx. Therefore, by calculating
+                // that octant the ray intersects with in order to calculate the new idx. Therefore, by calculating
                 // the center position of the hit octant, it can be determined to which side of the center the ray
                 // intersects on each axis. This center position is equal to the current "upper bound" pos + half of
                 // the current scale.
@@ -391,7 +391,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                     if (t_min < ty_center) idx ^= 2, pos.y += scale_exp2;
                     if (t_min < tz_center) idx ^= 4, pos.z += scale_exp2;
 
-                    // udpate t_max to not allow exceeding the child octant that was descended into
+                    // update t_max to not allow exceeding the child octant that was descended into
                     t_max = tv_max;
 
                     // make sure that ADVANCE phase is skipped
@@ -399,8 +399,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 }
             }
         } else {
-            // if no leaf is found, reset the adjcent leaf counter
-            adjecent_leaf_count = 0;
+            // if no leaf is found, reset the adjacent leaf counter
+            adjacent_leaf_count = 0;
             last_leaf_value = -1;
         }
 
@@ -460,7 +460,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
             t_max = t_max_stack[scale];
 
             // Floor all positions to given scale to truncate previous information from when the ray was within a child
-            // octant. Because the position becomes smaller as the ray advances, this efficient round down mechansim
+            // octant. Because the position becomes smaller as the ray advances, this efficient round down mechanism
             // works. For example: 1.375 (0b011) rounded to scale=22 becomes 1.25 (0b010).
             int shx = floatBitsToInt(pos.x) >> scale;
             int shy = floatBitsToInt(pos.y) >> scale;
@@ -469,9 +469,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
             pos.y = intBitsToFloat(shy << scale);
             pos.z = intBitsToFloat(shz << scale);
 
-            // Recalcuate the new, ascended to, parent's index by checking if the bit, that was rounded to, is set.
+            // Recalculate the new, ascended to, parent's index by checking if the bit, that was rounded to, is set.
             // For example: if rounding 1.75 (0b11) to 1.5 (0b10) for scale=23, then the 23rd bit is set. However,
-            // rounding 1.25 (0b01) to 1.0 (0b00) for the same scale, does not thave the 23rd bit set. Hence, they are
+            // rounding 1.25 (0b01) to 1.0 (0b00) for the same scale, does not have the 23rd bit set. Hence, they are
             // contribute to the new idx respectively.
             idx = (shx & 1) | ((shy & 1) << 1) | ((shz & 1) << 2);
         }
