@@ -40,7 +40,7 @@ impl Input {
 
         self.mouse_delta = cgmath::Vector2::new(0.0, 0.0);
         self.mouse_wheel_delta = 0.0;
-        self.last_button_state = self.pressed_buttons.clone();
+        self.last_button_state.clone_from(&self.pressed_buttons);
     }
 
     pub(super) fn handle_event(&mut self, event: &glfw::WindowEvent) {

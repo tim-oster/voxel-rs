@@ -323,7 +323,7 @@ impl<T, A: Allocator> Octree<T, A> {
         self.depth += by;
     }
 
-    /// Expands the octant's depth to by equal to the given value. If the depth is already larger,
+    /// Expands the octant's depth to be equal to the given value. If the depth is already larger,
     /// nothing happens. For shrinking empty octant space, [`Octree::compact`] can be used.
     pub fn expand_to(&mut self, to: u8) {
         if self.depth > to {

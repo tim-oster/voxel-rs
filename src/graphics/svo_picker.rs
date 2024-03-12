@@ -23,7 +23,7 @@ pub(super) struct PickerTask {
 pub(super) struct PickerResult {
     /// dst is the distance to the hit object.
     pub dst: f32,
-    /// inside_voxel is true, if the ray origin is within a voxel itself.
+    /// `inside_voxel` is true, if the ray origin is within a voxel itself.
     pub inside_voxel: bool,
     /// pos of intersection.
     pub pos: AlignedPoint3<f32>,

@@ -216,7 +216,7 @@ impl ShaderProgramBuilder {
     }
 
     pub fn add_shader(&mut self, type_: ShaderType, src: String) -> Result<&mut Self, ShaderError> {
-        if self.shaders.get(&type_).is_some() {
+        if self.shaders.contains_key(&type_) {
             return Err(ShaderError::Other(format!("type {type_:?} is already registered")));
         }
 

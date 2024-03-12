@@ -73,7 +73,7 @@ impl TextureArrayBuilder {
     }
 
     fn register_texture(&mut self, name: String) -> Result<(), TextureArrayError> {
-        if self.textures.get(&name).is_some() {
+        if self.textures.contains_key(&name) {
             return Err(TextureArrayError::Other(format!("name '{name}' is already registered")));
         }
         self.textures.insert(name, self.content.len() as u32);

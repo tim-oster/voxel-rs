@@ -159,7 +159,7 @@ struct GeneratorCache {
     columns: FxHashMap<(i32, i32), Arc<ChunkColumn>>,
     /// inflight is the set of columns that are currently calculated.
     inflight: FxHashSet<(i32, i32)>,
-    /// keys_ordered is a list of generated chunk column keys, where the first element is the oldest.
+    /// `keys_ordered` is a list of generated chunk column keys, where the first element is the oldest.
     keys_ordered: VecDeque<(i32, i32)>,
 }
 
@@ -333,7 +333,7 @@ mod benches {
     //noinspection DuplicatedCode
     #[bench]
     fn some_bench(b: &mut Bencher) {
-        // default worldgen configuration for testing
+        // default world gen configuration for testing
         let cfg = worldgen::Config {
             sea_level: 70,
             continentalness: Noise {
@@ -376,6 +376,6 @@ mod benches {
         });
 
         let stats = dhat::HeapStats::get();
-        println!("{:?}", stats);
+        println!("{stats:?}");
     }
 }

@@ -136,7 +136,7 @@ pub struct Svo<T: SvoSerializable, A: Allocator = Global> {
     leaf_info: FxHashMap<u64, LeafInfo>,
     root_info: Option<LeafInfo>,
 
-    /// Reusable buffer for serializing octants data to be copied into actual SvoBuffer.
+    /// Reusable buffer for serializing octants data to be copied into actual `SvoBuffer`.
     tmp_octant_buffer: Option<ChunkBuffer>,
 }
 
@@ -436,7 +436,7 @@ struct ChildEncodeParams<'a, T> {
     parent_id: OctantId,
     /// Index of the child to be serialized inside the parent.
     idx: u8,
-    /// SerializationResult of the parent octant. Can be modified per child.
+    /// `SerializationResult` of the parent octant. Can be modified per child.
     result: &'a mut SerializationResult,
     /// Buffer for the parent's octant data. At least 12 elements long, can be expanded if necessary.
     dst: &'a mut [u32],
@@ -747,7 +747,7 @@ mod svo_tests {
                 0,
                 156 + preamble_length,
             ],
-            expected.to_vec(),
+            expected,
         ].concat());
     }
 
@@ -809,7 +809,7 @@ mod svo_tests {
                 0,
                 1 + preamble_length,
             ],
-            expected.to_vec(),
+            expected,
         ].concat());
 
         // remove and move leaves, and update buffer with only changed data
@@ -863,7 +863,7 @@ mod svo_tests {
                 (1 << 8) << 8 << 16,
                 preamble_length,
             ],
-            expected.to_vec(),
+            expected,
         ].concat());
     }
 

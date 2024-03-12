@@ -17,12 +17,12 @@ use crate::world::svo::{ChunkBuffer, ChunkBufferPool, SerializedChunk, SvoSerial
 use crate::world::world::BorrowedChunk;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`world::chunk::Chunk`]s.
-/// Adding chunks will serialize them in the background and attach them the the GPU SVO. Removing
+/// Adding chunks will serialize them in the background and attach them the GPU SVO. Removing
 /// chunks will also remove them from the GPU.
 ///
 /// In addition to serialization, this Svo manages "chunk shifting". One major limitation of the
 /// SVO structure used in this project is, that it can only grow in the positive direction of each
-/// axis. Supporting a "infinitely" large world in all directions is consequently not possible by
+/// axis. Supporting an "infinitely" large world in all directions is consequently not possible by
 /// default. This implementation solves this shortcoming by always keeping the camera position
 /// inside the center chunk of the SVO and shifting all chunks in the opposite movement direction
 /// if the camera leaves the chunk.

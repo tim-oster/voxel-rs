@@ -51,34 +51,34 @@ pub struct Svo {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Stats {
-    /// used_bytes is the amount of bytes that is used by of the mapped buffer.
+    /// `used_bytes` is the amount of bytes that is used by of the mapped buffer.
     pub used_bytes: usize,
-    /// capacity_bytes is the full size of the mapped buffer on both CPU & GPU.
+    /// `capacity_bytes` is the full size of the mapped buffer on both CPU & GPU.
     pub capacity_bytes: usize,
     /// depth is the number of octant divisions the SVO has, until the leaf node is encoded.
     pub depth: u8,
 }
 
 pub struct RenderParams {
-    /// ambient_intensity is the amount of ambient light present in the scene.
+    /// `ambient_intensity` is the amount of ambient light present in the scene.
     pub ambient_intensity: f32,
-    /// light_dir indicates in which direction sun light shines in the scene.
+    /// `light_dir` indicates in which direction sun light shines in the scene.
     pub light_dir: Vector3<f32>,
-    /// cam_pos is the eye position from which the scene is rendered.
+    /// `cam_pos` is the eye position from which the scene is rendered.
     pub cam_pos: Point3<f32>,
-    /// cam_fwd is the look at direction of the camera.
+    /// `cam_fwd` is the look at direction of the camera.
     pub cam_fwd: Vector3<f32>,
-    /// cam_up is the up vector of the camera.
+    /// `cam_up` is the up vector of the camera.
     pub cam_up: Vector3<f32>,
-    /// fov_y_rad is the vertical field of view in radians.
+    /// `fov_y_rad` is the vertical field of view in radians.
     pub fov_y_rad: f32,
-    /// aspect_ratio is `width / height` of the screen's resolution.
+    /// `aspect_ratio` is `width / height` of the screen's resolution.
     pub aspect_ratio: f32,
-    /// selected_voxel is the position of the voxel to be highlighted.
+    /// `selected_voxel` is the position of the voxel to be highlighted.
     pub selected_voxel: Option<Point3<f32>>,
-    /// render_shadows enables secondary ray casting to check for sun light occlusion.
+    /// `render_shadows` enables secondary ray casting to check for sun light occlusion.
     pub render_shadows: bool,
-    /// shadow_distance defines the maximum distance to the primary hit, until which secondary rays are cast.
+    /// `shadow_distance` defines the maximum distance to the primary hit, until which secondary rays are cast.
     pub shadow_distance: f32,
 }
 

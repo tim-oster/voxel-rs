@@ -94,7 +94,7 @@ vec4 trace_ray(vec3 ro, vec3 rd, out bool hit) {
     vec3 reflect_dir = reflect(-u_light_dir, normal);
     float specular = pow(max(dot(view_dir, reflect_dir), 0.0), mat.specular_pow) * mat.specular_strength;
 
-    // Calcualte shadow by casting another ray from the previous hit location towards the sun. Skip if the hit is too
+    // Calculate shadow by casting another ray from the previous hit location towards the sun. Skip if the hit is too
     // far away.
     float shadow = 1;
     if (u_render_shadows && res.t < u_shadow_distance) {
@@ -117,7 +117,7 @@ vec3 get_sky_color(vec3 rd) {
     vec3 p = normalize(vec3(rd.x, 0, rd.z));
     float a = acos(dot(rd, p) / (abs(length(rd))) * abs(length(p)));
 
-    // calcuate linear gradient based on angle
+    // calculate linear gradient based on angle
     float grad = a / HALF_PI;
 
     // use easing function to skew white part towards horizon
