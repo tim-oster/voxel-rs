@@ -79,7 +79,7 @@ flowchart LR
     systems --> world
 ```
 
-The high-level dependency chain looks as follows:
+The abstract dependency chain looks as follows:
 `world <- systems|graphics <- gamelogic`
 
 Each module in the chain builds on top of the previous one and extends it or combines its concepts. `world` contains
@@ -104,7 +104,7 @@ the world and a configured loading radius of chunks around that position. The pl
    world chunk map after generation.
 3. Unloaded chunks are removed from the world, and changed LoDs are updated in the map.
 4. Every chunk change (e.g., a voxel was edited), LoD adjustment, or newly generated chunk is added to the SVO system to
-5. be serialized and updated in the GPU buffer.
+   be serialized and updated in the GPU buffer.
 
 This event-driven approach allows expensive calculations to be moved to background threads. A shared job system is used for
 this and passed into every gamelogic component and system to allow sharing of all available machine threads. Urgent
@@ -119,7 +119,7 @@ Jobs are created to perform the work, but the main thread joins all results.
 ### Octree
 
 All chunks store their voxel content as octrees, allowing for efficient SVO construction and compression of
-space compared to a flat array. The main downside is that reading or writing along the x,y, and z axes produces overhead
+space compared to a flat array. The main downside is that reading or writing along the x, y, and z axes produces overhead
 to find the leaf nodes.
 
 An Octree is stored as an array of Octants and a pointer to the root Octant. A fixed-size array of 8 children defines
@@ -155,12 +155,11 @@ no space (at most 5 bytes), Sparse Octrees are more space efficient than linear 
 
 The final world is stored as an octree of octrees, where every chunk is one Octree encoded using relative pointers in
 a larger world octree using absolute pointers to each chunk octree. This allows for independently serializing each chunk
-as an SVO and copying them to the final SVO buffer without impacting the actual SVO renderer. A chunk will only be
-rendered when the newly serialized SVO pointer is set in the world SVO.
+as an SVO and copying them to the final SVO buffer without impacting the actual SVO renderer.
 
-Swapping pointers (see SVO above) can be used to achieve an "infinite" world. In addition to the absolute player position in
+Swapping pointers (see SVO above) can be used to achieve the feeling of an "infinite" world. In addition to the absolute player position in
 the world, an additional position at the center of the Octree is calculated. Whenever the player leaves the center-most
-octant (across all axes), the relative position is reset to the new center octant, and all chunk octants
+octant (along any axes), the relative position is reset to the new center octant, and all chunk octants
 are shifted one position into the opposite direction of the player movement. This way, chunks are rotated
 through the Octree, making space for new chunks to be loaded. This operation grows linearly with the number of chunks
 in the world.
