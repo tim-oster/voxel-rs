@@ -3,7 +3,7 @@
 use std::io;
 
 use gl::types::{GLenum, GLint, GLuint};
-use image::{GenericImageView, ImageError, ImageFormat};
+use image::{ImageError, ImageFormat};
 use rustc_hash::FxHashMap;
 
 use crate::core::assets;
