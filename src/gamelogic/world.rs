@@ -3,7 +3,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
-use imgui::{Condition, Id, TreeNodeFlags};
+use imgui::{Condition, TreeNodeFlags};
 
 use crate::{graphics, systems};
 use crate::core::Frame;
@@ -233,11 +233,11 @@ impl World {
     }
 
     pub fn render_debug_window(&mut self, frame: &mut Frame) {
-        imgui::Window::new("World Gen")
+        frame.ui.window("World Gen")
             .position([8.0, 2.0f32.mul_add(8.0, 290.0)], Condition::Once)
             .size([400.0, 400.0], Condition::Once)
             .collapsed(true, Condition::Once)
-            .build(&frame.ui, || {
+            .build(|| {
                 frame.ui.input_int("sea level", &mut self.world_generator_cfg.sea_level).build();
 
                 if frame.ui.button("generate") {
@@ -264,7 +264,7 @@ impl World {
                         return;
                     }
 
-                    let stack = frame.ui.push_id(Id::Str(label));
+                    let stack = frame.ui.push_id(label);
 
                     frame.ui.input_float("frequency", &mut noise.frequency).step(0.01).build();
                     frame.ui.input_int("octaves", &mut noise.octaves).build();
@@ -281,7 +281,7 @@ impl World {
 
                     let mut i = 0;
                     while i < noise.spline_points.len() {
-                        let stack = frame.ui.push_id(Id::Int(i as i32));
+                        let stack = frame.ui.push_id_int(i as i32);
 
                         frame.ui.text(format!("#{i}"));
                         frame.ui.same_line();
@@ -324,11 +324,11 @@ impl World {
                 display_noise("erosion", &mut self.world_generator_cfg.erosion);
             });
 
-        imgui::Window::new("Settings")
+        frame.ui.window("Settings")
             .position([frame.size.0 as f32 - 400.0 - 8.0, 2.0f32.mul_add(8.0, 170.0)], Condition::Once)
             .size([400.0, 320.0], Condition::Once)
             .collapsed(true, Condition::Once)
-            .build(&frame.ui, || {
+            .build(|| {
                 fn render_control_list(ui: &imgui::Ui, header: &str, controls: &[&str]) {
                     ui.text(header);
                     ui.separator();
@@ -369,7 +369,7 @@ impl World {
                 frame.ui.separator();
                 frame.ui.new_line();
 
-                render_control_list(&frame.ui, "Debug Controls", &[
+                render_control_list(frame.ui, "Debug Controls", &[
                     "P: toggle debug UI",
                     "E: set sun to view dir",
                     "R: reload assets",
@@ -379,7 +379,7 @@ impl World {
 
                 frame.ui.new_line();
 
-                render_control_list(&frame.ui, "Game Controls", &[
+                render_control_list(frame.ui, "Game Controls", &[
                     "L Click: break block",
                     "R Click: place block",
                     "M Click: select block",

@@ -266,7 +266,6 @@ impl ShaderProgramBuilder {
 #[cfg(test)]
 mod shader_program_builder_tests {
     use std::io::Write;
-    use std::iter::FromIterator;
 
     use indoc::{formatdoc, indoc};
     use rustc_hash::FxHashMap;

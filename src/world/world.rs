@@ -192,7 +192,6 @@ impl World {
 #[cfg(test)]
 mod tests {
     use std::collections::VecDeque;
-    use std::iter::FromIterator;
     use std::sync::Arc;
     use std::sync::atomic::Ordering;
 

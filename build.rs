@@ -2,7 +2,6 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{Error, Write};
-use std::iter::FromIterator;
 use std::path::{Component, Path, PathBuf};
 
 use rustc_hash::FxHashSet;

@@ -2,6 +2,8 @@
 
 use std::ffi::{c_void, CStr, CString};
 
+use crate::core::imgui_opengl;
+
 struct GlfwClipboardBackend(*mut c_void);
 
 impl imgui::ClipboardBackend for GlfwClipboardBackend {
@@ -21,11 +23,11 @@ impl imgui::ClipboardBackend for GlfwClipboardBackend {
 
 pub struct Wrapper {
     pub context: imgui::Context,
-    pub renderer: imgui_opengl_renderer::Renderer,
+    pub renderer: imgui_opengl::Renderer,
 }
 
 impl Wrapper {
-    pub fn new(window: &mut glfw::Window) -> Self {
+    pub fn new(window: &glfw::Window) -> Self {
         let mut context = imgui::Context::create();
 
         let io = context.io_mut();
@@ -56,10 +58,7 @@ impl Wrapper {
             context.set_clipboard_backend(GlfwClipboardBackend(ptr));
         }
 
-        let renderer = imgui_opengl_renderer::Renderer::new(
-            &mut context,
-            |s| window.get_proc_address(s).cast(),
-        );
+        let renderer = imgui_opengl::Renderer::new(&mut context);
         Self {
             context,
             renderer,

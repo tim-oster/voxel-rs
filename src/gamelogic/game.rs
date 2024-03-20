@@ -175,11 +175,11 @@ impl State {
     fn render_debug_window(&mut self, frame: &mut Frame) {
         let camera = &self.world.camera;
 
-        imgui::Window::new("Debug")
+        frame.ui.window("Debug")
             .position([8.0, 8.0], Condition::Once)
             .size([400.0, 290.0], Condition::Once)
             .collapsed(false, Condition::Once)
-            .build(&frame.ui, || {
+            .build(|| {
                 frame.ui.text(format!(
                     "fps: {}, frame: {:.2}ms, update: {:.2}ms",
                     frame.stats.frames_per_second,
@@ -288,15 +288,15 @@ impl State {
             self.plot_memory.add(bytes as f32 / 1024.0 / 1024.0);
         }
 
-        imgui::Window::new("Graphs")
+        frame.ui.window("Graphs")
             .position([frame.size.0 as f32 - 400.0 - 8.0, 8.0], Condition::Once)
             .size([400.0, 170.0], Condition::Once)
             .collapsed(false, Condition::Once)
-            .build(&frame.ui, || {
-                self.plot_fps.render(&frame.ui, "fps");
-                self.plot_frame_time.render(&frame.ui, "frame time");
-                self.plot_jobs.render(&frame.ui, "job queue");
-                self.plot_memory.render(&frame.ui, "memory");
+            .build(|| {
+                self.plot_fps.render(frame.ui, "fps");
+                self.plot_frame_time.render(frame.ui, "frame time");
+                self.plot_jobs.render(frame.ui, "job queue");
+                self.plot_memory.render(frame.ui, "memory");
             });
     }
 

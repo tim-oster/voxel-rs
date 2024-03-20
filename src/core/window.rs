@@ -141,7 +141,7 @@ impl Window {
         context.window.set_all_polling(true);
         context.window.set_cursor_mode(glfw::CursorMode::Disabled);
 
-        let imgui = imgui_wrapper::Wrapper::new(&mut context.window);
+        let imgui = imgui_wrapper::Wrapper::new(&context.window);
 
         Self {
             context: RefCell::new(context),
@@ -178,7 +178,7 @@ impl Window {
         let request_close: Option<bool>;
         let request_grab_cursor: Option<bool>;
         {
-            let ui = self.imgui.context.frame();
+            let ui = self.imgui.context.new_frame();
             let mut frame = Frame {
                 input: &self.input,
                 stats: &self.current_stats,
@@ -194,7 +194,7 @@ impl Window {
             request_close = frame.request_close;
             request_grab_cursor = frame.request_grab_cursor;
 
-            self.imgui.renderer.render(frame.ui);
+            self.imgui.renderer.render(&mut self.imgui.context);
         }
         if request_close == Some(true) {
             self.request_close();
@@ -304,7 +304,7 @@ pub struct Frame<'window> {
     pub stats: &'window FrameStats,
     pub was_resized: bool,
     pub size: (i32, i32),
-    pub ui: imgui::Ui<'window>,
+    pub ui: &'window mut imgui::Ui,
 
     is_cursor_grabbed: bool,
     request_close: Option<bool>,
