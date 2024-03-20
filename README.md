@@ -11,6 +11,8 @@ the randomly generated world.
 Rust and OpenGL were chosen for their high performance, memory safety, and ease of use. Since most of the rendering work
 is done in shaders, usage of the actual OpenGL API is minimal.
 
+![Ray-traced Voxel World](/assets/docs/screenshot.jpg)
+
 ## Motivation
 
 Most games use rasterization to render geometry to the screen because it is the most versatile and computationally
