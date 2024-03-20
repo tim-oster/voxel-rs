@@ -138,7 +138,7 @@ impl TextureArrayBuilder {
                 }
             }
 
-            assert!(iw == width && ih == height, "image does not match base dimensions: got: {}x{}, base: {}x{}", iw, ih, width, height);
+            assert!(iw == width && ih == height, "image does not match base dimensions: got: {iw}x{ih}, base: {width}x{height}");
             assert_eq!(data.len(), (iw * ih * 4) as usize);
 
             texture.sub_image_3d(i as u32, iw, ih, data);
@@ -189,7 +189,7 @@ impl Drop for TextureArray {
 
 impl TextureArray {
     fn new(width: u32, height: u32, depth: u32, mip_levels: u8, max_anisotropy: f32, textures: FxHashMap<String, u32>) -> Self {
-        assert!(mip_levels > 0, "mip_levels must at least be 1, but is {}", mip_levels);
+        assert!(mip_levels > 0, "mip_levels must at least be 1, but is {mip_levels}");
 
         let mut id = 0;
 

@@ -559,8 +559,6 @@ fn pick_leaf_for_lod<'a, T, A: Allocator>(octree: &'a Octree<T, A>, parent: &'a 
 
 #[cfg(test)]
 mod svo_tests {
-    use std::iter::FromIterator;
-
     use rustc_hash::FxHashMap;
 
     use crate::world::chunk::{BlockId, ChunkPos};
@@ -1366,7 +1364,6 @@ impl<A: Allocator> SvoBuffer<A> {
 #[cfg(test)]
 mod svo_buffer_tests {
     use std::alloc::Global;
-    use std::iter::FromIterator;
 
     use rustc_hash::FxHashMap;
 

@@ -210,8 +210,6 @@ impl Svo {
 //noinspection DuplicatedCode
 #[cfg(test)]
 mod svo_tests {
-    use std::iter::FromIterator;
-
     use rustc_hash::FxHashMap;
 
     use crate::systems::worldsvo::{Svo, SvoCoordSpace};
