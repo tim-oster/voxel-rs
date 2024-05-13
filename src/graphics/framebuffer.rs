@@ -9,6 +9,7 @@ use crate::gl_assert_no_error;
 
 pub struct Framebuffer {
     handle: GLuint,
+    color_attachment: GLuint,
     width: i32,
     height: i32,
 }
@@ -16,35 +17,40 @@ pub struct Framebuffer {
 /// Framebuffer is a wrapper around a OpenGL framebuffer object. It attaches color, depth & stencil
 /// buffer for the given resolution. No multi-sampling is applied.
 impl Framebuffer {
-    pub fn new(width: i32, height: i32) -> Self {
+    pub fn new(width: i32, height: i32, depth: bool, stencil: bool) -> Self {
         let mut handle = 0;
+        let mut color_attachment = 0;
         unsafe {
             gl::GenFramebuffers(1, &mut handle);
             gl::BindFramebuffer(gl::FRAMEBUFFER, handle);
 
-            let mut color_attachment = 0;
             gl::GenTextures(1, &mut color_attachment);
             gl::BindTexture(gl::TEXTURE_2D, color_attachment);
-            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA8 as GLint, width, height, 0, gl::RGBA, gl::UNSIGNED_BYTE, ptr::null());
+            gl::TexImage2D(gl::TEXTURE_2D, 0, gl::RGBA32F as GLint, width, height, 0, gl::RGBA, gl::FLOAT, ptr::null());
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MIN_FILTER, gl::LINEAR as GLint);
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as GLint);
             gl::BindTexture(gl::TEXTURE_2D, 0);
             gl::FramebufferTexture2D(gl::FRAMEBUFFER, gl::COLOR_ATTACHMENT0, gl::TEXTURE_2D, color_attachment, 0);
             gl_assert_no_error!();
 
-            let mut depth_stencil_attachment = 0;
-            gl::GenRenderbuffers(1, &mut depth_stencil_attachment);
-            gl::BindRenderbuffer(gl::RENDERBUFFER, depth_stencil_attachment);
-            gl::RenderbufferStorage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, width, height);
-            gl::BindRenderbuffer(gl::RENDERBUFFER, 0);
-            gl::FramebufferRenderbuffer(gl::FRAMEBUFFER, gl::DEPTH_STENCIL_ATTACHMENT, gl::RENDERBUFFER, depth_stencil_attachment);
-            gl_assert_no_error!();
+            if depth && stencil {
+                let mut depth_stencil_attachment = 0;
+                gl::GenRenderbuffers(1, &mut depth_stencil_attachment);
+                gl::BindRenderbuffer(gl::RENDERBUFFER, depth_stencil_attachment);
+                gl::RenderbufferStorage(gl::RENDERBUFFER, gl::DEPTH24_STENCIL8, width, height);
+                gl::BindRenderbuffer(gl::RENDERBUFFER, 0);
+                gl::FramebufferRenderbuffer(gl::FRAMEBUFFER, gl::DEPTH_STENCIL_ATTACHMENT, gl::RENDERBUFFER, depth_stencil_attachment);
+                gl_assert_no_error!();
+            } else if depth != stencil {
+                // NOTE: implementations needs to change in order to support independent configuration
+                panic!("depth & stencil must both either be true or false");
+            }
 
             assert_eq!(gl::CheckFramebufferStatus(gl::FRAMEBUFFER), gl::FRAMEBUFFER_COMPLETE);
 
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
         }
-        Self { handle, width, height }
+        Self { handle, color_attachment, width, height }
     }
 
     pub fn width(&self) -> i32 {
@@ -53,6 +59,10 @@ impl Framebuffer {
 
     pub fn height(&self) -> i32 {
         self.height
+    }
+
+    pub fn color_attachment(&self) -> GLuint {
+        self.color_attachment
     }
 
     pub fn bind(&self) {
@@ -69,6 +79,18 @@ impl Framebuffer {
         unsafe {
             gl::ClearColor(r, g, b, a);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
+        }
+    }
+
+    pub fn blit_to_default(&self) {
+        unsafe {
+            gl::BindFramebuffer(gl::READ_FRAMEBUFFER, self.handle);
+            gl::BindFramebuffer(gl::DRAW_FRAMEBUFFER, 0);
+            gl::BlitFramebuffer(
+                0, 0, self.width, self.height,
+                0, 0, self.width, self.height,
+                gl::COLOR_BUFFER_BIT, gl::NEAREST,
+            );
         }
     }
 

@@ -1,29 +1,13 @@
-#shader_type vertex
-#version 450
-
-layout (location = 0) in vec3 position;
-layout (location = 1) in vec2 uv;
-
-out vec2 v_uv;
-
-void main() {
-    v_uv = uv;
-    gl_Position = vec4(position, 1.0);
-}
-
-// ------------------------------------------------------------
-
-#shader_type fragment
+#shader_type compute
 #version 450
 
 #include "svo.glsl"
 
-const float PI = 3.141592;
-const float HALF_PI = PI / 2.0;
+#define PI 3.141592
+#define HALF_PI 1.570796
 
-in vec2 v_uv;
-
-layout (location = 0) out vec4 color;
+layout (local_size_x = 32, local_size_y = 32, local_size_z = 1) in;
+layout (rgba32f, binding = 0) uniform image2D render_target;
 
 uniform mat4 u_view;// converts world to view space
 uniform float u_fovy;
@@ -73,11 +57,7 @@ vec4 trace_ray(vec3 ro, vec3 rd, out bool hit) {
 
     // if a normal texture is set, use its value as the normal vector
     if (tex_normal_id != -1) {
-        #if SHADER_COMPILE_TYPE != SHADER_TYPE_COMPUTE
-        vec3 tex = textureGrad(u_texture, vec3(res.uv, float(tex_normal_id)), vec2(dFdx(res.t), 0), vec2(dFdy(res.t), 0)).xzy;
-        #else
         vec3 tex = textureLod(u_texture, vec3(res.uv, float(tex_normal_id)), res.lod).xzy;
-        #endif
 
         // map [0;1] to [-1;1]
         tex = normalize(tex * 2 - 1);
@@ -129,7 +109,8 @@ vec3 get_sky_color(vec3 rd) {
 
 void main() {
     // convert uv from [0;1] to [-1;1], apply screen aspect ratio & vertical FoV
-    vec2 uv = v_uv * 2.0 - 1.0;
+    vec2 uv = vec2(gl_GlobalInvocationID.xy) / imageSize(render_target);
+    uv = uv * 2.0 - 1.0;
     uv.x *= u_aspect;
     uv *= tan(u_fovy * 0.5);
 
@@ -147,11 +128,14 @@ void main() {
     // cast ray from origin to look_at
     vec3 rd = normalize(look_at - ro);
     bool hit = false;
-    color = trace_ray(ro, rd, hit);
+
+    vec4 color = trace_ray(ro, rd, hit);
 
     // calculate sky color if nothing was hit
     if (!hit) {
         vec3 sky = get_sky_color(rd);
         color = vec4(sky, 1.0);
     }
+
+    imageStore(render_target, ivec2(gl_GlobalInvocationID.xy), color);
 }

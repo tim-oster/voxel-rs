@@ -5,6 +5,7 @@ use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
 
 use crate::graphics::buffer::{Buffer, MappedBuffer};
 use crate::graphics::fence::Fence;
+use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::resource::Resource;
 use crate::graphics::screen_quad::ScreenQuad;
 use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
@@ -159,7 +160,7 @@ impl Svo {
     }
 
     /// Draws a full-screen quad on which the raytracing shader is executed.
-    pub fn render(&self, params: &RenderParams) {
+    pub fn render(&self, params: &RenderParams, target: &Framebuffer) {
         let view_mat = Matrix4::look_to_rh(params.cam_pos, params.cam_fwd, params.cam_up).invert().unwrap();
 
         self.world_shader.bind();
@@ -180,7 +181,14 @@ impl Svo {
         }
         self.world_shader.set_f32vec3("u_highlight_pos", &selected_block);
 
-        self.screen_quad.render();
+        unsafe {
+            let (width, height) = (target.width(), target.height());
+
+            gl::BindImageTexture(0, target.color_attachment(), 0, gl::FALSE, 0, gl::WRITE_ONLY, gl::RGBA32F);
+            gl::DispatchCompute((width / 32 + 1) as u32, (height / 32 + 1) as u32, 1);
+            gl::MemoryBarrier(gl::SHADER_IMAGE_ACCESS_BARRIER_BIT);
+        }
+
         self.world_shader.unbind();
 
         // place a fence to allow for waiting on the current frame to be rendered
@@ -267,7 +275,7 @@ mod svo_tests {
     }
 
     /// Tests if rendering of a demo chunks works correctly. Voxels are textured and lighting is
-    /// applied. Result is stored in an image an compared against a reference image.
+    /// applied. Result is stored in an image and compared against a reference image.
     #[test]
     fn render() {
         let (width, height) = (640, 490);
@@ -293,7 +301,7 @@ mod svo_tests {
         let mut svo = Svo::new(&create_voxel_registry());
         svo.update(&mut world_svo);
 
-        let fb = Framebuffer::new(width as i32, height as i32);
+        let fb = Framebuffer::new(width as i32, height as i32, false, false);
 
         fb.bind();
         fb.clear(0.0, 0.0, 0.0, 1.0);
@@ -310,7 +318,7 @@ mod svo_tests {
             selected_voxel: Some(Point3::new(1.0, 1.0, 3.0)),
             render_shadows: true,
             shadow_distance: 500.0,
-        });
+        }, &fb);
         fb.unbind();
         gl_assert_no_error!();
 

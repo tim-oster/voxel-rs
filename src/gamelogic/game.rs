@@ -40,13 +40,13 @@ struct State {
 impl Game {
     pub fn new() -> Self {
         let mut window = Window::new(&Config {
-            width: 1024,
-            height: 768,
+            width: 1920,
+            height: 1080,
             title: "voxel engine",
             msaa_samples: 0,
             headless: false,
             resizable: true,
-            buffering: Buffering::Double,
+            buffering: Buffering::Single,
             target_fps: None,
         });
         window.request_grab_cursor(true);
@@ -162,7 +162,7 @@ impl State {
     }
 
     fn handle_window_resize(&mut self, width: i32, height: i32, aspect_ratio: f32) {
-        self.world.handle_window_resize(aspect_ratio);
+        self.world.handle_window_resize(width, height, aspect_ratio);
         self.gameplay.handle_window_resize(width, height);
     }
 

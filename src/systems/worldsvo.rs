@@ -6,6 +6,7 @@ use cgmath::Point3;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::graphics;
+use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult};
 use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
 use crate::systems::physics::Raycaster;
@@ -379,7 +380,7 @@ impl Svo {
     }
 
     /// Calls [`graphics::Svo::render`]. Positions are expected to be in world space.
-    pub fn render(&self, params: graphics::svo::RenderParams) {
+    pub fn render(&self, params: graphics::svo::RenderParams, target: &Framebuffer) {
         let mut params = params;
 
         // translate camera position into SVO
@@ -390,7 +391,7 @@ impl Svo {
             params.selected_voxel = Some(self.svo_coord_space.cnv_block_pos(pos));
         }
 
-        self.graphics_svo.render(&params);
+        self.graphics_svo.render(&params, target);
     }
 
     /// Calls [`graphics::Svo::get_stats`].

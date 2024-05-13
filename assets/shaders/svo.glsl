@@ -1,5 +1,5 @@
 // Pre-calculated normals per face in order [x-, x+, y-, y+, z-, z+].
-const vec3 FACE_NORMALS[6] = vec3[6](
+/*const*/ vec3 FACE_NORMALS[6] = vec3[6](
 vec3(-1, 0, 0),
 vec3(1, 0, 0),
 vec3(0, -1, 0),
@@ -9,7 +9,7 @@ vec3(0, 0, 1)
 );
 
 // Pre-calculated tangents per face in order [x-, x+, y-, y+, z-, z+].
-const vec3 FACE_TANGENTS[6] = vec3[6](
+/*const*/ vec3 FACE_TANGENTS[6] = vec3[6](
 vec3(0, 0, 1),
 vec3(0, 0, -1),
 vec3(1, 0, 0),
@@ -19,7 +19,7 @@ vec3(1, 0, 0)
 );
 
 // Pre-calculated bi-tangents per face in order [x-, x+, y-, y+, z-, z+].
-const vec3 FACE_BITANGENTS[6] = vec3[6](
+/*const*/ vec3 FACE_BITANGENTS[6] = vec3[6](
 vec3(0, 1, 0),
 vec3(0, 1, 0),
 vec3(0, 0, 1),
@@ -79,23 +79,19 @@ layout (std430, binding = 2) readonly buffer MaterialRegistry {
     return next_ptr;
 }
 
-// Parses the descriptor for the given parent octant and looks up child & leaf mask for octant_idx.
-// Actual format is explained in `src/world/svo.rs`.
-/*inline*/ bvec2 parse_descriptor(uint ptr, uint parent_octant_idx, uint octant_idx) {
-    uint bit = 1u << octant_idx;
+#define MAX_STEPS 1000
+// The algorithm relies on the IEEE 754 floating point bit representation. Since it using single precision (f32),
+// there are only 23 bits in the fractional part.
+#define MAX_SCALE 23
+// The smallest ray increment can only be exp2(-22) because of the fractional bit size of single precision floats.
+// Hence an epsilon value of exp2(-23) can be used for floating point operations.
+#define EPSILON 0.00000011920929// = exp2(-MAX_SCALE)
 
-    // lookup the descriptor for the current octant
-    uint descriptor = descriptors[ptr + (parent_octant_idx / 2)];
-    if ((parent_octant_idx % 2) != 0) {
-        descriptor >>= 16;
-    }
-    descriptor &= 0xffffu;
-
-    bool is_child = (descriptor & (bit << 8)) != 0;
-    bool is_leaf = (descriptor & bit) != 0;
-
-    return bvec2(is_child, is_leaf);
-}
+// Stacks to implement PUSH & POP for step into and out of the child octants.
+// Decalred outside of function scope as it seems to use a different memory region on the GPU and is faster.
+uint[MAX_SCALE + 1] ptr_stack;
+uint[MAX_SCALE + 1] parent_octant_idx_stack;
+float[MAX_SCALE + 1] t_max_stack;
 
 // Intersects the given ray (defined by ro & rd) against the octree in SVO format. It uses a modified implementation of
 // the raytracer described in Laine and Karras "Efficient sparse voxel octrees". In contrast to their implementation,
@@ -116,14 +112,6 @@ layout (std430, binding = 2) readonly buffer MaterialRegistry {
 //  - Samuli Laine and Tero Karras. 2010 "Efficient sparse voxel octrees – Analysis, Extensions, and Implementation"
 //      - https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
 void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sampler2DArray textures, out OctreeResult res) {
-    const int MAX_STEPS = 1000;
-    // The algorithm relies on the IEEE 754 floating point bit representation. Since it using single precision (f32),
-    // there are only 23 bits in the fractional part.
-    const int MAX_SCALE = 23;
-    // The smallest ray increment can only be exp2(-22) because of the fractional bit size of single precision floats.
-    // Hence an epsilon value of exp2(-23) can be used for floating point operations.
-    const float epsilon = exp2(-MAX_SCALE);
-
     // rescale inputs to be [0;1]
     ro *= octree_scale;
     max_dst *= octree_scale;
@@ -140,11 +128,6 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // Shift input coordinate system so that the octree spans from [1;2). Doing so allows the algorithm to work directly
     // on the mantissa/fractional bits of the float bits.
     ro += 1;
-
-    // stacks to implement PUSH & POP for step into and out of the child octants
-    uint[MAX_SCALE] ptr_stack;
-    uint[MAX_SCALE] parent_octant_idx_stack;
-    float[MAX_SCALE] t_max_stack;
 
     uint ptr = 0;// current pointer inside the SVO data structure
     uint parent_octant_idx = 0;// the child index [0;7] of the current octant's parent octant
@@ -164,10 +147,10 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // Prevent division by zero by making sure that rd is never less than epsilon, both in positive and negative
     // direction. Use bit-magic to copy the rd sign to the epsilon value.
     int sign_mask = 1 << 31;
-    int epsilon_bits_without_sign = floatBitsToInt(epsilon) & ~sign_mask;
-    if (abs(rd.x) < epsilon) rd.x = intBitsToFloat(epsilon_bits_without_sign | (floatBitsToInt(rd.x) & sign_mask));
-    if (abs(rd.y) < epsilon) rd.y = intBitsToFloat(epsilon_bits_without_sign | (floatBitsToInt(rd.y) & sign_mask));
-    if (abs(rd.z) < epsilon) rd.z = intBitsToFloat(epsilon_bits_without_sign | (floatBitsToInt(rd.z) & sign_mask));
+    int epsilon_bits_without_sign = floatBitsToInt(EPSILON) & ~sign_mask;
+    if (abs(rd.x) < EPSILON) rd.x = intBitsToFloat(epsilon_bits_without_sign | (floatBitsToInt(rd.x) & sign_mask));
+    if (abs(rd.y) < EPSILON) rd.y = intBitsToFloat(epsilon_bits_without_sign | (floatBitsToInt(rd.y) & sign_mask));
+    if (abs(rd.z) < EPSILON) rd.z = intBitsToFloat(epsilon_bits_without_sign | (floatBitsToInt(rd.z) & sign_mask));
 
     // To calculate octant intersections, the algorithm needs to know the distance `t` along every axis until the next
     // octant at the current step size is reached. This can be expressed as `rx(t) = rx + t * dx` for the x-axis.
@@ -183,12 +166,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // position.
     //
     // Ensure that ray directions are always negative, this is required so that the mirroring logic below works.
-    float tx_coef = 1.0 / -abs(rd.x);
-    float ty_coef = 1.0 / -abs(rd.y);
-    float tz_coef = 1.0 / -abs(rd.z);
-    float tx_bias = tx_coef * ro.x;
-    float ty_bias = ty_coef * ro.y;
-    float tz_bias = tz_coef * ro.z;
+    vec3 t_coef = 1.0 / -abs(rd);
+    vec3 t_bias = t_coef * ro;
 
     // To keep the implementation logic simple, all positive ray directions are mirrored. This allows for stepping
     // through the octree without having to keep the sign of the direction into account. Whenever information about a
@@ -204,18 +183,19 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // alternative implementations. The negative property also simplifies the calculation of corner points, which
     // happens frequently.
     int octant_mask = 0;
-    if (rd.x > 0) octant_mask ^= 1, tx_bias = 3.0 * tx_coef - tx_bias;
-    if (rd.y > 0) octant_mask ^= 2, ty_bias = 3.0 * ty_coef - ty_bias;
-    if (rd.z > 0) octant_mask ^= 4, tz_bias = 3.0 * tz_coef - tz_bias;
+    if (rd.x > 0) octant_mask ^= 1, t_bias.x = 3.0 * t_coef.x - t_bias.x;
+    if (rd.y > 0) octant_mask ^= 2, t_bias.y = 3.0 * t_coef.y - t_bias.y;
+    if (rd.z > 0) octant_mask ^= 4, t_bias.z = 3.0 * t_coef.z - t_bias.z;
 
     // Calculate distance t_min from ro at which the ray enters the octant. t_min will be increased while casting the
     // ray and represents the final dst result. It might be negative when ro is within the octree. Since rd is always
     // negative in the distance equation, the first interception is at the axis aligned planes at (2, 2, 2).
-    float t_min = max(max(2.0 * tx_coef - tx_bias, 2.0 * ty_coef - ty_bias), 2.0 * tz_coef - tz_bias);
+    float t_min = max(max(2.0 * t_coef.x - t_bias.x, 2.0 * t_coef.y - t_bias.y), 2.0 * t_coef.z - t_bias.z);
     t_min = max(0, t_min);
     // Calculate the distance t_max at which the ray leaves the octree. Since rd is always negative in the distance
     // equation, the exit interception is at the axis aligned planes at (1, 1, 1).
-    float t_max = min(min(tx_coef - tx_bias, ty_coef - ty_bias), tz_coef - tz_bias);
+    float t_max = min(min(t_coef.x - t_bias.x, t_coef.y - t_bias.y), t_coef.z - t_bias.z);
+    float h = t_max;
 
     // idx is the current octant index inside its parent. Every octant can have 8 children. The index is calculated by
     // allocating one bit per axis and setting it to 0 or 1 depending on the position of the octant on the given axis
@@ -228,9 +208,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // calculation logic needs to be inverted as well. If t_min is less than the distance to the center of every
     // axis (1.5), then globally the entry position is in the second half of the octant. To indicate this, the idx flag
     // is updated. Additionally, pos needs to be set to 1.5 to reflect that fact.
-    if (t_min < 1.5 * tx_coef - tx_bias) idx ^= 1, pos.x = 1.5;
-    if (t_min < 1.5 * ty_coef - ty_bias) idx ^= 2, pos.y = 1.5;
-    if (t_min < 1.5 * tz_coef - tz_bias) idx ^= 4, pos.z = 1.5;
+    if (t_min < 1.5 * t_coef.x - t_bias.x) idx ^= 1, pos.x = 1.5;
+    if (t_min < 1.5 * t_coef.y - t_bias.y) idx ^= 2, pos.y = 1.5;
+    if (t_min < 1.5 * t_coef.z - t_bias.z) idx ^= 4, pos.z = 1.5;
 
     // Start stepping through the octree until a voxel is hit or max steps are reached.
     for (int i = 0; i < MAX_STEPS; ++i) {
@@ -240,17 +220,21 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
         }
 
         // Because the ray direction is inverted, pos defines the corner of the cube where the ray will exit.
-        float tx_corner = pos.x * tx_coef - tx_bias;
-        float ty_corner = pos.y * ty_coef - ty_bias;
-        float tz_corner = pos.z * tz_coef - tz_bias;
+        vec3 t_corner = pos * t_coef - t_bias;
         // The smallest distance across axes determines the exit distance of the current octant.
-        float tc_max = min(min(tx_corner, ty_corner), tz_corner);
+        float tc_max = min(min(t_corner.x, t_corner.y), t_corner.z);
 
         // lookup the descriptor for the current octant
         uint octant_idx = idx ^ octant_mask;// undo mirroring
-        bvec2 desc = parse_descriptor(ptr, parent_octant_idx, octant_idx);
-        bool is_child = desc.x;
-        bool is_leaf = desc.y;
+        uint bit = 1u << octant_idx;
+
+        // lookup the descriptor for the current octant
+        uint descriptor = descriptors[ptr + (parent_octant_idx / 2)];
+        if ((parent_octant_idx % 2) != 0) {
+            descriptor >>= 16;
+        }
+        bool is_child = (descriptor & (bit << 8)) != 0;
+        bool is_leaf = (descriptor & bit) != 0;
 
         OCTREE_RAYTRACE_DEBUG_FN(t_min/octree_scale, ptr, idx, parent_octant_idx, scale, is_child, is_leaf);
 
@@ -274,11 +258,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 uint value = descriptors[next_ptr];
 
                 // Use current pos + scale_exp2 to get the lower bound, i.e. the entry distance for the ray.
-                float tx_corner = (pos.x + scale_exp2) * tx_coef - tx_bias;
-                float ty_corner = (pos.y + scale_exp2) * ty_coef - ty_bias;
-                float tz_corner = (pos.z + scale_exp2) * tz_coef - tz_bias;
+                vec3 t_corner = (pos + scale_exp2) * t_coef - t_bias;
                 // The smallest distance across axes determines the entry distance of the hit leaf.
-                float tc_min = max(max(tx_corner, ty_corner), tz_corner);
+                float tc_min = max(max(t_corner.x, t_corner.y), t_corner.z);
 
                 // undo mirroring of the position
                 vec3 pos = pos;
@@ -291,17 +273,17 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 // position rescaled by the current scale.
                 int face_id;
                 vec2 uv;
-                if (tc_min == tx_corner) {
+                if (tc_min == t_corner.x) {
                     face_id = (floatBitsToInt(rd.x) >> 31) & 1;
-                    uv = vec2((ro.z + rd.z * tx_corner) - pos.z, (ro.y + rd.y * tx_corner) - pos.y) / scale_exp2;
+                    uv = vec2((ro.z + rd.z * t_corner.x) - pos.z, (ro.y + rd.y * t_corner.x) - pos.y) / scale_exp2;
                     if (rd.x > 0) uv.x = 1 - uv.x;
-                } else if (tc_min == ty_corner) {
+                } else if (tc_min == t_corner.y) {
                     face_id = 2 | ((floatBitsToInt(rd.y) >> 31) & 1);
-                    uv = vec2((ro.x + rd.x * ty_corner) - pos.x, (ro.z + rd.z * ty_corner) - pos.z) / scale_exp2;
+                    uv = vec2((ro.x + rd.x * t_corner.y) - pos.x, (ro.z + rd.z * t_corner.y) - pos.z) / scale_exp2;
                     if (rd.y > 0) uv.y = 1 - uv.y;
                 } else {
                     face_id = 4 | ((floatBitsToInt(rd.z) >> 31) & 1);
-                    uv = vec2((ro.x + rd.x * tz_corner) - pos.x, (ro.y + rd.y * tz_corner) - pos.y) / scale_exp2;
+                    uv = vec2((ro.x + rd.x * t_corner.z) - pos.x, (ro.y + rd.y * t_corner.z) - pos.y) / scale_exp2;
                     if (rd.z < 0) uv.x = 1 - uv.x;
                 }
 
@@ -316,14 +298,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 // calculate custom texture lod interpolation factor
                 float tex_lod = smoothstep(15, 25, dst) * (dst-15) * 0.05;
 
-                #if SHADER_COMPILE_TYPE != SHADER_TYPE_COMPUTE
-                // use derivative of t because uv is not continuous (resets after every voxel)
-                vec4 tex_color_a = textureGrad(textures, vec3(uv, float(tex_id)), vec2(dFdx(dst), 0), vec2(dFdy(dst), 0));
-                vec4 tex_color_b = textureLod(textures, vec3(uv, float(tex_id)), tex_lod);
-                vec4 tex_color = mix(tex_color_b, tex_color_b, smoothstep(15, 25, dst));
-                #else
                 vec4 tex_color = textureLod(textures, vec3(uv, float(tex_id)), tex_lod);
-                #endif
 
                 // If texel is not translucent, or cast_translucent = false, calculate the result and stop the
                 // algorithm. Ignore the leaf if it is not the first of its kind, when casting translucent voxels.
@@ -338,9 +313,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
 
                     // Clamp final `ro + t_min * rd` between octant start & end position to mitigate floating point
                     // errors.
-                    res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + epsilon), pos.x + scale_exp2 - epsilon);
-                    res.pos.y = min(max(ro.y + t_min * rd.y, pos.y + epsilon), pos.y + scale_exp2 - epsilon);
-                    res.pos.z = min(max(ro.z + t_min * rd.z, pos.z + epsilon), pos.z + scale_exp2 - epsilon);
+                    res.pos.x = min(max(ro.x + t_min * rd.x, pos.x + EPSILON), pos.x + scale_exp2 - EPSILON);
+                    res.pos.y = min(max(ro.y + t_min * rd.y, pos.y + EPSILON), pos.y + scale_exp2 - EPSILON);
+                    res.pos.z = min(max(ro.z + t_min * rd.z, pos.z + EPSILON), pos.z + scale_exp2 - EPSILON);
 
                     // undo initial coordinate system shift & rescale
                     res.pos -= 1;
@@ -361,9 +336,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 // intersects on each axis. This center position is equal to the current "upper bound" pos + half of
                 // the current scale.
                 float half_scale = scale_exp2 * 0.5;
-                float tx_center = half_scale * tx_coef + tx_corner;
-                float ty_center = half_scale * ty_coef + ty_corner;
-                float tz_center = half_scale * tz_coef + tz_corner;
+                vec3 t_center = half_scale * t_coef + t_corner;
 
                 // do not exceed current parent octant
                 float tv_max = min(t_max, tc_max);
@@ -372,9 +345,12 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                     // phase: PUSH
 
                     // "push" current values onto the stack
-                    ptr_stack[scale] = ptr;
-                    parent_octant_idx_stack[scale] = parent_octant_idx;
-                    t_max_stack[scale] = t_max;
+                    if (tc_max < h) {
+                        ptr_stack[scale] = ptr;
+                        parent_octant_idx_stack[scale] = parent_octant_idx;
+                        t_max_stack[scale] = t_max;
+                    }
+                    h = tc_max;
 
                     // fetch next octant pointer
                     ptr = get_octant_ptr(ptr, parent_octant_idx);
@@ -387,9 +363,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                     // Use center values to determine the next idx & pos using the same logic as done during the setup
                     // phase of the algorithm.
                     idx = 0;
-                    if (t_min < tx_center) idx ^= 1, pos.x += scale_exp2;
-                    if (t_min < ty_center) idx ^= 2, pos.y += scale_exp2;
-                    if (t_min < tz_center) idx ^= 4, pos.z += scale_exp2;
+                    if (t_min < t_center.x) idx ^= 1, pos.x += scale_exp2;
+                    if (t_min < t_center.y) idx ^= 2, pos.y += scale_exp2;
+                    if (t_min < t_center.z) idx ^= 4, pos.z += scale_exp2;
 
                     // update t_max to not allow exceeding the child octant that was descended into
                     t_max = tv_max;
@@ -410,9 +386,9 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
         // Figure out which corner is the closest and build the step_mask using it. Also adjust the pos (upper bound)
         // in inverse direction to reflect the next upper bound correctly.
         int step_mask = 0;
-        if (tc_max >= tx_corner) step_mask ^= 1, pos.x -= scale_exp2;
-        if (tc_max >= ty_corner) step_mask ^= 2, pos.y -= scale_exp2;
-        if (tc_max >= tz_corner) step_mask ^= 4, pos.z -= scale_exp2;
+        if (tc_max >= t_corner.x) step_mask ^= 1, pos.x -= scale_exp2;
+        if (tc_max >= t_corner.y) step_mask ^= 2, pos.y -= scale_exp2;
+        if (tc_max >= t_corner.z) step_mask ^= 4, pos.z -= scale_exp2;
 
         // advance t_min and perform step on idx
         t_min = tc_max;
@@ -474,6 +450,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
             // rounding 1.25 (0b01) to 1.0 (0b00) for the same scale, does not have the 23rd bit set. Hence, they are
             // contribute to the new idx respectively.
             idx = (shx & 1) | ((shy & 1) << 1) | ((shz & 1) << 2);
+
+            h = 0;
         }
     }
 }

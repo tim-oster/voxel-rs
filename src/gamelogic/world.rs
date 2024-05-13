@@ -11,6 +11,7 @@ use crate::gamelogic::content::blocks;
 use crate::gamelogic::worldgen;
 use crate::gamelogic::worldgen::{Generator, Noise, SplinePoint};
 use crate::graphics::camera::Camera;
+use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::svo::RenderParams;
 use crate::systems::{storage, worldsvo};
 use crate::systems::chunkloader::{ChunkEvent, ChunkLoader};
@@ -34,6 +35,7 @@ pub struct World {
     world_generator: systems::worldgen::Generator,
     world_generator_cfg: worldgen::Config,
     pub world_svo: worldsvo::Svo,
+    world_fbo: Framebuffer,
 
     physics: Physics,
 
@@ -83,6 +85,7 @@ impl World {
             world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_allocator, chunk_generator),
             world_generator_cfg: world_cfg,
             world_svo: worldsvo::Svo::new(job_system, graphics_svo, loading_radius),
+            world_fbo: Framebuffer::new(1920, 1080, false, false),
             physics: Physics::new(),
             camera: Camera::new(72.0, 1.0, 0.01, 1024.0),
             selected_voxel: None,
@@ -104,8 +107,9 @@ impl World {
         self.handle_chunk_loading();
     }
 
-    pub fn handle_window_resize(&mut self, aspect_ratio: f32) {
+    pub fn handle_window_resize(&mut self, width: i32, height: i32, aspect_ratio: f32) {
         self.camera.update_projection(72.0, aspect_ratio, 0.01, 1024.0);
+        self.world_fbo = Framebuffer::new(width, height, false, false);
     }
 
     pub fn reload_resources(&mut self) {
@@ -182,7 +186,7 @@ impl World {
     }
 
     /// `sort_chunks_by_view_frustum` sorts the given chunk event to contain all chunks that are in
-    /// the camera's view first first. All other chunks are sorted radially from forward to backward
+    /// the camera's view first. All other chunks are sorted radially from forward to backward
     /// camera vector.
     fn sort_chunks_by_view_frustum(events: Vec<ChunkEvent>, camera: &Camera) -> Vec<ChunkEvent> {
         let mut visible_chunks = Vec::new();
@@ -229,7 +233,8 @@ impl World {
             selected_voxel: self.selected_voxel,
             render_shadows: self.render_shadows,
             shadow_distance: self.shadow_distance,
-        });
+        }, &self.world_fbo);
+        self.world_fbo.blit_to_default();
     }
 
     pub fn render_debug_window(&mut self, frame: &mut Frame) {
@@ -403,7 +408,7 @@ mod tests {
     use crate::core::GlContext;
     use crate::gamelogic::world::World;
     use crate::gl_assert_no_error;
-    use crate::graphics::framebuffer::{diff_images, Framebuffer};
+    use crate::graphics::framebuffer::diff_images;
     use crate::systems::jobs::JobSystem;
     use crate::systems::physics::{AABBDef, Entity};
 
@@ -424,7 +429,7 @@ mod tests {
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
         let mut world = World::new(Rc::clone(&job_system), 15);
-        world.handle_window_resize(aspect_ratio);
+        world.handle_window_resize(width as i32, height as i32, aspect_ratio);
 
         loop {
             world.update(&player);
@@ -436,14 +441,10 @@ mod tests {
 
         job_system.wait_until_empty_and_processed();
 
-        let fb = Framebuffer::new(width as i32, height as i32);
-        fb.bind();
-        fb.clear(0.0, 0.0, 0.0, 1.0);
         world.render(aspect_ratio);
-        fb.unbind();
         gl_assert_no_error!();
 
-        let actual = fb.as_image();
+        let actual = world.world_fbo.as_image();
         actual.save_with_format("assets/tests/gamelogic_world_end_to_end_actual.png", image::ImageFormat::Png).unwrap();
 
         let expected = image::open("assets/tests/gamelogic_world_end_to_end_expected.png").unwrap();
