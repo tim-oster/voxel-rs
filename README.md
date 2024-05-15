@@ -238,7 +238,17 @@ The following custom cargo build features can be used when compiling the project
   memory operations to be performed in the main thread in a coordinated way, there could be alternative
   implementations that reduce this to a minimum and allow streaming data from other threads.
 
-- The raytracer performs well on high screen resolutions but struggles with large worlds on 4k monitors. One way
-  to optimize this is to reduce the steps a ray must make through space before it hits anything. The
-  original paper describes this as "Thick Rays". A pre-pass can try to determine the actual depth of intersection for a
-  group of pixels at once to allow those pixels to start much further into the scene.
+- The raytracer performs well on high screen resolutions but struggles with large worlds on 4k monitors. Several ideas
+  on how to make this more efficient exist:
+
+  - Reduce the steps a ray must make through space before it hits anything. The original paper describes this as
+    "Thick Rays". A pre-pass can try to determine the actual depth of intersection for a group of pixels at once to
+    allow those pixels to start much further into the scene.
+
+  - When casting secondary rays, the octree needs to descend to the starting position before casting the ray itself.
+    At the end of the primary ray, the stack is already build, so it should be possible to reuse it to avoid doing 
+    duplicate work.
+
+  - When the camera is within the octree, the ray-tracer has to descend to the leaf level at the starting position first,
+    in order to step through the tree. This calculation is the same for every pixel, so it might be possible to
+    pre-calculate it to reduce unnecessary work.
