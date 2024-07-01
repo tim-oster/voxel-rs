@@ -59,7 +59,7 @@ impl Game {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let world = World::new(Rc::clone(&job_system), 15);
+        let world = World::new(Rc::clone(&job_system), 15, Some("assets/worlds/benchmark"));
         let gameplay = Gameplay::new();
 
         Self {

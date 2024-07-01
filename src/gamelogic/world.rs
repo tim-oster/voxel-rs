@@ -16,7 +16,7 @@ use crate::graphics::svo::RenderParams;
 use crate::systems::chunkloader::{ChunkEvent, ChunkLoader};
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{Entity, Physics};
-use crate::systems::storage::{MinecraftStorage, Storage};
+use crate::systems::storage::{MinecraftStorage, NopStorage, Storage};
 use crate::systems::worldsvo;
 use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
 use crate::world::world;
@@ -48,7 +48,7 @@ pub struct World {
 }
 
 impl World {
-    pub fn new(job_system: Rc<JobSystem>, loading_radius: u32) -> Self {
+    pub fn new(job_system: Rc<JobSystem>, loading_radius: u32, mc_world_path: Option<&str>) -> Self {
         let world_cfg = worldgen::Config {
             sea_level: 70,
             continentalness: Noise {
@@ -80,7 +80,11 @@ impl World {
             job_system: Rc::clone(&job_system),
             chunk_loader: ChunkLoader::new(loading_radius, 0, 8),
             chunk_storage_allocator: chunk_allocator.clone(),
-            storage: Box::new(MinecraftStorage::new(Rc::clone(&job_system), chunk_allocator.clone(), "assets/worlds/benchmark")),
+            storage: if let Some(path) = mc_world_path {
+                Box::new(MinecraftStorage::new(job_system.clone(), chunk_allocator.clone(), path))
+            } else {
+                Box::new(NopStorage::new())
+            },
             world: world::World::new(),
             world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_allocator, chunk_generator),
             world_generator_cfg: world_cfg,
@@ -425,7 +429,7 @@ mod tests {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let mut world = World::new(Rc::clone(&job_system), 15);
+        let mut world = World::new(Rc::clone(&job_system), 15, None);
         world.handle_window_resize(width as i32, height as i32, aspect_ratio);
 
         loop {
