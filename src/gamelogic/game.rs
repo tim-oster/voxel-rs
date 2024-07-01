@@ -52,14 +52,14 @@ impl Game {
         window.request_grab_cursor(true);
 
         let mut player = Entity::new(
-            Point3::new(-24.0, 80.0, 174.0),
+            Point3::new(-644.0, 116.0, 120.0),
             AABBDef::new(Vector3::new(-0.4, -1.7, -0.4), Vector3::new(0.8, 1.8, 0.8)),
         );
         player.euler_rotation = Vector3::new(0.0, -90f32.to_radians(), 0.0);
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let world = World::new(Rc::clone(&job_system), 20);
+        let world = World::new(Rc::clone(&job_system), 15);
         let gameplay = Gameplay::new();
 
         Self {

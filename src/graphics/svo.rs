@@ -93,7 +93,7 @@ impl Svo {
             || ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
         ).unwrap();
 
-        let world_buffer = MappedBuffer::<u32>::new(100 * 1000 * 1000 / 4); // 100 MB
+        let world_buffer = MappedBuffer::<u32>::new(300 * 1000 * 1000 / 4); // 300 MB
         world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);
 
         let picker_shader = Resource::new(

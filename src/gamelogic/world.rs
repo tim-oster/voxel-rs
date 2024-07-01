@@ -13,11 +13,11 @@ use crate::gamelogic::worldgen::{Generator, Noise, SplinePoint};
 use crate::graphics::camera::Camera;
 use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::svo::RenderParams;
-use crate::systems::{storage, worldsvo};
 use crate::systems::chunkloader::{ChunkEvent, ChunkLoader};
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{Entity, Physics};
-use crate::systems::storage::Storage;
+use crate::systems::storage::{MinecraftStorage, Storage};
+use crate::systems::worldsvo;
 use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
 use crate::world::world;
 
@@ -29,7 +29,7 @@ pub struct World {
 
     chunk_loader: ChunkLoader,
     pub chunk_storage_allocator: Arc<ChunkStorageAllocator>,
-    pub storage: Storage,
+    pub storage: Box<dyn Storage>,
 
     pub world: world::World,
     world_generator: systems::worldgen::Generator,
@@ -80,14 +80,14 @@ impl World {
             job_system: Rc::clone(&job_system),
             chunk_loader: ChunkLoader::new(loading_radius, 0, 8),
             chunk_storage_allocator: chunk_allocator.clone(),
-            storage: Storage::new(),
+            storage: Box::new(MinecraftStorage::new(Rc::clone(&job_system), chunk_allocator.clone(), "assets/worlds/benchmark")),
             world: world::World::new(),
             world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_allocator, chunk_generator),
             world_generator_cfg: world_cfg,
             world_svo: worldsvo::Svo::new(job_system, graphics_svo, loading_radius),
             world_fbo: Framebuffer::new(1920, 1080, false, false),
             physics: Physics::new(),
-            camera: Camera::new(72.0, 1.0, 0.01, 1024.0),
+            camera: Camera::new(80.0, 1.0, 0.01, 1024.0),
             selected_voxel: None,
             ambient_intensity: 0.3,
             sun_direction: Vector3::new(-1.0, -1.0, -1.0).normalize(),
@@ -119,29 +119,17 @@ impl World {
     fn handle_chunk_loading(&mut self) {
         let chunk_events = self.chunk_loader.update(self.camera.position);
         if !chunk_events.is_empty() {
-            let mut generate_count = 0;
+            let mut loaded_count = 0;
 
             let chunk_events = Self::sort_chunks_by_view_frustum(chunk_events, &self.camera);
             for event in &chunk_events {
                 match event {
                     ChunkEvent::Load { pos, lod } => {
-                        let result = self.storage.load(pos);
-                        if result.is_ok() {
-                            let mut chunk = result.ok().unwrap();
-                            chunk.lod = *lod;
-                            self.world.set_chunk(chunk);
-                            continue;
-                        }
-
-                        let err = result.err().unwrap();
-                        match err {
-                            storage::LoadError::NotFound => {
-                                self.world_generator.enqueue_chunk(*pos, *lod);
-                                generate_count += 1;
-                            }
-                        }
+                        self.storage.load(pos, *lod);
+                        loaded_count += 1;
                     }
                     ChunkEvent::Unload { pos } => {
+                        self.storage.dequeue_chunk(pos);
                         self.world_generator.dequeue_chunk(pos);
                         self.world.remove_chunk(pos);
                     }
@@ -153,7 +141,17 @@ impl World {
                 }
             }
             if !chunk_events.is_empty() {
-                println!("generate {generate_count} new chunks");
+                println!("loaded {loaded_count} new chunks");
+            }
+        }
+        for chunk in self.storage.get_load_results(400) {
+            if self.chunk_loader.is_loaded(&chunk.pos) {
+                if chunk.value.0.is_none() {
+                    self.world_generator.enqueue_chunk(chunk.pos, chunk.value.1);
+                    continue;
+                }
+                let chunk = chunk.value.0.unwrap();
+                self.world.set_chunk(chunk);
             }
         }
         for chunk in self.world_generator.get_generated_chunks(400) {
@@ -256,7 +254,6 @@ impl World {
                     let graphics_svo = graphics::Svo::new(&blocks::new_registry());
 
                     self.chunk_loader = ChunkLoader::new(self.chunk_loader.get_radius(), 0, 8);
-                    self.storage = Storage::new();
                     self.world = world::World::new();
                     self.world_generator = systems::worldgen::Generator::new(Rc::clone(&self.job_system), self.chunk_storage_allocator.clone(), chunk_generator);
                     self.world_svo = worldsvo::Svo::new(Rc::clone(&self.job_system), graphics_svo, self.world_svo.get_render_distance());
@@ -434,7 +431,7 @@ mod tests {
         loop {
             world.update(&player);
 
-            if !world.world_generator.has_pending_jobs() && !world.world_svo.has_pending_jobs() {
+            if !world.storage.has_pending_jobs() && !world.world_generator.has_pending_jobs() && !world.world_svo.has_pending_jobs() {
                 break;
             }
         }
