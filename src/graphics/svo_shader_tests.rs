@@ -17,8 +17,8 @@ mod tests {
     use crate::graphics::texture_array::{TextureArray, TextureArrayBuilder, TextureArrayError};
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
     use crate::world::memory::{Pool, StatsAllocator};
-    use crate::world::octree::Position;
-    use crate::world::svo::{ChunkBuffer, SerializedChunk, Svo};
+    use crate::world::hds::octree::Position;
+    use crate::world::hds::esvo::{ChunkBuffer, SerializedChunk, Svo};
     use crate::world::world::BorrowedChunk;
 
     #[repr(C)]

@@ -6,9 +6,10 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::graphics::svo::Container;
 use crate::world::chunk::{BlockId, ChunkPos};
+use crate::world::hds::octree::{LeafId, Octant, OctantId, Octree, Position};
 use crate::world::memory::{Pool, Pooled, StatsAllocator};
-use crate::world::octree::{LeafId, Octant, OctantId, Octree, Position};
 use crate::world::world::BorrowedChunk;
 
 pub type ChunkBufferPool<A = StatsAllocator> = Pool<ChunkBuffer<A>, A>;
@@ -49,7 +50,7 @@ enum OctantChange {
     Remove(u64),
 }
 
-pub trait SvoSerializable {
+pub trait EsvoSerializable {
     /// Returns a unique id for the serializable value. It is used to keep track of the serialized result when moving
     /// it around inside the SVO.
     fn unique_id(&self) -> u64;
@@ -128,7 +129,7 @@ pub struct SerializationResult {
 /// [10] 00000000 00000000  00000000 00000000
 /// [11] 00000000 00000000  00000000 00000000
 /// ```
-pub struct Svo<T: SvoSerializable, A: Allocator = Global> {
+pub struct Svo<T: EsvoSerializable, A: Allocator = Global> {
     octree: Octree<T>,
     change_set: FxHashSet<OctantChange>,
 
@@ -148,7 +149,7 @@ struct LeafInfo {
     serialization: SerializationResult,
 }
 
-impl<T: SvoSerializable> Svo<T> {
+impl<T: EsvoSerializable> Svo<T> {
     pub fn new() -> Self {
         Self::new_in(Global)
     }
@@ -158,7 +159,7 @@ impl<T: SvoSerializable> Svo<T> {
     }
 }
 
-impl<T: SvoSerializable, A: Allocator> Svo<T, A> {
+impl<T: EsvoSerializable, A: Allocator> Svo<T, A> {
     /// Static size of the serialized data required for wrapping the root octant into a traversable format.
     const PREAMBLE_LENGTH: u32 = 5;
 
@@ -302,7 +303,7 @@ impl<T: SvoSerializable, A: Allocator> Svo<T, A> {
 
     /// Writes the full serialized SVO buffer to the `dst` pointer. Returns the number of elements written. Must be
     /// called after [`Svo::serialize`].
-    pub unsafe fn write_to(&self, dst: *mut u32) -> usize {
+    unsafe fn write_to(&self, dst: *mut u32) -> usize {
         if self.root_info.is_none() {
             return 0;
         }
@@ -366,6 +367,20 @@ impl<T: SvoSerializable, A: Allocator> Svo<T, A> {
     }
 }
 
+impl<T: EsvoSerializable, A: Allocator> Container for Svo<T, A> {
+    fn depth(&self) -> u8 {
+        self.depth()
+    }
+
+    fn size_in_bytes(&self) -> usize {
+        self.size_in_bytes()
+    }
+
+    unsafe fn write_changes_to(&mut self, dst: *mut u32, dst_len: usize, reset: bool) {
+        self.write_changes_to(dst, dst_len, reset);
+    }
+}
+
 /// `SerializedChunk` is a wrapper that serializes the given chunk on creation and stores the results.
 pub struct SerializedChunk {
     pub pos: ChunkPos,
@@ -410,7 +425,7 @@ impl SerializedChunk {
     }
 }
 
-impl SvoSerializable for SerializedChunk {
+impl EsvoSerializable for SerializedChunk {
     fn unique_id(&self) -> u64 {
         self.pos_hash
     }
@@ -456,7 +471,9 @@ struct ChildEncodeParams<'a, T> {
 /// `lod` > 0, the recursion depth is limited to that lod. If no leaf could be found until the LOD is exceeded,
 /// [`pick_leaf_for_lod`] is used to find the first leaf in any octant at the last position.
 fn serialize_octant<T, F, A1: Allocator, A2: Allocator>(octree: &Octree<T, A1>, octant_id: OctantId, dst: &mut Vec<u32, A2>, lod: u8, child_encoder: &F) -> SerializationResult
-    where F: Fn(ChildEncodeParams<T>) {
+where
+    F: Fn(ChildEncodeParams<T>),
+{
     // keep track of the start position to determine how much data was added in this call
     let start_offset = dst.len();
 
@@ -558,13 +575,13 @@ fn pick_leaf_for_lod<'a, T, A: Allocator>(octree: &'a Octree<T, A>, parent: &'a 
 }
 
 #[cfg(test)]
-mod svo_tests {
+mod esvo_tests {
     use rustc_hash::FxHashMap;
 
     use crate::world::chunk::{BlockId, ChunkPos};
+    use crate::world::hds::esvo::{ChunkBuffer, LeafInfo, Range, SerializationResult, SerializedChunk, Svo, SvoBuffer};
+    use crate::world::hds::octree::{LeafId, Octree, Position};
     use crate::world::memory::{Pool, StatsAllocator};
-    use crate::world::octree::{LeafId, Octree, Position};
-    use crate::world::svo::{ChunkBuffer, LeafInfo, Range, SerializationResult, SerializedChunk, Svo, SvoBuffer};
 
     /// Tests that serializing an SVO with `SerializedChunk` values produces the expected result buffer.
     #[test]
@@ -588,11 +605,11 @@ mod svo_tests {
             pos_hash: 100,
         };
 
-        let mut svo = Svo::new();
-        svo.set_leaf(Position(1, 0, 0), sc, true);
-        svo.serialize();
+        let mut esvo = Svo::new();
+        esvo.set_leaf(Position(1, 0, 0), sc, true);
+        esvo.serialize();
 
-        assert_eq!(svo.root_info, Some(LeafInfo {
+        assert_eq!(esvo.root_info, Some(LeafInfo {
             buf_offset: 156,
             serialization: SerializationResult {
                 child_mask: 2,
@@ -723,7 +740,7 @@ mod svo_tests {
             0, preamble_length, 0, 0,
             0, 0, 0, 0,
         ];
-        assert_eq!(svo.buffer, SvoBuffer {
+        assert_eq!(esvo.buffer, SvoBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 168 }],
@@ -735,7 +752,7 @@ mod svo_tests {
 
         let mut buffer = Vec::new();
         buffer.resize(200, 0);
-        let size = unsafe { svo.write_to(buffer.as_mut_ptr()) };
+        let size = unsafe { esvo.write_to(buffer.as_mut_ptr()) };
         assert_eq!(buffer[..size], [
             vec![
                 // preamble
@@ -752,15 +769,15 @@ mod svo_tests {
     /// Tests that removing and moving leaf values inside an SVO works and that data can be partially updated.
     #[test]
     fn serialize_with_remove_and_move() {
-        let mut svo = Svo::new();
+        let mut esvo = Svo::new();
 
         // NOTE: serialize twice to avoid non-deterministic results due to random map lookup in implementation
-        svo.set_leaf(Position(0, 0, 0), 10, true);
-        svo.serialize();
-        svo.set_leaf(Position(1, 0, 0), 20, true);
-        svo.serialize();
+        esvo.set_leaf(Position(0, 0, 0), 10, true);
+        esvo.serialize();
+        esvo.set_leaf(Position(1, 0, 0), 20, true);
+        esvo.serialize();
 
-        assert_eq!(svo.root_info, Some(LeafInfo {
+        assert_eq!(esvo.root_info, Some(LeafInfo {
             buf_offset: 1,
             serialization: SerializationResult {
                 child_mask: 2 | 1,
@@ -783,7 +800,7 @@ mod svo_tests {
             // value 2
             20,
         ];
-        assert_eq!(svo.buffer, SvoBuffer {
+        assert_eq!(esvo.buffer, SvoBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 14 }],
@@ -793,11 +810,11 @@ mod svo_tests {
                 (u64::MAX, Range { start: 1, length: 12 }),
             ]),
         });
-        svo.buffer.updated_ranges.clear();
+        esvo.buffer.updated_ranges.clear();
 
         let mut buffer = Vec::new();
         buffer.resize(200, 0);
-        let size = unsafe { svo.write_to(buffer.as_mut_ptr()) };
+        let size = unsafe { esvo.write_to(buffer.as_mut_ptr()) };
         assert_eq!(buffer[..size], [
             vec![
                 // preamble
@@ -811,16 +828,16 @@ mod svo_tests {
         ].concat());
 
         // remove and move leaves, and update buffer with only changed data
-        let (new_leaf_id, old_value) = svo.move_leaf(LeafId { parent: 0, idx: 1 }, Position(1, 1, 1));
+        let (new_leaf_id, old_value) = esvo.move_leaf(LeafId { parent: 0, idx: 1 }, Position(1, 1, 1));
         assert_eq!(new_leaf_id, LeafId { parent: 0, idx: 7 });
         assert_eq!(old_value, None);
 
-        let old_value = svo.remove_leaf(LeafId { parent: 0, idx: 0 });
+        let old_value = esvo.remove_leaf(LeafId { parent: 0, idx: 0 });
         assert_eq!(old_value, Some(10));
 
-        svo.serialize();
+        esvo.serialize();
 
-        assert_eq!(svo.root_info, Some(LeafInfo {
+        assert_eq!(esvo.root_info, Some(LeafInfo {
             buf_offset: 0,
             serialization: SerializationResult {
                 child_mask: 1 << 7,
@@ -841,7 +858,7 @@ mod svo_tests {
             // value 2
             20,
         ];
-        assert_eq!(svo.buffer, SvoBuffer {
+        assert_eq!(esvo.buffer, SvoBuffer {
             bytes: expected.clone(),
             free_ranges: vec![Range { start: 12, length: 1 }],
             updated_ranges: vec![Range { start: 0, length: 12 }],
@@ -851,7 +868,7 @@ mod svo_tests {
             ]),
         });
 
-        unsafe { svo.write_changes_to(buffer.as_mut_ptr(), buffer.capacity(), true); };
+        unsafe { esvo.write_changes_to(buffer.as_mut_ptr(), buffer.capacity(), true); };
         assert_eq!(buffer[..size], [
             vec![
                 // preamble
@@ -1362,12 +1379,12 @@ impl<A: Allocator> SvoBuffer<A> {
 }
 
 #[cfg(test)]
-mod svo_buffer_tests {
+mod esvo_buffer_tests {
     use std::alloc::Global;
 
     use rustc_hash::FxHashMap;
 
-    use crate::world::svo::{ChunkBuffer, Range, SvoBuffer};
+    use crate::world::hds::esvo::{ChunkBuffer, Range, SvoBuffer};
 
     /// Tests different insert & remove edge cases.
     #[test]

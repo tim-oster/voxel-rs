@@ -3,7 +3,7 @@ use std::ops::{Deref, Sub};
 use cgmath::{num_traits, Point3};
 
 use crate::world::memory::{Pool, Pooled, StatsAllocator};
-use crate::world::octree::{Octree, Position};
+use crate::world::hds::octree::{Octree, Position};
 
 pub type BlockId = u32;
 pub type ChunkStorage = Octree<BlockId, StatsAllocator>;

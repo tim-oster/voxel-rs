@@ -508,7 +508,7 @@ impl<T> Octant<T> {
 mod tests {
     use Child::*;
 
-    use crate::world::octree::{Child, LeafId, Octant, Octree, Position};
+    use crate::world::hds::octree::{Child, LeafId, Octant, Octree, Position};
 
     /// Tests that adding a leaf at a depth > 1 results in the correct octree state.
     #[test]

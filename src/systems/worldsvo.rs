@@ -12,9 +12,10 @@ use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
 use crate::systems::physics::Raycaster;
 use crate::world;
 use crate::world::chunk::{BlockPos, ChunkPos};
+use crate::world::hds;
 use crate::world::memory::{AllocatorStats, Pool, StatsAllocator};
-use crate::world::octree::LeafId;
-use crate::world::svo::{ChunkBuffer, ChunkBufferPool, SerializedChunk, SvoSerializable};
+use crate::world::hds::octree::LeafId;
+use crate::world::hds::esvo::{ChunkBuffer, ChunkBufferPool, SerializedChunk, EsvoSerializable};
 use crate::world::world::BorrowedChunk;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`world::chunk::Chunk`]s.
@@ -143,7 +144,7 @@ impl Svo {
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
     /// space by replacing the previous chunk in the new position. Also removes all chunks, that
     /// are out of SVO bounds.
-    fn shift_chunks<T: SvoSerializable, A: Allocator>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T, A>) {
+    fn shift_chunks<T: EsvoSerializable, A: Allocator>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T, A>) {
         let mut overridden_leaves = FxHashMap::default();
         let mut removed = FxHashSet::default();
 
@@ -216,10 +217,10 @@ mod svo_tests {
     use crate::systems::worldsvo::{Svo, SvoCoordSpace};
     use crate::world;
     use crate::world::chunk::ChunkPos;
-    use crate::world::octree::Position;
-    use crate::world::svo::{SerializationResult, SvoSerializable};
+    use crate::world::hds::octree::Position;
+    use crate::world::hds::esvo::{SerializationResult, EsvoSerializable};
 
-    impl SvoSerializable for u32 {
+    impl EsvoSerializable for u32 {
         fn unique_id(&self) -> u64 {
             *self as u64
         }
@@ -464,7 +465,7 @@ impl SvoCoordSpace {
     /// Converts a chunk position from world space to the respective chunk position in SVO space,
     /// if possible. Conversion is not possible if the position is outside the coordinate space's
     /// `dst`.
-    fn cnv_chunk_pos(&self, pos: ChunkPos) -> Option<world::octree::Position> {
+    fn cnv_chunk_pos(&self, pos: ChunkPos) -> Option<hds::octree::Position> {
         let r = self.dst as f32;
 
         let pos = pos.as_block_pos();
@@ -484,7 +485,7 @@ impl SvoCoordSpace {
             return None;
         }
 
-        Some(world::octree::Position(pos.x as u32, pos.y as u32, pos.z as u32))
+        Some(hds::octree::Position(pos.x as u32, pos.y as u32, pos.z as u32))
     }
 }
 
@@ -494,7 +495,7 @@ mod coord_space_tests {
 
     use crate::systems::worldsvo::SvoCoordSpace;
     use crate::world::chunk::ChunkPos;
-    use crate::world::octree::Position;
+    use crate::world::hds::octree::Position;
 
     /// Tests transformation for positive coordinates.
     #[test]
