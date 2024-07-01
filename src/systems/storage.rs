@@ -22,8 +22,8 @@ pub struct NopStorage {
 }
 
 impl NopStorage {
-    pub fn new() -> NopStorage {
-        NopStorage { loads: Vec::new() }
+    pub fn new() -> Self {
+        Self { loads: Vec::new() }
     }
 }
 
@@ -65,7 +65,7 @@ impl MinecraftStorage {
                 continue;
             }
 
-            let parts = path.file_name().unwrap().to_str().unwrap().split(".").collect::<Vec<&str>>();
+            let parts = path.file_name().unwrap().to_str().unwrap().split('.').collect::<Vec<&str>>();
             if parts.len() != 4 || parts[0] != "r" || parts[3] != "mca" {
                 continue;
             }
@@ -107,6 +107,8 @@ impl Storage for MinecraftStorage {
             let region_z = (pos.z * 2) >> 5;
             let stack_x = region_x * 32 + ((pos.x * 2) & 31);
             let stack_z = region_z * 32 + ((pos.z * 2) & 31);
+
+            #[allow(clippy::identity_op)]
             let data = [
                 loaded_chunks.get(&(stack_x + 0, stack_z + 0)),
                 loaded_chunks.get(&(stack_x + 1, stack_z + 0)),
@@ -118,12 +120,9 @@ impl Storage for MinecraftStorage {
             storage.construct_octants_with(5, |block_pos| {
                 let data = &data[(block_pos.0 / 16 + (block_pos.2 / 16) * 2) as usize];
                 let data = data.as_ref();
-                if data.is_none() {
-                    return None;
-                }
 
                 let actual_height = pos.y * 32 + block_pos.1 as i32;
-                let block = data.unwrap().block(block_pos.0 as usize % 16, actual_height as isize, block_pos.2 as usize % 16);
+                let block = data?.block(block_pos.0 as usize % 16, actual_height as isize, block_pos.2 as usize % 16);
                 if let Some(block) = block {
                     if block.name().contains("_ore") {
                         return None;

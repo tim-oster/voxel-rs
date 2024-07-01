@@ -80,10 +80,13 @@ impl World {
             job_system: Rc::clone(&job_system),
             chunk_loader: ChunkLoader::new(loading_radius, 0, 8),
             chunk_storage_allocator: chunk_allocator.clone(),
-            storage: if let Some(path) = mc_world_path {
-                Box::new(MinecraftStorage::new(job_system.clone(), chunk_allocator.clone(), path))
-            } else {
-                Box::new(NopStorage::new())
+            storage: {
+                #[allow(clippy::option_if_let_else)]
+                if let Some(path) = mc_world_path {
+                    Box::new(MinecraftStorage::new(job_system.clone(), chunk_allocator.clone(), path))
+                } else {
+                    Box::new(NopStorage::new())
+                }
             },
             world: world::World::new(),
             world_generator: systems::worldgen::Generator::new(Rc::clone(&job_system), chunk_allocator, chunk_generator),
