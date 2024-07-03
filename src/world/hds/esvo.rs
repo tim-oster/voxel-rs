@@ -8,40 +8,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::graphics::svo::Container;
 use crate::world::chunk::{BlockId, ChunkPos};
+use crate::world::hds::internal::{ChunkBuffer, ChunkBufferPool, RangeBuffer};
 use crate::world::hds::octree::{LeafId, Octant, OctantId, Octree, Position};
-use crate::world::memory::{Pool, Pooled, StatsAllocator};
+use crate::world::memory::{Pooled, StatsAllocator};
 use crate::world::world::BorrowedChunk;
-
-pub type ChunkBufferPool<A = StatsAllocator> = Pool<ChunkBuffer<A>, A>;
-
-/// `ChunkBuffer` abstracts the temporary storage used for serializing octants into the SVO format.
-pub struct ChunkBuffer<A: Allocator = Global> {
-    data: Vec<u32, A>,
-}
-
-impl ChunkBuffer {
-    pub fn new() -> Self {
-        Self::new_in(Global)
-    }
-
-    pub fn with_capacity(capacity: usize) -> Self {
-        Self::with_capacity_in(capacity, Global)
-    }
-}
-
-impl<A: Allocator> ChunkBuffer<A> {
-    pub fn new_in(alloc: A) -> Self {
-        Self::with_capacity_in(0, alloc)
-    }
-
-    pub fn with_capacity_in(capacity: usize, alloc: A) -> Self {
-        Self { data: Vec::with_capacity_in(capacity, alloc) }
-    }
-
-    pub fn reset(&mut self) {
-        self.data.clear();
-    }
-}
 
 /// `OctantChange` describes if an octant was added (and where), or if it was removed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -50,7 +20,7 @@ enum OctantChange {
     Remove(u64),
 }
 
-pub trait EsvoSerializable {
+pub trait Serializable {
     /// Returns a unique id for the serializable value. It is used to keep track of the serialized result when moving
     /// it around inside the SVO.
     fn unique_id(&self) -> u64;
@@ -129,16 +99,16 @@ pub struct SerializationResult {
 /// [10] 00000000 00000000  00000000 00000000
 /// [11] 00000000 00000000  00000000 00000000
 /// ```
-pub struct Svo<T: EsvoSerializable, A: Allocator = Global> {
+pub struct Svo<T: Serializable, A: Allocator = Global> {
     octree: Octree<T>,
     change_set: FxHashSet<OctantChange>,
 
-    buffer: SvoBuffer<A>,
+    buffer: RangeBuffer<u32, A>,
     leaf_info: FxHashMap<u64, LeafInfo>,
     root_info: Option<LeafInfo>,
 
-    /// Reusable buffer for serializing octants data to be copied into actual `SvoBuffer`.
-    tmp_octant_buffer: Option<ChunkBuffer>,
+    /// Reusable buffer for serializing octants data to be copied into actual [`RangeBuffer`].
+    tmp_octant_buffer: Option<ChunkBuffer<u32>>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -149,7 +119,7 @@ struct LeafInfo {
     serialization: SerializationResult,
 }
 
-impl<T: EsvoSerializable> Svo<T> {
+impl<T: Serializable> Svo<T> {
     pub fn new() -> Self {
         Self::new_in(Global)
     }
@@ -159,7 +129,7 @@ impl<T: EsvoSerializable> Svo<T> {
     }
 }
 
-impl<T: EsvoSerializable, A: Allocator> Svo<T, A> {
+impl<T: Serializable, A: Allocator> Svo<T, A> {
     /// Static size of the serialized data required for wrapping the root octant into a traversable format.
     const PREAMBLE_LENGTH: u32 = 5;
 
@@ -171,7 +141,7 @@ impl<T: EsvoSerializable, A: Allocator> Svo<T, A> {
         Self {
             octree: Octree::new(),
             change_set: FxHashSet::default(),
-            buffer: SvoBuffer::with_capacity_in(capacity, alloc),
+            buffer: RangeBuffer::with_capacity_in(capacity, alloc),
             leaf_info: FxHashMap::default(),
             root_info: None,
             tmp_octant_buffer: Some(ChunkBuffer::new()),
@@ -188,7 +158,7 @@ impl<T: EsvoSerializable, A: Allocator> Svo<T, A> {
     }
 
     /// See [`Octree::set_leaf`]. Setting `serialize` to false attempts to bypass re-serializing the leaf in case it
-    /// was done. This is useful if the leaf is moved around, but its content has not changed.
+    /// was done already. This is useful if the leaf is moved around, but its content has not changed.
     pub fn set_leaf(&mut self, pos: Position, leaf: T, serialize: bool) -> (LeafId, Option<T>) {
         let uid = leaf.unique_id();
         let (leaf_id, prev_leaf) = self.octree.set_leaf(pos, leaf);
@@ -264,7 +234,7 @@ impl<T: EsvoSerializable, A: Allocator> Svo<T, A> {
         self.tmp_octant_buffer = Some(tmp_buffer);
     }
 
-    fn serialize_root(&self, dst: &mut ChunkBuffer) -> SerializationResult {
+    fn serialize_root(&self, dst: &mut ChunkBuffer<u32>) -> SerializationResult {
         let root_id = self.octree.root.unwrap();
 
         serialize_octant(&self.octree, root_id, &mut dst.data, 0, &|params| {
@@ -290,15 +260,30 @@ impl<T: EsvoSerializable, A: Allocator> Svo<T, A> {
         })
     }
 
-    pub fn size_in_bytes(&self) -> usize {
-        self.buffer.bytes.len() * 4
+    /// Writes a "fake" octant with the SVO root octant as its first child octant to build the entry point into
+    /// the data structure.
+    unsafe fn write_preamble(info: LeafInfo, dst: *mut u32) -> *mut u32 {
+        dst.offset(0).write((info.serialization.child_mask as u32) << 8);
+        dst.offset(1).write(0);
+        dst.offset(2).write(0);
+        dst.offset(3).write(0);
+        // preamble is always written first, so PREAMBLE_LENGTH can be used as the absolut position of the root octree
+        dst.offset(4).write(info.buf_offset as u32 + Self::PREAMBLE_LENGTH);
+        // return to pointer to after preamble for next writes
+        dst.offset(Self::PREAMBLE_LENGTH as isize)
     }
+}
 
-    pub fn depth(&self) -> u8 {
+impl<T: Serializable, A: Allocator> Container<u32> for Svo<T, A> {
+    fn depth(&self) -> u8 {
         if self.root_info.is_none() {
             return 0;
         }
         self.root_info.unwrap().serialization.depth
+    }
+
+    fn size_in_bytes(&self) -> usize {
+        self.buffer.size_in_bytes()
     }
 
     /// Writes the full serialized SVO buffer to the `dst` pointer. Returns the number of elements written. Must be
@@ -322,7 +307,7 @@ impl<T: EsvoSerializable, A: Allocator> Svo<T, A> {
     /// Writes all changes after the last reset to the given buffer. The implementation assumes that the same buffer,
     /// that was used in the initial call to [`Svo::write_to`] and previous calls to this method, is reused. If `reset`
     /// is true, the change tracker is reset. Must be called after [`Svo::serialize`].
-    pub unsafe fn write_changes_to(&mut self, dst: *mut u32, dst_len: usize, reset: bool) {
+    unsafe fn write_changes_to(&mut self, dst: *mut u32, dst_len: usize, reset: bool) {
         if self.root_info.is_none() {
             return;
         }
@@ -352,33 +337,6 @@ impl<T: EsvoSerializable, A: Allocator> Svo<T, A> {
             self.buffer.updated_ranges.clear();
         }
     }
-
-    /// Writes a "fake" octant with the SVO root octant as its first child octant to build the entry point into
-    /// the data structure.
-    unsafe fn write_preamble(info: LeafInfo, dst: *mut u32) -> *mut u32 {
-        dst.offset(0).write((info.serialization.child_mask as u32) << 8);
-        dst.offset(1).write(0);
-        dst.offset(2).write(0);
-        dst.offset(3).write(0);
-        // preamble is always written first, so PREAMBLE_LENGTH can be used as the absolut position of the root octree
-        dst.offset(4).write(info.buf_offset as u32 + Self::PREAMBLE_LENGTH);
-        // return to pointer to after preamble for next writes
-        dst.offset(Self::PREAMBLE_LENGTH as isize)
-    }
-}
-
-impl<T: EsvoSerializable, A: Allocator> Container for Svo<T, A> {
-    fn depth(&self) -> u8 {
-        self.depth()
-    }
-
-    fn size_in_bytes(&self) -> usize {
-        self.size_in_bytes()
-    }
-
-    unsafe fn write_changes_to(&mut self, dst: *mut u32, dst_len: usize, reset: bool) {
-        self.write_changes_to(dst, dst_len, reset);
-    }
 }
 
 /// `SerializedChunk` is a wrapper that serializes the given chunk on creation and stores the results.
@@ -387,12 +345,12 @@ pub struct SerializedChunk {
     pos_hash: u64,
     pub lod: u8,
     pub borrowed_chunk: Option<BorrowedChunk>,
-    buffer: Option<Pooled<ChunkBuffer<StatsAllocator>>>,
+    buffer: Option<Pooled<ChunkBuffer<u32, StatsAllocator>>>,
     result: SerializationResult,
 }
 
 impl SerializedChunk {
-    pub fn new(chunk: BorrowedChunk, alloc: &Arc<ChunkBufferPool>) -> Self {
+    pub fn new(chunk: BorrowedChunk, alloc: &Arc<ChunkBufferPool<u32>>) -> Self {
         let pos = chunk.pos;
         let lod = chunk.lod;
 
@@ -425,7 +383,7 @@ impl SerializedChunk {
     }
 }
 
-impl EsvoSerializable for SerializedChunk {
+impl Serializable for SerializedChunk {
     fn unique_id(&self) -> u64 {
         self.pos_hash
     }
@@ -578,8 +536,10 @@ fn pick_leaf_for_lod<'a, T, A: Allocator>(octree: &'a Octree<T, A>, parent: &'a 
 mod esvo_tests {
     use rustc_hash::FxHashMap;
 
+    use crate::graphics::svo::Container;
     use crate::world::chunk::{BlockId, ChunkPos};
-    use crate::world::hds::esvo::{ChunkBuffer, LeafInfo, Range, SerializationResult, SerializedChunk, Svo, SvoBuffer};
+    use crate::world::hds::esvo::{ChunkBuffer, LeafInfo, RangeBuffer, SerializationResult, SerializedChunk, Svo};
+    use crate::world::hds::internal::Range;
     use crate::world::hds::octree::{LeafId, Octree, Position};
     use crate::world::memory::{Pool, StatsAllocator};
 
@@ -740,7 +700,7 @@ mod esvo_tests {
             0, preamble_length, 0, 0,
             0, 0, 0, 0,
         ];
-        assert_eq!(esvo.buffer, SvoBuffer {
+        assert_eq!(esvo.buffer, RangeBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 168 }],
@@ -800,7 +760,7 @@ mod esvo_tests {
             // value 2
             20,
         ];
-        assert_eq!(esvo.buffer, SvoBuffer {
+        assert_eq!(esvo.buffer, RangeBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 14 }],
@@ -858,7 +818,7 @@ mod esvo_tests {
             // value 2
             20,
         ];
-        assert_eq!(esvo.buffer, SvoBuffer {
+        assert_eq!(esvo.buffer, RangeBuffer {
             bytes: expected.clone(),
             free_ranges: vec![Range { start: 12, length: 1 }],
             updated_ranges: vec![Range { start: 0, length: 12 }],
@@ -1250,307 +1210,5 @@ mod esvo_tests {
             leaf_mask: 2 | 4 | 16,
             depth: 1,
         });
-    }
-}
-
-#[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Range {
-    pub start: usize,
-    pub length: usize,
-}
-
-/// `SvoBuffer` allows for copying data to an internal buffer and keeping track of the range the data was copied to using
-/// unique ids. Those ids can be used to remove data from the buffer again.
-///
-/// Removing data does not free up the already allocated memory but instead marks the range inside the buffer as free.
-/// If two adjacent ranges are removed, they are merged into one. Inserting into the buffer will prioritize reusing
-/// memory over appending to the end of the internal buffer.
-#[derive(Debug)]
-struct SvoBuffer<A: Allocator> {
-    bytes: Vec<u32, A>,
-    free_ranges: Vec<Range>,
-    updated_ranges: Vec<Range>,
-    octant_to_range: FxHashMap<u64, Range>,
-}
-
-impl<A: Allocator> PartialEq for SvoBuffer<A> {
-    fn eq(&self, other: &Self) -> bool {
-        self.bytes == other.bytes
-            && self.free_ranges == other.free_ranges
-            && self.updated_ranges == other.updated_ranges
-            && self.octant_to_range == other.octant_to_range
-    }
-}
-
-impl<A: Allocator> SvoBuffer<A> {
-    fn with_capacity_in(initial_capacity: usize, alloc: A) -> Self {
-        let mut bytes = Vec::with_capacity_in(initial_capacity, alloc);
-        bytes.extend(std::iter::repeat(0).take(initial_capacity));
-
-        let mut buffer = Self {
-            bytes,
-            free_ranges: Vec::new(),
-            updated_ranges: Vec::new(),
-            octant_to_range: FxHashMap::default(),
-        };
-        if initial_capacity > 0 {
-            buffer.free_ranges.push(Range { start: 0, length: initial_capacity });
-        }
-        buffer
-    }
-
-    fn clear(&mut self) {
-        self.free_ranges.clear();
-        self.free_ranges.push(Range { start: 0, length: self.bytes.capacity() });
-        self.updated_ranges.clear();
-        self.octant_to_range.clear();
-    }
-
-    /// Inserts by copying data from the given buffer to the first free range or to the end of the internal buffer.
-    fn insert(&mut self, id: u64, buf: &ChunkBuffer) -> usize {
-        self.remove(id);
-
-        let mut ptr = self.bytes.len();
-        let length = buf.data.len();
-
-        // try to find the first free range that is at least as long as the buffer
-        if let Some(pos) = self.free_ranges.iter().position(|x| length <= x.length) {
-            let range = &mut self.free_ranges[pos];
-
-            ptr = range.start;
-
-            if length < range.length {
-                range.start += length;
-                range.length -= length;
-            } else {
-                self.free_ranges.remove(pos);
-            }
-
-            unsafe {
-                ptr::copy(buf.data.as_ptr(), self.bytes.as_mut_ptr().add(ptr), length);
-            }
-        } else {
-            // otherwise, extend at the end
-            self.bytes.extend(buf.data.iter());
-        }
-
-        self.octant_to_range.insert(id, Range { start: ptr, length });
-
-        self.updated_ranges.push(Range { start: ptr, length });
-        Self::merge_ranges(&mut self.updated_ranges);
-
-        ptr
-    }
-
-    /// Frees the corresponding range for the given id.
-    fn remove(&mut self, id: u64) {
-        let range = self.octant_to_range.remove(&id);
-        if range.is_none() {
-            return;
-        }
-
-        let range = range.unwrap();
-        self.free_ranges.push(range);
-        Self::merge_ranges(&mut self.free_ranges);
-    }
-
-    /// Orders all free ranges by start index and merges adjacent ranges into one.
-    fn merge_ranges(ranges: &mut Vec<Range>) {
-        // Unstable is fine here as no equivalent objects can exist. It should be slightly faster
-        // and avoids heap allocations.
-        ranges.sort_unstable_by(|lhs, rhs| lhs.start.cmp(&rhs.start));
-
-        let mut i = 1;
-        while i < ranges.len() {
-            let rhs = ranges[i];
-            let lhs = &mut ranges[i - 1];
-
-            if rhs.start <= lhs.start + lhs.length {
-                let diff = lhs.start + lhs.length - rhs.start;
-                if rhs.length > diff {
-                    lhs.length += rhs.length - diff;
-                }
-                ranges.remove(i);
-            } else {
-                i += 1;
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod esvo_buffer_tests {
-    use std::alloc::Global;
-
-    use rustc_hash::FxHashMap;
-
-    use crate::world::hds::esvo::{ChunkBuffer, Range, SvoBuffer};
-
-    /// Tests different insert & remove edge cases.
-    #[test]
-    fn buffer_insert_remove() {
-        // create empty buffer with initial capacity
-        let mut buffer = SvoBuffer::with_capacity_in(10, Global);
-
-        assert_eq!(buffer, SvoBuffer {
-            bytes: vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
-            free_ranges: vec![Range { start: 0, length: 10 }],
-            updated_ranges: vec![],
-            octant_to_range: Default::default(),
-        });
-
-        // insert data until initial capacity is full
-        buffer.insert(1, &ChunkBuffer { data: vec![0, 1, 2, 3, 4] });
-        buffer.insert(2, &ChunkBuffer { data: vec![5, 6] });
-        buffer.insert(3, &ChunkBuffer { data: vec![7, 8, 9] });
-
-        assert_eq!(buffer, SvoBuffer {
-            bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
-            free_ranges: vec![],
-            updated_ranges: vec![Range { start: 0, length: 10 }],
-            octant_to_range: FxHashMap::from_iter([
-                (1, Range { start: 0, length: 5 }),
-                (2, Range { start: 5, length: 2 }),
-                (3, Range { start: 7, length: 3 }),
-            ]),
-        });
-
-        // exceed initial capacity
-        buffer.insert(4, &ChunkBuffer { data: vec![10] });
-
-        assert_eq!(buffer, SvoBuffer {
-            bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-            free_ranges: vec![],
-            updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: FxHashMap::from_iter([
-                (1, Range { start: 0, length: 5 }),
-                (2, Range { start: 5, length: 2 }),
-                (3, Range { start: 7, length: 3 }),
-                (4, Range { start: 10, length: 1 }),
-            ]),
-        });
-
-        // replace already existing data
-        buffer.insert(3, &ChunkBuffer { data: vec![11] });
-
-        assert_eq!(buffer, SvoBuffer {
-            bytes: vec![0, 1, 2, 3, 4, 5, 6, 11, 8, 9, 10],
-            free_ranges: vec![Range { start: 8, length: 2 }],
-            updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: FxHashMap::from_iter([
-                (1, Range { start: 0, length: 5 }),
-                (2, Range { start: 5, length: 2 }),
-                (3, Range { start: 7, length: 1 }),
-                (4, Range { start: 10, length: 1 }),
-            ]),
-        });
-
-        // remove existing data
-        buffer.remove(2);
-        buffer.remove(3);
-
-        assert_eq!(buffer, SvoBuffer {
-            bytes: vec![0, 1, 2, 3, 4, 5, 6, 11, 8, 9, 10],
-            free_ranges: vec![Range { start: 5, length: 5 }],
-            updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: FxHashMap::from_iter([
-                (1, Range { start: 0, length: 5 }),
-                (4, Range { start: 10, length: 1 }),
-            ]),
-        });
-
-        // insert into free space
-        buffer.insert(5, &ChunkBuffer { data: vec![12, 13, 14] });
-
-        assert_eq!(buffer, SvoBuffer {
-            bytes: vec![0, 1, 2, 3, 4, 12, 13, 14, 8, 9, 10],
-            free_ranges: vec![Range { start: 8, length: 2 }],
-            updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: FxHashMap::from_iter([
-                (1, Range { start: 0, length: 5 }),
-                (4, Range { start: 10, length: 1 }),
-                (5, Range { start: 5, length: 3 }),
-            ]),
-        });
-
-        // remove all and revert back to beginning
-        buffer.remove(5);
-        buffer.remove(4);
-        buffer.remove(1);
-
-        assert_eq!(buffer, SvoBuffer {
-            bytes: vec![0, 1, 2, 3, 4, 12, 13, 14, 8, 9, 10],
-            free_ranges: vec![Range { start: 0, length: 11 }],
-            updated_ranges: vec![Range { start: 0, length: 11 }],
-            octant_to_range: FxHashMap::default(),
-        });
-    }
-
-    /// Tests that range merging edge cases work properly.
-    #[test]
-    fn merge_ranges() {
-        struct TestCase {
-            name: &'static str,
-            input: Vec<Range>,
-            expected: Vec<Range>,
-        }
-        for case in vec![
-            TestCase {
-                name: "join adjacent ranges",
-                input: vec![
-                    Range { start: 0, length: 1 },
-                    Range { start: 1, length: 1 },
-                    Range { start: 2, length: 1 },
-                ],
-                expected: vec![
-                    Range { start: 0, length: 3 },
-                ],
-            },
-            TestCase {
-                name: "ignore non-adjacent ranges",
-                input: vec![
-                    Range { start: 0, length: 1 },
-                    Range { start: 2, length: 1 },
-                ],
-                expected: vec![
-                    Range { start: 0, length: 1 },
-                    Range { start: 2, length: 1 },
-                ],
-            },
-            TestCase {
-                name: "remove fully contained ranges",
-                input: vec![
-                    Range { start: 0, length: 5 },
-                    Range { start: 3, length: 1 },
-                ],
-                expected: vec![
-                    Range { start: 0, length: 5 },
-                ],
-            },
-            TestCase {
-                name: "remove and extend contained ranges",
-                input: vec![
-                    Range { start: 0, length: 5 },
-                    Range { start: 3, length: 5 },
-                ],
-                expected: vec![
-                    Range { start: 0, length: 8 },
-                ],
-            },
-            TestCase {
-                name: "works in inverse order",
-                input: vec![
-                    Range { start: 3, length: 5 },
-                    Range { start: 0, length: 5 },
-                ],
-                expected: vec![
-                    Range { start: 0, length: 8 },
-                ],
-            },
-        ] {
-            let mut input = case.input;
-            SvoBuffer::<Global>::merge_ranges(&mut input);
-            assert_eq!(input, case.expected, "{}", case.name);
-        }
     }
 }

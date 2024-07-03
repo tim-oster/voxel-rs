@@ -13,9 +13,10 @@ use crate::systems::physics::Raycaster;
 use crate::world;
 use crate::world::chunk::{BlockPos, ChunkPos};
 use crate::world::hds;
-use crate::world::memory::{AllocatorStats, Pool, StatsAllocator};
+use crate::world::hds::{ChunkBuffer, ChunkBufferPool};
+use crate::world::hds::esvo::{Serializable, SerializedChunk};
 use crate::world::hds::octree::LeafId;
-use crate::world::hds::esvo::{ChunkBuffer, ChunkBufferPool, SerializedChunk, EsvoSerializable};
+use crate::world::memory::{AllocatorStats, Pool, StatsAllocator};
 use crate::world::world::BorrowedChunk;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`world::chunk::Chunk`]s.
@@ -35,7 +36,7 @@ pub struct Svo {
     world_svo: world::Svo<SerializedChunk, StatsAllocator>,
 
     graphics_svo: graphics::Svo,
-    chunk_buffer_pool: Arc<ChunkBufferPool>,
+    chunk_buffer_pool: Arc<ChunkBufferPool<u32>>,
 
     leaf_ids: FxHashMap<ChunkPos, LeafId>,
     has_changed: bool,
@@ -144,7 +145,7 @@ impl Svo {
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
     /// space by replacing the previous chunk in the new position. Also removes all chunks, that
     /// are out of SVO bounds.
-    fn shift_chunks<T: EsvoSerializable, A: Allocator>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T, A>) {
+    fn shift_chunks<T: Serializable, A: Allocator>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T, A>) {
         let mut overridden_leaves = FxHashMap::default();
         let mut removed = FxHashSet::default();
 
@@ -217,10 +218,10 @@ mod svo_tests {
     use crate::systems::worldsvo::{Svo, SvoCoordSpace};
     use crate::world;
     use crate::world::chunk::ChunkPos;
+    use crate::world::hds::esvo::{Serializable, SerializationResult};
     use crate::world::hds::octree::Position;
-    use crate::world::hds::esvo::{SerializationResult, EsvoSerializable};
 
-    impl EsvoSerializable for u32 {
+    impl Serializable for u32 {
         fn unique_id(&self) -> u64 {
             *self as u64
         }

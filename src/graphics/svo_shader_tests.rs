@@ -12,13 +12,14 @@ mod tests {
     use crate::graphics::macros::{assert_vec2_eq, assert_vec3_eq, assert_vec4_eq};
     use crate::graphics::resource::Resource;
     use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
-    use crate::graphics::svo::buffer_indices;
+    use crate::graphics::svo::{buffer_indices, Container};
     use crate::graphics::svo_registry::MaterialInstance;
     use crate::graphics::texture_array::{TextureArray, TextureArrayBuilder, TextureArrayError};
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
-    use crate::world::memory::{Pool, StatsAllocator};
+    use crate::world::hds::ChunkBuffer;
+    use crate::world::hds::esvo::{SerializedChunk, Svo};
     use crate::world::hds::octree::Position;
-    use crate::world::hds::esvo::{ChunkBuffer, SerializedChunk, Svo};
+    use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;
 
     #[repr(C)]
@@ -61,7 +62,9 @@ mod tests {
     }
 
     fn create_test_world<F>(svo_pos: Position, builder: F) -> MappedBuffer<u32>
-        where F: FnOnce(&mut Chunk) {
+    where
+        F: FnOnce(&mut Chunk),
+    {
         let storage_alloc = ChunkStorageAllocator::new();
         let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, storage_alloc.allocate());
         builder(&mut chunk);
@@ -178,7 +181,9 @@ mod tests {
     }
 
     fn setup_test<F>(svo_pos: Option<Position>, world_builder: F) -> TestSetup
-        where F: FnOnce(&mut Chunk) {
+    where
+        F: FnOnce(&mut Chunk),
+    {
         let context = GlContext::new_headless(640, 490);
 
         let svo_pos = svo_pos.unwrap_or(Position(0, 0, 0));
