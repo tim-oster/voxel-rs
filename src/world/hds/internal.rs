@@ -122,11 +122,11 @@ impl<T: Bits<T=T>, A: Allocator> RangeBuffer<T, A> {
     }
 
     /// Inserts by copying data from the given buffer to the first free range or to the end of the internal buffer.
-    pub fn insert(&mut self, id: u64, buf: &ChunkBuffer<T>) -> usize {
+    pub fn insert(&mut self, id: u64, buf: &Vec<T>) -> usize {
         self.remove(id);
 
         let mut ptr = self.bytes.len();
-        let length = buf.data.len();
+        let length = buf.len();
 
         // try to find the first free range that is at least as long as the buffer
         if let Some(pos) = self.free_ranges.iter().position(|x| length <= x.length) {
@@ -142,11 +142,11 @@ impl<T: Bits<T=T>, A: Allocator> RangeBuffer<T, A> {
             }
 
             unsafe {
-                ptr::copy(buf.data.as_ptr(), self.bytes.as_mut_ptr().add(ptr), length);
+                ptr::copy(buf.as_ptr(), self.bytes.as_mut_ptr().add(ptr), length);
             }
         } else {
             // otherwise, extend at the end
-            self.bytes.extend(buf.data.iter());
+            self.bytes.extend(buf.iter());
         }
 
         self.octant_to_range.insert(id, Range { start: ptr, length });
@@ -203,7 +203,7 @@ mod range_buffer_tests {
 
     use rustc_hash::FxHashMap;
 
-    use crate::world::hds::internal::{ChunkBuffer, RangeBuffer};
+    use crate::world::hds::internal::RangeBuffer;
 
     /// Tests different insert & remove edge cases.
     #[test]
@@ -219,9 +219,9 @@ mod range_buffer_tests {
         });
 
         // insert data until initial capacity is full
-        buffer.insert(1, &ChunkBuffer { data: vec![0, 1, 2, 3, 4] });
-        buffer.insert(2, &ChunkBuffer { data: vec![5, 6] });
-        buffer.insert(3, &ChunkBuffer { data: vec![7, 8, 9] });
+        buffer.insert(1, &vec![0, 1, 2, 3, 4]);
+        buffer.insert(2, &vec![5, 6]);
+        buffer.insert(3, &vec![7, 8, 9]);
 
         assert_eq!(buffer, RangeBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
@@ -235,7 +235,7 @@ mod range_buffer_tests {
         });
 
         // exceed initial capacity
-        buffer.insert(4, &ChunkBuffer { data: vec![10] });
+        buffer.insert(4, &vec![10]);
 
         assert_eq!(buffer, RangeBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
@@ -250,7 +250,7 @@ mod range_buffer_tests {
         });
 
         // replace already existing data
-        buffer.insert(3, &ChunkBuffer { data: vec![11] });
+        buffer.insert(3, &vec![11]);
 
         assert_eq!(buffer, RangeBuffer {
             bytes: vec![0, 1, 2, 3, 4, 5, 6, 11, 8, 9, 10],
@@ -279,7 +279,7 @@ mod range_buffer_tests {
         });
 
         // insert into free space
-        buffer.insert(5, &ChunkBuffer { data: vec![12, 13, 14] });
+        buffer.insert(5, &vec![12, 13, 14]);
 
         assert_eq!(buffer, RangeBuffer {
             bytes: vec![0, 1, 2, 3, 4, 12, 13, 14, 8, 9, 10],

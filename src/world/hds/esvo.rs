@@ -210,7 +210,7 @@ impl<T: Serializable, A: Allocator> Svo<T, A> {
                     let content = child.get_leaf_value_mut().unwrap();
                     let result = content.serialize(&mut tmp_buffer.data, 0);
                     if result.depth > 0 {
-                        let offset = self.buffer.insert(id, &tmp_buffer);
+                        let offset = self.buffer.insert(id, &tmp_buffer.data);
                         tmp_buffer.reset();
 
                         self.leaf_info.insert(id, LeafInfo { buf_offset: offset, serialization: result });
@@ -226,7 +226,7 @@ impl<T: Serializable, A: Allocator> Svo<T, A> {
 
         // rebuild root octree
         let result = self.serialize_root(&mut tmp_buffer);
-        let offset = self.buffer.insert(u64::MAX, &tmp_buffer);
+        let offset = self.buffer.insert(u64::MAX, &tmp_buffer.data);
         tmp_buffer.reset();
         self.root_info = Some(LeafInfo { buf_offset: offset, serialization: result });
 
