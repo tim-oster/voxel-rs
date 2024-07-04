@@ -1,7 +1,6 @@
 use std::{mem, ptr};
 use std::alloc::{Allocator, Global};
 use std::hash::{DefaultHasher, Hash, Hasher};
-use std::io::Write;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -119,6 +118,7 @@ impl<A: Allocator> Csvo<A> {
                     let child = &mut self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
                     let content = child.get_leaf_value_mut().unwrap();
 
+                    // TODO change
                     if content.depth != self.child_depth && self.child_depth != 0 {
                         panic!("all children must have the same depth");
                     }
@@ -129,8 +129,9 @@ impl<A: Allocator> Csvo<A> {
 
                         let materials = content.materials.take().unwrap();
                         let material_bytes = materials.len() * mem::size_of::<BlockId>();
-                        let mut merged = Vec::with_capacity(4 + material_bytes + buffer.len());
+                        let mut merged = Vec::with_capacity(1 + 4 + material_bytes + buffer.len());
 
+                        merged.push(if content.lod != 0 { content.lod } else { content.depth });
                         merged.extend_from_slice(&(material_bytes as u32).to_be_bytes());
                         for material in materials {
                             merged.extend_from_slice(&material.to_be_bytes());
@@ -322,9 +323,12 @@ mod csvo_tests {
         esvo.set_leaf(Position(1, 0, 0), sc, true);
         esvo.serialize();
 
-        assert_eq!(esvo.root_info, Some(LeafInfo { buf_offset: 42 }));
+        assert_eq!(esvo.root_info, Some(LeafInfo { buf_offset: 43 }));
 
         let expected = vec![
+            // chunk LOD
+            5,
+
             // chunk materials
             0, 0, 0, 12,
             0, 0, 0, 1,
@@ -353,10 +357,10 @@ mod csvo_tests {
         assert_eq!(esvo.buffer, RangeBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
-            updated_ranges: vec![Range { start: 0, length: 48 }],
+            updated_ranges: vec![Range { start: 0, length: 49 }],
             octant_to_range: FxHashMap::from_iter([
-                (2435999049025295583, Range { start: 0, length: 42 }),
-                (u64::MAX, Range { start: 42, length: 6 }),
+                (2435999049025295583, Range { start: 0, length: 43 }),
+                (u64::MAX, Range { start: 43, length: 6 }),
             ]),
         });
 
@@ -392,7 +396,12 @@ impl SerializedChunk {
         let mut buffer = None;
         let mut materials = None;
         if let Some(root_id) = storage.root {
-            let (b, m) = Self::serialize_octant(&storage, root_id, storage.depth(), chunk.lod);
+            let mut depth = storage.depth();
+            if chunk.lod != 0 && chunk.lod < depth {
+                depth -= depth - chunk.lod;
+            }
+
+            let (b, m) = Self::serialize_octant(&storage, root_id, depth);
             (buffer, materials) = (Some(b), Some(m));
         }
 
@@ -407,10 +416,9 @@ impl SerializedChunk {
         }
     }
 
-    pub fn serialize_octant<A: Allocator>(octree: &Octree<BlockId, A>, octant_id: OctantId, depth: u8, lod: u8) -> (Vec<u8>, Vec<BlockId>) {
+    pub fn serialize_octant<A: Allocator>(octree: &Octree<BlockId, A>, octant_id: OctantId, depth: u8) -> (Vec<u8>, Vec<BlockId>) {
         let octant = &octree.octants[octant_id as usize];
 
-        // if depth == 1 || lod == 1 { // TODO
         if depth == 1 {
             let mut leaf_mask = 0u8;
             let mut materials = Vec::new();
@@ -421,13 +429,12 @@ impl SerializedChunk {
                 }
 
                 // try to get the leaf value
-                let content = child.get_leaf_value();
-                // TODO
-                // // if NONE, find the first child if the child is an octant
-                // if content.is_none() && child.is_octant() {
-                //     let child_id = child.get_octant_value().unwrap();
-                //     content = pick_leaf_for_lod(octree, &octree.octants[child_id as usize]);
-                // }
+                let mut content = child.get_leaf_value();
+                // if NONE, find the first child if the child is an octant
+                if content.is_none() && child.is_octant() {
+                    let child_id = child.get_octant_value().unwrap();
+                    content = Self::pick_leaf_for_lod(octree, &octree.octants[child_id as usize]);
+                }
                 // if nothing was found, skip
                 if content.is_none() {
                     continue;
@@ -452,9 +459,8 @@ impl SerializedChunk {
 
             // decrease lod and calculate buffer offset before recursively serializing the child octant
             let child_id = child.get_octant_value().unwrap();
-            let child_lod = if lod > 0 { lod - 1 } else { 0 };
 
-            let (buffer, child_materials) = Self::serialize_octant(octree, child_id, depth - 1, child_lod);
+            let (buffer, child_materials) = Self::serialize_octant(octree, child_id, depth - 1);
             children.push((idx, buffer));
             materials.extend(child_materials);
         }
@@ -566,7 +572,7 @@ mod serialized_chunk_tests {
         octree.expand_to(4);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth(), 0);
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth());
         assert_eq!(result, vec![
             0, 1, 0,    // inode
             1, 0,       // plnode
@@ -585,7 +591,7 @@ mod serialized_chunk_tests {
         octree.expand_to(4);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth(), 0);
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth());
         assert_eq!(result, vec![
             0, 1, 0,                    // inode
             1 | (1 << 7), 0, 3,         // plnode
@@ -603,21 +609,69 @@ mod serialized_chunk_tests {
         octree.set_leaf(Position(0, 0, 31), 3 as BlockId);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth(), 0);
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth());
         assert_eq!(result, vec![
             0b00_00_00_01, 0b_00_01_01_00, 0, 7, 14,
             0, 0b00_00_01_00, 0,
             2, 0,
             2,
             2,
-            0, 16, 0,
+            0, 0b00_01_00_00, 0,
             4, 0,
             4,
             4,
-            1, 0, 0,
+            0b00_00_00_01, 0, 0,
             16, 0,
             16,
             16,
+        ]);
+        assert_eq!(materials, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn serialize_octant_chunk_with_lod() {
+        let mut octree = Octree::new();
+        octree.set_leaf(Position(31, 0, 0), 1 as BlockId);
+        octree.set_leaf(Position(0, 31, 0), 2 as BlockId);
+        octree.set_leaf(Position(0, 0, 31), 3 as BlockId);
+        octree.compact();
+
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 1);
+        assert_eq!(result, vec![
+            0b00_00_00_01, 0b_00_01_01_00, 0, 4, 8,
+            2, 0,
+            2,
+            2,
+            4, 0,
+            4,
+            4,
+            16, 0,
+            16,
+            16,
+        ]);
+        assert_eq!(materials, vec![1, 2, 3]);
+
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 2);
+        assert_eq!(result, vec![
+            0b00010110, 0, 2, 4,
+            2,
+            2,
+            4,
+            4,
+            16,
+            16,
+        ]);
+        assert_eq!(materials, vec![1, 2, 3]);
+
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 3);
+        assert_eq!(result, vec![
+            0b00010110, 2, 4, 16,
+        ]);
+        assert_eq!(materials, vec![1, 2, 3]);
+
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 4);
+        assert_eq!(result, vec![
+            22,
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
     }
