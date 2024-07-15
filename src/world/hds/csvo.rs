@@ -119,9 +119,7 @@ impl<A: Allocator> Csvo<A> {
                     let content = child.get_leaf_value_mut().unwrap();
 
                     // TODO change
-                    if content.depth != self.child_depth && self.child_depth != 0 {
-                        panic!("all children must have the same depth");
-                    }
+                    assert!(!(content.depth != self.child_depth && self.child_depth != 0), "all children must have the same depth");
                     self.child_depth = content.depth;
 
                     if let Some(buffer) = content.buffer.take() {
@@ -180,9 +178,7 @@ impl<A: Allocator> Csvo<A> {
                 }
                 continue;
             }
-            if child.is_leaf() {
-                panic!("octree leaves must be at a uniform level");
-            }
+            assert!(!child.is_leaf(), "octree leaves must be at a uniform level");
 
             // decrease lod and calculate buffer offset before recursively serializing the child octant
             let child_id = child.get_octant_value().unwrap();
@@ -219,7 +215,7 @@ impl<A: Allocator> Csvo<A> {
                     2 => buffer.extend((offsets[i] as u16).to_be_bytes()),
                     3 => {
                         assert_eq!(offsets[i] & (1 << 31), 0, "32 bit pointers must not have the 32nd bit set");
-                        buffer.extend(offsets[i].to_be_bytes())
+                        buffer.extend(offsets[i].to_be_bytes());
                     }
                     _ => unreachable!(),
                 }
@@ -398,10 +394,10 @@ impl SerializedChunk {
         if let Some(root_id) = storage.root {
             let mut depth = storage.depth();
             if chunk.lod != 0 && chunk.lod < depth {
-                depth -= depth - chunk.lod;
+                depth -= chunk.lod;
             }
 
-            let (b, m) = Self::serialize_octant(&storage, root_id, depth);
+            let (b, m) = Self::serialize_octant(storage, root_id, depth);
             (buffer, materials) = (Some(b), Some(m));
         }
 
@@ -453,9 +449,7 @@ impl SerializedChunk {
             if child.is_none() {
                 continue;
             }
-            if child.is_leaf() {
-                panic!("octree leaves must be at a uniform level");
-            }
+            assert!(!child.is_leaf(), "octree leaves must be at a uniform level");
 
             // decrease lod and calculate buffer offset before recursively serializing the child octant
             let child_id = child.get_octant_value().unwrap();
@@ -512,7 +506,7 @@ impl SerializedChunk {
                     2 => buffer.extend((offsets[i] as u16).to_be_bytes()),
                     3 => {
                         assert_eq!(offsets[i] & (1 << 31), 0, "32 bit pointers must not have the 32nd bit set");
-                        buffer.extend(offsets[i].to_be_bytes())
+                        buffer.extend(offsets[i].to_be_bytes());
                     }
                     _ => unreachable!(),
                 }

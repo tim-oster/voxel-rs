@@ -46,21 +46,21 @@ pub trait Bits: Clone + Copy {
 }
 
 impl Bits for u8 {
-    type T = u8;
+    type T = Self;
 
     const ZERO: Self::T = 0u8;
     const BYTES: usize = 1;
 }
 
 impl Bits for u16 {
-    type T = u16;
+    type T = Self;
 
     const ZERO: Self::T = 0u16;
     const BYTES: usize = 2;
 }
 
 impl Bits for u32 {
-    type T = u32;
+    type T = Self;
 
     const ZERO: Self::T = 0u32;
     const BYTES: usize = 4;
@@ -122,7 +122,7 @@ impl<T: Bits<T=T>, A: Allocator> RangeBuffer<T, A> {
     }
 
     /// Inserts by copying data from the given buffer to the first free range or to the end of the internal buffer.
-    pub fn insert(&mut self, id: u64, buf: &Vec<T>) -> usize {
+    pub fn insert(&mut self, id: u64, buf: &[T]) -> usize {
         self.remove(id);
 
         let mut ptr = self.bytes.len();
