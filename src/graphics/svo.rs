@@ -248,7 +248,7 @@ mod svo_tests {
     use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;
 
-    fn create_world_svo<F>(builder: F) -> hds::esvo::Svo<SerializedChunk>
+    fn create_world_svo<F>(builder: F) -> hds::esvo::Esvo<SerializedChunk>
     where
         F: FnOnce(&mut Chunk),
     {
@@ -259,7 +259,7 @@ mod svo_tests {
         let buffer_alloc = Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new());
 
         let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(buffer_alloc));
-        let mut svo = hds::esvo::Svo::<SerializedChunk>::new();
+        let mut svo = hds::esvo::Esvo::<SerializedChunk>::new();
         svo.set_leaf(Position(0, 0, 0), chunk, true);
         svo.serialize();
         svo

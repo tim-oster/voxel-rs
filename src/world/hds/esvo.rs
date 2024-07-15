@@ -8,8 +8,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::graphics::svo::Container;
 use crate::world::chunk::{BlockId, ChunkPos};
-use crate::world::hds::internal::{ChunkBuffer, ChunkBufferPool, RangeBuffer};
-use crate::world::hds::octree::{LeafId, Octant, OctantId, Octree, Position};
+use crate::world::hds::internal::{ChunkBuffer, ChunkBufferPool, pick_leaf_for_lod, RangeBuffer};
+use crate::world::hds::octree::{LeafId, OctantId, Octree, Position};
 use crate::world::memory::{Pooled, StatsAllocator};
 use crate::world::world::BorrowedChunk;
 
@@ -62,13 +62,13 @@ pub struct SerializationResult {
 ///
 /// ### Optimisations
 ///
-/// - On [`Svo::serialize`], the root octree is always fully serialized and all its octants have relative pointers
+/// - On [`Esvo::serialize`], the root octree is always fully serialized and all its octants have relative pointers
 /// to each other. Leaves however are only serialized once. The root octree uses absolute pointers to index them. This
 /// allows for efficient "leaf moving" by swapping the pointers in the root octree.
 /// - Removing leaves frees up already allocated space. The implementation keeps track of that space and reuses it
 /// efficiently for new leaves.
-/// - [`Svo::write_to`] can be used to copy the whole serialized buffer to a target buffer. This only needs to be done
-/// once, after that a call to [`Svo::write_changes_to`] with the same buffer suffices and only copies the changed
+/// - [`Esvo::write_to`] can be used to copy the whole serialized buffer to a target buffer. This only needs to be done
+/// once, after that a call to [`Esvo::write_changes_to`] with the same buffer suffices and only copies the changed
 /// buffer ranges.
 ///
 /// ### Binary format
@@ -99,7 +99,7 @@ pub struct SerializationResult {
 /// [10] 00000000 00000000  00000000 00000000
 /// [11] 00000000 00000000  00000000 00000000
 /// ```
-pub struct Svo<T: Serializable, A: Allocator = Global> {
+pub struct Esvo<T: Serializable, A: Allocator = Global> {
     octree: Octree<T>,
     change_set: FxHashSet<OctantChange>,
 
@@ -119,7 +119,7 @@ struct LeafInfo {
     serialization: SerializationResult,
 }
 
-impl<T: Serializable> Svo<T> {
+impl<T: Serializable> Esvo<T> {
     pub fn new() -> Self {
         Self::new_in(Global)
     }
@@ -129,7 +129,7 @@ impl<T: Serializable> Svo<T> {
     }
 }
 
-impl<T: Serializable, A: Allocator> Svo<T, A> {
+impl<T: Serializable, A: Allocator> Esvo<T, A> {
     /// Static size of the serialized data required for wrapping the root octant into a traversable format.
     const PREAMBLE_LENGTH: u32 = 5;
 
@@ -191,8 +191,8 @@ impl<T: Serializable, A: Allocator> Svo<T, A> {
         self.octree.get_leaf(pos)
     }
 
-    /// Serializes the root octant and adds/removes all changed leaves. Must be called before [`Svo::write_to`] or
-    /// [`Svo::write_changes_to`] for them to have any effect.
+    /// Serializes the root octant and adds/removes all changed leaves. Must be called before [`Esvo::write_to`] or
+    /// [`Esvo::write_changes_to`] for them to have any effect.
     pub fn serialize(&mut self) {
         if self.octree.root.is_none() {
             return;
@@ -274,7 +274,7 @@ impl<T: Serializable, A: Allocator> Svo<T, A> {
     }
 }
 
-impl<T: Serializable, A: Allocator> Container<u32> for Svo<T, A> {
+impl<T: Serializable, A: Allocator> Container<u32> for Esvo<T, A> {
     fn depth(&self) -> u8 {
         if self.root_info.is_none() {
             return 0;
@@ -287,7 +287,7 @@ impl<T: Serializable, A: Allocator> Container<u32> for Svo<T, A> {
     }
 
     /// Writes the full serialized SVO buffer to the `dst` pointer. Returns the number of elements written. Must be
-    /// called after [`Svo::serialize`].
+    /// called after [`Esvo::serialize`].
     unsafe fn write_to(&self, dst: *mut u32) -> usize {
         if self.root_info.is_none() {
             return 0;
@@ -305,8 +305,8 @@ impl<T: Serializable, A: Allocator> Container<u32> for Svo<T, A> {
     }
 
     /// Writes all changes after the last reset to the given buffer. The implementation assumes that the same buffer,
-    /// that was used in the initial call to [`Svo::write_to`] and previous calls to this method, is reused. If `reset`
-    /// is true, the change tracker is reset. Must be called after [`Svo::serialize`].
+    /// that was used in the initial call to [`Esvo::write_to`] and previous calls to this method, is reused. If `reset`
+    /// is true, the change tracker is reset. Must be called after [`Esvo::serialize`].
     unsafe fn write_changes_to(&mut self, dst: *mut u32, dst_len: usize, reset: bool) {
         if self.root_info.is_none() {
             return;
@@ -503,42 +503,13 @@ where
     result
 }
 
-/// Iterates recursively through the given octant in breadth-first order. The goal is to find the first, highest level
-/// leaf value, if any. It uses a custom iteration order to check for leaves from y=1 to y=0. This results in a better
-/// look in most scenarios.
-fn pick_leaf_for_lod<'a, T, A: Allocator>(octree: &'a Octree<T, A>, parent: &'a Octant<T>) -> Option<&'a T> {
-    const ORDER: [usize; 8] = [2, 3, 6, 7, 0, 1, 4, 5];
-    for index in ORDER {
-        let child = &parent.children[index];
-        if !child.is_leaf() {
-            continue;
-        }
-        let content = child.get_leaf_value();
-        return content;
-    }
-    for index in ORDER {
-        let child = &parent.children[index];
-        if !child.is_octant() {
-            continue;
-        }
-
-        let child_id = child.get_octant_value().unwrap();
-        let child = &octree.octants[child_id as usize];
-        let result = pick_leaf_for_lod(octree, child);
-        if result.is_some() {
-            return result;
-        }
-    }
-    None
-}
-
 #[cfg(test)]
 mod esvo_tests {
     use rustc_hash::FxHashMap;
 
     use crate::graphics::svo::Container;
     use crate::world::chunk::{BlockId, ChunkPos};
-    use crate::world::hds::esvo::{ChunkBuffer, LeafInfo, RangeBuffer, SerializationResult, SerializedChunk, Svo};
+    use crate::world::hds::esvo::{ChunkBuffer, Esvo, LeafInfo, RangeBuffer, SerializationResult, SerializedChunk};
     use crate::world::hds::internal::Range;
     use crate::world::hds::octree::{LeafId, Octree, Position};
     use crate::world::memory::{Pool, StatsAllocator};
@@ -565,7 +536,7 @@ mod esvo_tests {
             pos_hash: 100,
         };
 
-        let mut esvo = Svo::new();
+        let mut esvo = Esvo::new();
         esvo.set_leaf(Position(1, 0, 0), sc, true);
         esvo.serialize();
 
@@ -729,7 +700,7 @@ mod esvo_tests {
     /// Tests that removing and moving leaf values inside an SVO works and that data can be partially updated.
     #[test]
     fn serialize_with_remove_and_move() {
-        let mut esvo = Svo::new();
+        let mut esvo = Esvo::new();
 
         // NOTE: serialize twice to avoid non-deterministic results due to random map lookup in implementation
         esvo.set_leaf(Position(0, 0, 0), 10, true);

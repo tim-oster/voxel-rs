@@ -3,6 +3,7 @@ use std::ptr;
 
 use rustc_hash::FxHashMap;
 
+use crate::world::hds::octree::{Octant, Octree};
 use crate::world::memory::{Pool, StatsAllocator};
 
 pub type ChunkBufferPool<T, A = StatsAllocator> = Pool<ChunkBuffer<T, A>, A>;
@@ -372,4 +373,35 @@ mod range_buffer_tests {
             assert_eq!(input, case.expected, "{}", case.name);
         }
     }
+}
+
+// -------------------------------------------------------------------------------------------------
+
+/// Iterates recursively through the given octant in breadth-first order. The goal is to find the first, highest level
+/// leaf value, if any. It uses a custom iteration order to check for leaves from y=1 to y=0. This results in a better
+/// look in most scenarios.
+pub fn pick_leaf_for_lod<'a, T, A: Allocator>(octree: &'a Octree<T, A>, parent: &'a Octant<T>) -> Option<&'a T> {
+    const ORDER: [usize; 8] = [2, 3, 6, 7, 0, 1, 4, 5];
+    for index in ORDER {
+        let child = &parent.children[index];
+        if !child.is_leaf() {
+            continue;
+        }
+        let content = child.get_leaf_value();
+        return content;
+    }
+    for index in ORDER {
+        let child = &parent.children[index];
+        if !child.is_octant() {
+            continue;
+        }
+
+        let child_id = child.get_octant_value().unwrap();
+        let child = &octree.octants[child_id as usize];
+        let result = pick_leaf_for_lod(octree, child);
+        if result.is_some() {
+            return result;
+        }
+    }
+    None
 }

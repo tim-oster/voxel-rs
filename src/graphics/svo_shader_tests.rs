@@ -17,7 +17,7 @@ mod tests {
     use crate::graphics::texture_array::{TextureArray, TextureArrayBuilder, TextureArrayError};
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
     use crate::world::hds::ChunkBuffer;
-    use crate::world::hds::esvo::{SerializedChunk, Svo};
+    use crate::world::hds::esvo::{SerializedChunk, Esvo};
     use crate::world::hds::octree::Position;
     use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;
@@ -72,7 +72,7 @@ mod tests {
         let buffer_alloc = Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new());
 
         let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(buffer_alloc));
-        let mut svo = Svo::<SerializedChunk>::new();
+        let mut svo = Esvo::<SerializedChunk>::new();
         svo.set_leaf(svo_pos, chunk, true);
         svo.serialize();
 

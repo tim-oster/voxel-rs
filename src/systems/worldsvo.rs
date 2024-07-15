@@ -33,7 +33,7 @@ pub struct Svo {
     processor: ChunkProcessor<SerializedChunk>,
 
     world_svo_alloc: StatsAllocator,
-    world_svo: world::Svo<SerializedChunk, StatsAllocator>,
+    world_svo: world::Esvo<SerializedChunk, StatsAllocator>,
 
     graphics_svo: graphics::Svo,
     chunk_buffer_pool: Arc<ChunkBufferPool<u32>>,
@@ -66,7 +66,7 @@ impl Svo {
         Self {
             processor: ChunkProcessor::new(job_system),
             world_svo_alloc: world_svo_alloc.clone(),
-            world_svo: world::Svo::new_in(world_svo_alloc),
+            world_svo: world::Esvo::new_in(world_svo_alloc),
             graphics_svo,
             chunk_buffer_pool: Arc::new(chunk_buffer_pool),
             leaf_ids: FxHashMap::default(),
@@ -145,7 +145,7 @@ impl Svo {
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
     /// space by replacing the previous chunk in the new position. Also removes all chunks, that
     /// are out of SVO bounds.
-    fn shift_chunks<T: Serializable, A: Allocator>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Svo<T, A>) {
+    fn shift_chunks<T: Serializable, A: Allocator>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Esvo<T, A>) {
         let mut overridden_leaves = FxHashMap::default();
         let mut removed = FxHashSet::default();
 
@@ -236,7 +236,7 @@ mod svo_tests {
     #[test]
     fn shift_chunks_x_positive() {
         let mut leaf_ids = FxHashMap::default();
-        let mut world_svo = world::Svo::new();
+        let mut world_svo = world::Esvo::new();
 
         // setup test SVO
         let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
@@ -291,7 +291,7 @@ mod svo_tests {
     #[test]
     fn shift_chunks_x_negative() {
         let mut leaf_ids = FxHashMap::default();
-        let mut world_svo = world::Svo::new();
+        let mut world_svo = world::Esvo::new();
 
         // setup test SVO
         let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
@@ -347,7 +347,7 @@ mod svo_tests {
     #[test]
     fn shift_chunks_x_out_of_range() {
         let mut leaf_ids = FxHashMap::default();
-        let mut world_svo = world::Svo::new();
+        let mut world_svo = world::Esvo::new();
 
         // setup test SVO
         let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);

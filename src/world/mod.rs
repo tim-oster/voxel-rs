@@ -1,4 +1,4 @@
-pub use hds::esvo::Svo;
+pub use hds::esvo::Esvo;
 
 pub mod memory;
 pub mod chunk;
