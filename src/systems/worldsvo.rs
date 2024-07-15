@@ -1,4 +1,3 @@
-use std::alloc::Allocator;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -13,7 +12,7 @@ use crate::systems::physics::Raycaster;
 use crate::world;
 use crate::world::chunk::{BlockPos, ChunkPos};
 use crate::world::hds;
-use crate::world::hds::{ChunkBuffer, ChunkBufferPool};
+use crate::world::hds::{ChunkBuffer, ChunkBufferPool, WorldSvo};
 use crate::world::hds::esvo::{Serializable, SerializedChunk};
 use crate::world::hds::octree::LeafId;
 use crate::world::memory::{AllocatorStats, Pool, StatsAllocator};
@@ -33,7 +32,7 @@ pub struct Svo {
     processor: ChunkProcessor<SerializedChunk>,
 
     world_svo_alloc: StatsAllocator,
-    world_svo: world::Esvo<SerializedChunk, StatsAllocator>,
+    world_svo: Box<dyn WorldSvo<SerializedChunk, u32>>,
 
     graphics_svo: graphics::Svo,
     chunk_buffer_pool: Arc<ChunkBufferPool<u32>>,
@@ -66,7 +65,7 @@ impl Svo {
         Self {
             processor: ChunkProcessor::new(job_system),
             world_svo_alloc: world_svo_alloc.clone(),
-            world_svo: world::Esvo::new_in(world_svo_alloc),
+            world_svo: Box::new(world::Esvo::new_in(world_svo_alloc)),
             graphics_svo,
             chunk_buffer_pool: Arc::new(chunk_buffer_pool),
             leaf_ids: FxHashMap::default(),
@@ -132,20 +131,20 @@ impl Svo {
 
         self.has_changed = false;
         self.world_svo.serialize();
-        self.graphics_svo.update(&mut self.world_svo);
+        self.graphics_svo.update(self.world_svo.as_mut());
 
         chunks
     }
 
     fn on_coord_space_change(&mut self) {
         self.has_changed = true;
-        Self::shift_chunks(&self.svo_coord_space, &mut self.leaf_ids, &mut self.world_svo);
+        Self::shift_chunks(&self.svo_coord_space, &mut self.leaf_ids, self.world_svo.as_mut());
     }
 
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
     /// space by replacing the previous chunk in the new position. Also removes all chunks, that
     /// are out of SVO bounds.
-    fn shift_chunks<T: Serializable, A: Allocator>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut world::Esvo<T, A>) {
+    fn shift_chunks<T: Serializable>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut dyn WorldSvo<T, u32>) {
         let mut overridden_leaves = FxHashMap::default();
         let mut removed = FxHashSet::default();
 
@@ -220,6 +219,7 @@ mod svo_tests {
     use crate::world::chunk::ChunkPos;
     use crate::world::hds::esvo::{Serializable, SerializationResult};
     use crate::world::hds::octree::Position;
+    use crate::world::hds::WorldSvo;
 
     impl Serializable for u32 {
         fn unique_id(&self) -> u64 {

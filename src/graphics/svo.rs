@@ -11,6 +11,8 @@ use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
 use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, PickerResult, PickerTask};
 use crate::graphics::svo_registry::{MaterialInstance, VoxelRegistry};
 use crate::graphics::texture_array::{TextureArray, TextureArrayError};
+use crate::world::hds::esvo::SerializedChunk;
+use crate::world::hds::WorldSvo;
 
 /// Buffer indices are constants for all buffer ids used in the SVO shaders.
 #[allow(dead_code)]
@@ -21,13 +23,6 @@ pub mod buffer_indices {
     pub const PICKER_IN: u32 = 3;
     pub const DEBUG_IN: u32 = 11;
     pub const DEBUG_OUT: u32 = 12;
-}
-
-pub trait Container<T> {
-    fn depth(&self) -> u8;
-    fn size_in_bytes(&self) -> usize;
-    unsafe fn write_to(&self, dst: *mut T) -> usize;
-    unsafe fn write_changes_to(&mut self, dst: *mut T, dst_len: usize, reset: bool);
 }
 
 /// Svo can be used to render an SVO of [`SerializedChunk`]. It is initialised
@@ -140,7 +135,7 @@ impl Svo {
     }
 
     /// Writes all changes from the given `svo` to the GPU buffer.
-    pub fn update<C: Container<u32>>(&mut self, svo: &mut C) {
+    pub fn update<T: WorldSvo<SerializedChunk, u32> + ?Sized>(&mut self, svo: &mut T) {
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
             self.world_buffer.write(max_depth_exp.to_bits());
@@ -242,8 +237,8 @@ mod svo_tests {
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
     use crate::world::hds;
-    use crate::world::hds::ChunkBuffer;
-    use crate::world::hds::esvo::{SerializedChunk};
+    use crate::world::hds::{ChunkBuffer, WorldSvo};
+    use crate::world::hds::esvo::SerializedChunk;
     use crate::world::hds::octree::Position;
     use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;

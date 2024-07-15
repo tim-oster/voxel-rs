@@ -4,10 +4,10 @@ use std::hash::{DefaultHasher, Hash, Hasher};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::graphics::svo::Container;
 use crate::world::chunk::{BlockId, ChunkPos};
 use crate::world::hds::internal::{pick_leaf_for_lod, RangeBuffer};
 use crate::world::hds::octree::{LeafId, OctantId, Octree, Position};
+use crate::world::hds::WorldSvo;
 use crate::world::world::BorrowedChunk;
 
 // TODO use common root implementation?
@@ -59,107 +59,6 @@ impl<A: Allocator> Csvo<A> {
             leaf_info: FxHashMap::default(),
             root_info: None,
         }
-    }
-
-    /// Clears all data from the SVO but does not free up memory.
-    pub fn clear(&mut self) {
-        self.octree.reset();
-        self.change_set.clear();
-        self.child_depth = 0;
-        self.buffer.clear();
-        self.leaf_info.clear();
-        self.root_info = None;
-    }
-
-    /// See [`Octree::set_leaf`]. Setting `serialize` to false attempts to bypass re-serializing the leaf in case it
-    /// was done already. This is useful if the leaf is moved around, but its content has not changed.
-    pub fn set_leaf(&mut self, pos: Position, leaf: SerializedChunk, serialize: bool) -> (LeafId, Option<SerializedChunk>) {
-        let uid = leaf.pos_hash;
-        let (leaf_id, prev_leaf) = self.octree.set_leaf(pos, leaf);
-
-        if serialize || !self.leaf_info.contains_key(&uid) {
-            self.change_set.insert(OctantChange::Add(uid, leaf_id));
-        }
-
-        (leaf_id, prev_leaf)
-    }
-
-    /// See [`Octree::move_leaf`].
-    pub fn move_leaf(&mut self, leaf: LeafId, to_pos: Position) -> (LeafId, Option<SerializedChunk>) {
-        let (new_leaf_id, old_value) = self.octree.move_leaf(leaf, to_pos);
-        (new_leaf_id, old_value)
-    }
-
-    /// See [`Octree::remove_leaf`].
-    pub fn remove_leaf(&mut self, leaf: LeafId) -> Option<SerializedChunk> {
-        let value = self.octree.remove_leaf_by_id(leaf);
-        if let Some(value) = &value {
-            let uid = value.pos_hash;
-            self.change_set.insert(OctantChange::Remove(uid));
-        }
-        value
-    }
-
-    /// See [`Octree::get_leaf`].
-    pub fn get_leaf(&self, pos: Position) -> Option<&SerializedChunk> {
-        self.octree.get_leaf(pos)
-    }
-
-    /// Serializes the root octant and adds/removes all changed leaves. Must be called before [`Csvo::write_to`] or
-    /// [`Csvo::write_changes_to`] for them to have any effect.
-    pub fn serialize(&mut self) {
-        if self.octree.root.is_none() {
-            return;
-        }
-
-        // rebuild & remove all changed leaf octants
-        let changes = self.change_set.drain().collect::<Vec<OctantChange>>();
-        for change in changes {
-            match change {
-                OctantChange::Add(id, leaf_id) => {
-                    let child = &mut self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
-                    let content = child.get_leaf_value_mut().unwrap();
-
-                    // TODO change
-                    assert!(!(content.depth != self.child_depth && self.child_depth != 0), "all children must have the same depth");
-                    self.child_depth = content.depth;
-
-                    if let Some(buffer) = content.buffer.take() {
-                        // TODO reuse some buffer for this?
-
-                        let materials = content.materials.take().unwrap();
-                        let material_bytes = materials.len() * mem::size_of::<BlockId>();
-                        let mut merged = Vec::with_capacity(1 + 4 + material_bytes + buffer.len());
-
-                        merged.push(if content.lod != 0 { content.lod } else { content.depth });
-                        merged.extend_from_slice(&(material_bytes as u32).to_be_bytes());
-                        for material in materials {
-                            merged.extend_from_slice(&material.to_be_bytes());
-                        }
-                        merged.extend(buffer);
-
-                        let offset = self.buffer.insert(id, &merged);
-
-                        // Drop the buffer so that the allocator can reuse it. A SerializedChunk only needs it's buffer for the
-                        // serialization to the SVO. After that, it is indexed by an absolute pointer. If the content changes
-                        // however, a new SerializedChunk is built and the old one discarded.
-                        content.buffer = None;
-
-                        self.leaf_info.insert(id, LeafInfo { buf_offset: offset });
-                    }
-                }
-
-                OctantChange::Remove(id) => {
-                    self.buffer.remove(id);
-                    self.leaf_info.remove(&id);
-                }
-            }
-        }
-
-        // rebuild root octree
-        let buffer = self.serialize_root(&self.octree, self.octree.root.unwrap(), self.octree.depth());
-        let offset = self.buffer.insert(u64::MAX, &buffer);
-        self.root_info = Some(LeafInfo { buf_offset: offset });
     }
 
     fn serialize_root(&self, octree: &Octree<SerializedChunk>, octant_id: OctantId, depth: u8) -> Vec<u8> {
@@ -235,7 +134,108 @@ impl<A: Allocator> Csvo<A> {
     }
 }
 
-impl<A: Allocator> Container<u8> for Csvo<A> {
+impl<A: Allocator> WorldSvo<SerializedChunk, u8> for Csvo<A> {
+    /// Clears all data from the SVO but does not free up memory.
+    fn clear(&mut self) {
+        self.octree.reset();
+        self.change_set.clear();
+        self.child_depth = 0;
+        self.buffer.clear();
+        self.leaf_info.clear();
+        self.root_info = None;
+    }
+
+    /// See [`Octree::set_leaf`]. Setting `serialize` to false attempts to bypass re-serializing the leaf in case it
+    /// was done already. This is useful if the leaf is moved around, but its content has not changed.
+    fn set_leaf(&mut self, pos: Position, leaf: SerializedChunk, serialize: bool) -> (LeafId, Option<SerializedChunk>) {
+        let uid = leaf.pos_hash;
+        let (leaf_id, prev_leaf) = self.octree.set_leaf(pos, leaf);
+
+        if serialize || !self.leaf_info.contains_key(&uid) {
+            self.change_set.insert(OctantChange::Add(uid, leaf_id));
+        }
+
+        (leaf_id, prev_leaf)
+    }
+
+    /// See [`Octree::move_leaf`].
+    fn move_leaf(&mut self, leaf: LeafId, to_pos: Position) -> (LeafId, Option<SerializedChunk>) {
+        let (new_leaf_id, old_value) = self.octree.move_leaf(leaf, to_pos);
+        (new_leaf_id, old_value)
+    }
+
+    /// See [`Octree::remove_leaf`].
+    fn remove_leaf(&mut self, leaf: LeafId) -> Option<SerializedChunk> {
+        let value = self.octree.remove_leaf_by_id(leaf);
+        if let Some(value) = &value {
+            let uid = value.pos_hash;
+            self.change_set.insert(OctantChange::Remove(uid));
+        }
+        value
+    }
+
+    /// See [`Octree::get_leaf`].
+    fn get_leaf(&self, pos: Position) -> Option<&SerializedChunk> {
+        self.octree.get_leaf(pos)
+    }
+
+    /// Serializes the root octant and adds/removes all changed leaves. Must be called before [`Csvo::write_to`] or
+    /// [`Csvo::write_changes_to`] for them to have any effect.
+    fn serialize(&mut self) {
+        if self.octree.root.is_none() {
+            return;
+        }
+
+        // rebuild & remove all changed leaf octants
+        let changes = self.change_set.drain().collect::<Vec<OctantChange>>();
+        for change in changes {
+            match change {
+                OctantChange::Add(id, leaf_id) => {
+                    let child = &mut self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
+                    let content = child.get_leaf_value_mut().unwrap();
+
+                    // TODO change
+                    assert!(!(content.depth != self.child_depth && self.child_depth != 0), "all children must have the same depth");
+                    self.child_depth = content.depth;
+
+                    if let Some(buffer) = content.buffer.take() {
+                        // TODO reuse some buffer for this?
+
+                        let materials = content.materials.take().unwrap();
+                        let material_bytes = materials.len() * mem::size_of::<BlockId>();
+                        let mut merged = Vec::with_capacity(1 + 4 + material_bytes + buffer.len());
+
+                        merged.push(if content.lod != 0 { content.lod } else { content.depth });
+                        merged.extend_from_slice(&(material_bytes as u32).to_be_bytes());
+                        for material in materials {
+                            merged.extend_from_slice(&material.to_be_bytes());
+                        }
+                        merged.extend(buffer);
+
+                        let offset = self.buffer.insert(id, &merged);
+
+                        // Drop the buffer so that the allocator can reuse it. A SerializedChunk only needs it's buffer for the
+                        // serialization to the SVO. After that, it is indexed by an absolute pointer. If the content changes
+                        // however, a new SerializedChunk is built and the old one discarded.
+                        content.buffer = None;
+
+                        self.leaf_info.insert(id, LeafInfo { buf_offset: offset });
+                    }
+                }
+
+                OctantChange::Remove(id) => {
+                    self.buffer.remove(id);
+                    self.leaf_info.remove(&id);
+                }
+            }
+        }
+
+        // rebuild root octree
+        let buffer = self.serialize_root(&self.octree, self.octree.root.unwrap(), self.octree.depth());
+        let offset = self.buffer.insert(u64::MAX, &buffer);
+        self.root_info = Some(LeafInfo { buf_offset: offset });
+    }
+
     fn depth(&self) -> u8 {
         self.octree.depth() + self.child_depth
     }
@@ -299,11 +299,11 @@ impl<A: Allocator> Container<u8> for Csvo<A> {
 mod csvo_tests {
     use rustc_hash::FxHashMap;
 
-    use crate::graphics::svo::Container;
     use crate::world::chunk::{BlockId, Chunk, ChunkPos, ChunkStorage};
     use crate::world::hds::csvo::{Csvo, LeafInfo, SerializedChunk};
     use crate::world::hds::internal::{Range, RangeBuffer};
     use crate::world::hds::octree::Position;
+    use crate::world::hds::WorldSvo;
     use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;
 

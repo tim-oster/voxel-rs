@@ -12,12 +12,12 @@ mod tests {
     use crate::graphics::macros::{assert_vec2_eq, assert_vec3_eq, assert_vec4_eq};
     use crate::graphics::resource::Resource;
     use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
-    use crate::graphics::svo::{buffer_indices, Container};
+    use crate::graphics::svo::buffer_indices;
     use crate::graphics::svo_registry::MaterialInstance;
     use crate::graphics::texture_array::{TextureArray, TextureArrayBuilder, TextureArrayError};
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
-    use crate::world::hds::ChunkBuffer;
-    use crate::world::hds::esvo::{SerializedChunk, Esvo};
+    use crate::world::hds::{ChunkBuffer, WorldSvo};
+    use crate::world::hds::esvo::{Esvo, SerializedChunk};
     use crate::world::hds::octree::Position;
     use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;

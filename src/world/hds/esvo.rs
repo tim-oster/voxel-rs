@@ -6,10 +6,10 @@ use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::graphics::svo::Container;
 use crate::world::chunk::{BlockId, ChunkPos};
 use crate::world::hds::internal::{ChunkBuffer, ChunkBufferPool, pick_leaf_for_lod, RangeBuffer};
 use crate::world::hds::octree::{LeafId, OctantId, Octree, Position};
+use crate::world::hds::WorldSvo;
 use crate::world::memory::{Pooled, StatsAllocator};
 use crate::world::world::BorrowedChunk;
 
@@ -148,92 +148,6 @@ impl<T: Serializable, A: Allocator> Esvo<T, A> {
         }
     }
 
-    /// Clears all data from the SVO but does not free up memory.
-    pub fn clear(&mut self) {
-        self.octree.reset();
-        self.change_set.clear();
-        self.buffer.clear();
-        self.leaf_info.clear();
-        self.root_info = None;
-    }
-
-    /// See [`Octree::set_leaf`]. Setting `serialize` to false attempts to bypass re-serializing the leaf in case it
-    /// was done already. This is useful if the leaf is moved around, but its content has not changed.
-    pub fn set_leaf(&mut self, pos: Position, leaf: T, serialize: bool) -> (LeafId, Option<T>) {
-        let uid = leaf.unique_id();
-        let (leaf_id, prev_leaf) = self.octree.set_leaf(pos, leaf);
-
-        if serialize || !self.leaf_info.contains_key(&uid) {
-            self.change_set.insert(OctantChange::Add(uid, leaf_id));
-        }
-
-        (leaf_id, prev_leaf)
-    }
-
-    /// See [`Octree::move_leaf`].
-    pub fn move_leaf(&mut self, leaf: LeafId, to_pos: Position) -> (LeafId, Option<T>) {
-        let (new_leaf_id, old_value) = self.octree.move_leaf(leaf, to_pos);
-        (new_leaf_id, old_value)
-    }
-
-    /// See [`Octree::remove_leaf`].
-    pub fn remove_leaf(&mut self, leaf: LeafId) -> Option<T> {
-        let value = self.octree.remove_leaf_by_id(leaf);
-        if let Some(value) = &value {
-            let uid = value.unique_id();
-            self.change_set.insert(OctantChange::Remove(uid));
-        }
-        value
-    }
-
-    /// See [`Octree::get_leaf`].
-    pub fn get_leaf(&self, pos: Position) -> Option<&T> {
-        self.octree.get_leaf(pos)
-    }
-
-    /// Serializes the root octant and adds/removes all changed leaves. Must be called before [`Esvo::write_to`] or
-    /// [`Esvo::write_changes_to`] for them to have any effect.
-    pub fn serialize(&mut self) {
-        if self.octree.root.is_none() {
-            return;
-        }
-
-        // move tmp buffer into scope
-        let mut tmp_buffer = self.tmp_octant_buffer.take().unwrap();
-
-        // rebuild & remove all changed leaf octants
-        let changes = self.change_set.drain().collect::<Vec<OctantChange>>();
-        for change in changes {
-            match change {
-                OctantChange::Add(id, leaf_id) => {
-                    let child = &mut self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
-                    let content = child.get_leaf_value_mut().unwrap();
-                    let result = content.serialize(&mut tmp_buffer.data, 0);
-                    if result.depth > 0 {
-                        let offset = self.buffer.insert(id, &tmp_buffer.data);
-                        tmp_buffer.reset();
-
-                        self.leaf_info.insert(id, LeafInfo { buf_offset: offset, serialization: result });
-                    }
-                }
-
-                OctantChange::Remove(id) => {
-                    self.buffer.remove(id);
-                    self.leaf_info.remove(&id);
-                }
-            }
-        }
-
-        // rebuild root octree
-        let result = self.serialize_root(&mut tmp_buffer);
-        let offset = self.buffer.insert(u64::MAX, &tmp_buffer.data);
-        tmp_buffer.reset();
-        self.root_info = Some(LeafInfo { buf_offset: offset, serialization: result });
-
-        // return tmp buffer for reuse
-        self.tmp_octant_buffer = Some(tmp_buffer);
-    }
-
     fn serialize_root(&self, dst: &mut ChunkBuffer<u32>) -> SerializationResult {
         let root_id = self.octree.root.unwrap();
 
@@ -274,7 +188,93 @@ impl<T: Serializable, A: Allocator> Esvo<T, A> {
     }
 }
 
-impl<T: Serializable, A: Allocator> Container<u32> for Esvo<T, A> {
+impl<T: Serializable, A: Allocator> WorldSvo<T, u32> for Esvo<T, A> {
+    /// Clears all data from the SVO but does not free up memory.
+    fn clear(&mut self) {
+        self.octree.reset();
+        self.change_set.clear();
+        self.buffer.clear();
+        self.leaf_info.clear();
+        self.root_info = None;
+    }
+
+    /// See [`Octree::set_leaf`]. Setting `serialize` to false attempts to bypass re-serializing the leaf in case it
+    /// was done already. This is useful if the leaf is moved around, but its content has not changed.
+    fn set_leaf(&mut self, pos: Position, leaf: T, serialize: bool) -> (LeafId, Option<T>) {
+        let uid = leaf.unique_id();
+        let (leaf_id, prev_leaf) = self.octree.set_leaf(pos, leaf);
+
+        if serialize || !self.leaf_info.contains_key(&uid) {
+            self.change_set.insert(OctantChange::Add(uid, leaf_id));
+        }
+
+        (leaf_id, prev_leaf)
+    }
+
+    /// See [`Octree::move_leaf`].
+    fn move_leaf(&mut self, leaf: LeafId, to_pos: Position) -> (LeafId, Option<T>) {
+        let (new_leaf_id, old_value) = self.octree.move_leaf(leaf, to_pos);
+        (new_leaf_id, old_value)
+    }
+
+    /// See [`Octree::remove_leaf`].
+    fn remove_leaf(&mut self, leaf: LeafId) -> Option<T> {
+        let value = self.octree.remove_leaf_by_id(leaf);
+        if let Some(value) = &value {
+            let uid = value.unique_id();
+            self.change_set.insert(OctantChange::Remove(uid));
+        }
+        value
+    }
+
+    /// See [`Octree::get_leaf`].
+    fn get_leaf(&self, pos: Position) -> Option<&T> {
+        self.octree.get_leaf(pos)
+    }
+
+    /// Serializes the root octant and adds/removes all changed leaves. Must be called before [`Esvo::write_to`] or
+    /// [`Esvo::write_changes_to`] for them to have any effect.
+    fn serialize(&mut self) {
+        if self.octree.root.is_none() {
+            return;
+        }
+
+        // move tmp buffer into scope
+        let mut tmp_buffer = self.tmp_octant_buffer.take().unwrap();
+
+        // rebuild & remove all changed leaf octants
+        let changes = self.change_set.drain().collect::<Vec<OctantChange>>();
+        for change in changes {
+            match change {
+                OctantChange::Add(id, leaf_id) => {
+                    let child = &mut self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
+                    let content = child.get_leaf_value_mut().unwrap();
+                    let result = content.serialize(&mut tmp_buffer.data, 0);
+                    if result.depth > 0 {
+                        let offset = self.buffer.insert(id, &tmp_buffer.data);
+                        tmp_buffer.reset();
+
+                        self.leaf_info.insert(id, LeafInfo { buf_offset: offset, serialization: result });
+                    }
+                }
+
+                OctantChange::Remove(id) => {
+                    self.buffer.remove(id);
+                    self.leaf_info.remove(&id);
+                }
+            }
+        }
+
+        // rebuild root octree
+        let result = self.serialize_root(&mut tmp_buffer);
+        let offset = self.buffer.insert(u64::MAX, &tmp_buffer.data);
+        tmp_buffer.reset();
+        self.root_info = Some(LeafInfo { buf_offset: offset, serialization: result });
+
+        // return tmp buffer for reuse
+        self.tmp_octant_buffer = Some(tmp_buffer);
+    }
+
     fn depth(&self) -> u8 {
         if self.root_info.is_none() {
             return 0;
@@ -507,11 +507,11 @@ where
 mod esvo_tests {
     use rustc_hash::FxHashMap;
 
-    use crate::graphics::svo::Container;
     use crate::world::chunk::{BlockId, ChunkPos};
     use crate::world::hds::esvo::{ChunkBuffer, Esvo, LeafInfo, RangeBuffer, SerializationResult, SerializedChunk};
     use crate::world::hds::internal::Range;
     use crate::world::hds::octree::{LeafId, Octree, Position};
+    use crate::world::hds::WorldSvo;
     use crate::world::memory::{Pool, StatsAllocator};
 
     /// Tests that serializing an SVO with `SerializedChunk` values produces the expected result buffer.
