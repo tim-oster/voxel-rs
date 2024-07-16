@@ -1,5 +1,6 @@
 pub use common::*;
-pub use internal::{ChunkBuffer, ChunkBufferPool};
+#[allow(unused_imports)]
+pub use internal::{Bits, ChunkBuffer, ChunkBufferPool};
 
 pub mod octree;
 pub mod esvo;

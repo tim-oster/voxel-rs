@@ -4,6 +4,7 @@ use cgmath::{InnerSpace, Point3, Vector3};
 
 use crate::graphics::svo::Svo;
 use crate::graphics::svo_picker::{Aabb, AabbResult, PickerBatch, PickerBatchResult};
+use crate::world::hds::Bits;
 
 const EPSILON: f32 = 0.0005;
 
@@ -89,7 +90,7 @@ pub trait Raycaster {
     fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult);
 }
 
-impl Raycaster for Svo {
+impl<F: Bits> Raycaster for Svo<F> {
     fn raycast(&self, batch: &mut PickerBatch, result: &mut PickerBatchResult) {
         self.raycast(batch, result);
     }

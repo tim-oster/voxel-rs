@@ -344,7 +344,7 @@ pub struct SerializedChunk {
     pub pos: ChunkPos,
     pos_hash: u64,
     pub lod: u8,
-    pub borrowed_chunk: Option<BorrowedChunk>,
+    borrowed_chunk: Option<BorrowedChunk>,
     buffer: Option<Pooled<ChunkBuffer<u32, StatsAllocator>>>,
     result: SerializationResult,
 }
@@ -381,6 +381,10 @@ impl SerializedChunk {
             params.result.depth = 1;
         })
     }
+
+    pub fn take_borrowed_chunk(&mut self) -> Option<BorrowedChunk> {
+        self.borrowed_chunk.take()
+    }
 }
 
 impl Serializable for SerializedChunk {
@@ -395,7 +399,7 @@ impl Serializable for SerializedChunk {
             let buffer = self.buffer.as_ref().unwrap();
             dst.extend(buffer.data.iter());
 
-            // Drop the buffer so that he allocator can reuse it. A SerializedChunk only needs it's buffer for the
+            // Drop the buffer so that the allocator can reuse it. A SerializedChunk only needs it's buffer for the
             // serialization to the SVO. After that, it is indexed by an absolute pointer. If the content changes
             // however, a new SerializedChunk is built and the old one discarded.
             self.buffer = None;

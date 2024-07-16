@@ -4,19 +4,22 @@ use std::sync::Arc;
 use cgmath::Point3;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use esvo as target_impl;
+use esvo::Esvo as target_type;
+
 use crate::graphics;
 use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult};
 use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
 use crate::systems::physics::Raycaster;
-use crate::world;
 use crate::world::chunk::{BlockPos, ChunkPos};
 use crate::world::hds;
-use crate::world::hds::{ChunkBuffer, ChunkBufferPool, WorldSvo};
-use crate::world::hds::esvo::{Serializable, SerializedChunk};
+use crate::world::hds::{ChunkBufferPool, esvo, WorldSvo};
 use crate::world::hds::octree::LeafId;
-use crate::world::memory::{AllocatorStats, Pool, StatsAllocator};
+use crate::world::memory::{AllocatorStats, StatsAllocator};
 use crate::world::world::BorrowedChunk;
+
+type BufferType = u32;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`world::chunk::Chunk`]s.
 /// Adding chunks will serialize them in the background and attach them the GPU SVO. Removing
@@ -29,13 +32,13 @@ use crate::world::world::BorrowedChunk;
 /// inside the center chunk of the SVO and shifting all chunks in the opposite movement direction
 /// if the camera leaves the chunk.
 pub struct Svo {
-    processor: ChunkProcessor<SerializedChunk>,
+    processor: ChunkProcessor<target_impl::SerializedChunk>,
 
     world_svo_alloc: StatsAllocator,
-    world_svo: Box<dyn WorldSvo<SerializedChunk, u32>>,
+    world_svo: Box<dyn WorldSvo<target_impl::SerializedChunk, BufferType>>,
 
-    graphics_svo: graphics::Svo,
-    chunk_buffer_pool: Arc<ChunkBufferPool<u32>>,
+    graphics_svo: graphics::Svo<BufferType>,
+    chunk_buffer_pool: Arc<ChunkBufferPool<BufferType>>,
 
     leaf_ids: FxHashMap<ChunkPos, LeafId>,
     has_changed: bool,
@@ -50,24 +53,15 @@ pub struct AllocStats {
 }
 
 impl Svo {
-    pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo, render_distance: u32) -> Self {
+    pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo<BufferType>, render_distance: u32) -> Self {
         let world_svo_alloc = StatsAllocator::new();
 
-        let chunk_buffer_pool = Pool::new_in(
-            // It is difficult to pre-allocate memory here as chunk sizes are random/depend heavily on the world generation
-            // mechanism. The naive approach is to allocate the maximum amount of memory, but that is too wasteful. Hence,
-            // an average size is taken so that it is sufficient in most cases and at worst, the storage is expanded a few
-            // times until it fits. This is still more stable than and safes a lot of allocations.
-            Box::new(|alloc| ChunkBuffer::with_capacity_in(100_000, alloc)),
-            Some(Box::new(ChunkBuffer::reset)),
-            StatsAllocator::new(),
-        );
         Self {
             processor: ChunkProcessor::new(job_system),
             world_svo_alloc: world_svo_alloc.clone(),
-            world_svo: Box::new(world::Esvo::new_in(world_svo_alloc)),
+            world_svo: Box::new(target_type::new_in(world_svo_alloc)),
             graphics_svo,
-            chunk_buffer_pool: Arc::new(chunk_buffer_pool),
+            chunk_buffer_pool: Arc::new(ChunkBufferPool::default()),
             leaf_ids: FxHashMap::default(),
             has_changed: false,
             svo_coord_space: SvoCoordSpace {
@@ -81,7 +75,7 @@ impl Svo {
     /// ownerships can be reclaimed by calling [`Svo::update`].
     pub fn set_chunk(&mut self, chunk: BorrowedChunk) {
         let alloc = self.chunk_buffer_pool.clone();
-        self.processor.enqueue(chunk.pos, true, move || SerializedChunk::new(chunk, &alloc));
+        self.processor.enqueue(chunk.pos, true, move || target_impl::SerializedChunk::new(chunk, &alloc));
     }
 
     pub fn remove_chunk(&mut self, pos: &ChunkPos) {
@@ -144,7 +138,7 @@ impl Svo {
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
     /// space by replacing the previous chunk in the new position. Also removes all chunks, that
     /// are out of SVO bounds.
-    fn shift_chunks<T: Serializable>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut dyn WorldSvo<T, u32>) {
+    fn shift_chunks<T, F>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut dyn WorldSvo<T, F>) {
         let mut overridden_leaves = FxHashMap::default();
         let mut removed = FxHashSet::default();
 
@@ -181,11 +175,11 @@ impl Svo {
         }
     }
 
-    fn process_serialized_chunks(&mut self, results: Vec<ChunkResult<SerializedChunk>>) -> Vec<BorrowedChunk> {
+    fn process_serialized_chunks(&mut self, results: Vec<ChunkResult<target_impl::SerializedChunk>>) -> Vec<BorrowedChunk> {
         let mut chunks = Vec::new();
 
         for mut result in results {
-            let chunk = result.value.borrowed_chunk.take().unwrap();
+            let chunk = result.value.take_borrowed_chunk().unwrap();
             chunks.push(chunk);
 
             let svo_pos = self.svo_coord_space.cnv_chunk_pos(result.pos);
@@ -215,20 +209,18 @@ mod svo_tests {
     use rustc_hash::FxHashMap;
 
     use crate::systems::worldsvo::{Svo, SvoCoordSpace};
-    use crate::world;
     use crate::world::chunk::ChunkPos;
-    use crate::world::hds::esvo::{Serializable, SerializationResult};
+    use crate::world::hds::{esvo, WorldSvo};
     use crate::world::hds::octree::Position;
-    use crate::world::hds::WorldSvo;
 
-    impl Serializable for u32 {
+    impl esvo::Serializable for u32 {
         fn unique_id(&self) -> u64 {
             *self as u64
         }
 
-        fn serialize(&mut self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
+        fn serialize(&mut self, dst: &mut Vec<u32>, _lod: u8) -> esvo::SerializationResult {
             dst.push(*self);
-            SerializationResult { child_mask: 1, leaf_mask: 1, depth: 1 }
+            esvo::SerializationResult { child_mask: 1, leaf_mask: 1, depth: 1 }
         }
     }
 
@@ -236,7 +228,7 @@ mod svo_tests {
     #[test]
     fn shift_chunks_x_positive() {
         let mut leaf_ids = FxHashMap::default();
-        let mut world_svo = world::Esvo::new();
+        let mut world_svo = esvo::Esvo::new();
 
         // setup test SVO
         let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
@@ -291,7 +283,7 @@ mod svo_tests {
     #[test]
     fn shift_chunks_x_negative() {
         let mut leaf_ids = FxHashMap::default();
-        let mut world_svo = world::Esvo::new();
+        let mut world_svo = esvo::Esvo::new();
 
         // setup test SVO
         let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);
@@ -347,7 +339,7 @@ mod svo_tests {
     #[test]
     fn shift_chunks_x_out_of_range() {
         let mut leaf_ids = FxHashMap::default();
-        let mut world_svo = world::Esvo::new();
+        let mut world_svo = esvo::Esvo::new();
 
         // setup test SVO
         let (c0, _) = world_svo.set_leaf(Position(0, 1, 1), 1u32, true);

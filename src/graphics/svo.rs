@@ -11,8 +11,7 @@ use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
 use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, PickerResult, PickerTask};
 use crate::graphics::svo_registry::{MaterialInstance, VoxelRegistry};
 use crate::graphics::texture_array::{TextureArray, TextureArrayError};
-use crate::world::hds::esvo::SerializedChunk;
-use crate::world::hds::WorldSvo;
+use crate::world::hds::{Bits, WorldSvo};
 
 /// Buffer indices are constants for all buffer ids used in the SVO shaders.
 #[allow(dead_code)]
@@ -29,12 +28,12 @@ pub mod buffer_indices {
 /// with a `VoxelRegistry` with textures and materials to render the actual chunks.
 ///
 /// Note that all coordinates passed must be in SVO coordinate space (\[0;size\] along all axes).
-pub struct Svo {
+pub struct Svo<F: Bits> {
     tex_array: Resource<TextureArray, TextureArrayError>,
     // _material_buffer needs to be stored to drop it together with all other resources
     _material_buffer: Buffer<MaterialInstance>,
     world_shader: Resource<ShaderProgram, ShaderError>,
-    world_buffer: MappedBuffer<u32>,
+    world_buffer: MappedBuffer<F>,
     // screen_quad is used to render a full-screen quad on which the per-pixel raytracer for the SVO
     // is executed
     screen_quad: ScreenQuad,
@@ -82,7 +81,7 @@ pub struct RenderParams {
     pub shadow_distance: f32,
 }
 
-impl Svo {
+impl<F: Bits> Svo<F> {
     pub fn new(registry: &VoxelRegistry) -> Self {
         let tex_array = registry.build_texture_array().unwrap();
         let material_buffer = registry.build_material_buffer(&tex_array);
@@ -92,7 +91,7 @@ impl Svo {
             || ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
         ).unwrap();
 
-        let world_buffer = MappedBuffer::<u32>::new(300 * 1000 * 1000 / 4); // 300 MB
+        let world_buffer = MappedBuffer::<F>::new(300 * 1000 * 1000 / F::BYTES); // 300 MB
         world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);
 
         let picker_shader = Resource::new(
@@ -135,10 +134,11 @@ impl Svo {
     }
 
     /// Writes all changes from the given `svo` to the GPU buffer.
-    pub fn update<T: WorldSvo<SerializedChunk, u32> + ?Sized>(&mut self, svo: &mut T) {
+    pub fn update<T: WorldSvo<U, F> + ?Sized, U>(&mut self, svo: &mut T) {
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
-            self.world_buffer.write(max_depth_exp.to_bits());
+            let max_depth_bytes = max_depth_exp.to_bits().to_le_bytes();
+            F::write_bytes(self.world_buffer.cast(), &max_depth_bytes);
 
             // wait for last draw call to finish so that updates and draws do not race and produce temporary "holes" in the world
             self.render_fence.borrow().wait();

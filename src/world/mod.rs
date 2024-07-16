@@ -1,5 +1,3 @@
-pub use hds::esvo::Esvo;
-
 pub mod memory;
 pub mod chunk;
 #[allow(clippy::module_inception)]

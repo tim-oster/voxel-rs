@@ -1,5 +1,5 @@
+use std::{ptr, slice};
 use std::alloc::{Allocator, Global};
-use std::ptr;
 
 use rustc_hash::FxHashMap;
 
@@ -7,6 +7,20 @@ use crate::world::hds::octree::{Octant, Octree};
 use crate::world::memory::{Pool, StatsAllocator};
 
 pub type ChunkBufferPool<T, A = StatsAllocator> = Pool<ChunkBuffer<T, A>, A>;
+
+impl<T: Bits + 'static> Default for ChunkBufferPool<T, StatsAllocator> {
+    fn default() -> Self {
+        Self::new_in(
+            // It is difficult to pre-allocate memory here as chunk sizes are random/depend heavily on the world generation
+            // mechanism. The naive approach is to allocate the maximum amount of memory, but that is too wasteful. Hence,
+            // an average size is taken so that it is sufficient in most cases and at worst, the storage is expanded a few
+            // times until it fits. This is still more stable than and safes a lot of allocations.
+            Box::new(|alloc| ChunkBuffer::with_capacity_in(100_000, alloc)),
+            Some(Box::new(ChunkBuffer::reset)),
+            StatsAllocator::new(),
+        )
+    }
+}
 
 /// `ChunkBuffer` abstracts the temporary storage used for serializing octants into the GPU format.
 pub struct ChunkBuffer<T: Bits, A: Allocator = Global> {
@@ -44,6 +58,20 @@ pub trait Bits: Clone + Copy {
 
     const ZERO: Self::T;
     const BYTES: usize;
+
+    #[cfg(target_endian = "little")]
+    unsafe fn write_bytes(dst: *mut Self::T, src: &[u8]) {
+        if src.is_empty() {
+            return;
+        }
+        assert_eq!(src.len() % Self::BYTES, 0, "src length is not a multiple of target byte size");
+
+        let len = src.len().checked_div(Self::BYTES).unwrap();
+        let ptr: *const Self::T = src.as_ptr().cast();
+        let slc = slice::from_raw_parts(ptr, len);
+
+        ptr::copy(slc.as_ptr(), dst, len);
+    }
 }
 
 impl Bits for u8 {
@@ -51,6 +79,14 @@ impl Bits for u8 {
 
     const ZERO: Self::T = 0u8;
     const BYTES: usize = 1;
+
+    unsafe fn write_bytes(dst: *mut Self::T, src: &[u8]) {
+        if src.is_empty() {
+            return;
+        }
+
+        ptr::copy(src.as_ptr(), dst, src.len());
+    }
 }
 
 impl Bits for u16 {
@@ -65,6 +101,46 @@ impl Bits for u32 {
 
     const ZERO: Self::T = 0u32;
     const BYTES: usize = 4;
+}
+
+#[cfg(test)]
+#[cfg(target_endian = "little")]
+mod bits_tests {
+    use crate::world::hds::Bits;
+
+    #[test]
+    fn test_u8() {
+        let mut dst = vec![0, 0];
+        unsafe { u8::write_bytes(dst.as_mut_ptr(), &[10, 20]); }
+        assert_eq!(dst[0], 10);
+        assert_eq!(dst[1], 20);
+    }
+
+    #[test]
+    fn test_u16() {
+        let mut dst = vec![0, 0];
+        unsafe { u16::write_bytes(dst.as_mut_ptr(), &[10, 20]); }
+        assert_eq!(dst[0], (20 << 8) | 10);
+        assert_eq!(dst[1], 0);
+
+        let mut dst = vec![0, 0];
+        unsafe { u16::write_bytes(dst.as_mut_ptr(), &[10, 20, 30, 0]); }
+        assert_eq!(dst[0], (20 << 8) | 10);
+        assert_eq!(dst[1], 30);
+    }
+
+    #[test]
+    fn test_u32() {
+        let mut dst = vec![0, 0];
+        unsafe { u32::write_bytes(dst.as_mut_ptr(), &[10, 20, 30, 40]); }
+        assert_eq!(dst[0], (40 << 24) | (30 << 16) | (20 << 8) | 10);
+        assert_eq!(dst[1], 0);
+
+        let mut dst = vec![0, 0];
+        unsafe { u32::write_bytes(dst.as_mut_ptr(), &[10, 20, 30, 40, 50, 0, 0, 0]); }
+        assert_eq!(dst[0], (40 << 24) | (30 << 16) | (20 << 8) | 10);
+        assert_eq!(dst[1], 50);
+    }
 }
 
 // -------------------------------------------------------------------------------------------------

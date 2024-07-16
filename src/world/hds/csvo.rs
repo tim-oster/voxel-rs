@@ -1,13 +1,14 @@
 use std::{mem, ptr};
 use std::alloc::{Allocator, Global};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::world::chunk::{BlockId, ChunkPos};
+use crate::world::hds::{ChunkBufferPool, WorldSvo};
 use crate::world::hds::internal::{pick_leaf_for_lod, RangeBuffer};
 use crate::world::hds::octree::{LeafId, OctantId, Octree, Position};
-use crate::world::hds::WorldSvo;
 use crate::world::world::BorrowedChunk;
 
 // TODO use common root implementation?
@@ -297,13 +298,15 @@ impl<A: Allocator> WorldSvo<SerializedChunk, u8> for Csvo<A> {
 
 #[cfg(test)]
 mod csvo_tests {
+    use std::sync::Arc;
+
     use rustc_hash::FxHashMap;
 
     use crate::world::chunk::{BlockId, Chunk, ChunkPos, ChunkStorage};
+    use crate::world::hds::{ChunkBufferPool, WorldSvo};
     use crate::world::hds::csvo::{Csvo, LeafInfo, SerializedChunk};
     use crate::world::hds::internal::{Range, RangeBuffer};
     use crate::world::hds::octree::Position;
-    use crate::world::hds::WorldSvo;
     use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;
 
@@ -315,7 +318,7 @@ mod csvo_tests {
         chunk.set_block(0, 31, 0, 2 as BlockId);
         chunk.set_block(0, 0, 31, 3 as BlockId);
         chunk.storage.as_mut().unwrap().compact();
-        let sc = SerializedChunk::new(BorrowedChunk::from(chunk));
+        let sc = SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(ChunkBufferPool::default()));
 
         let mut esvo = Csvo::new();
         esvo.set_leaf(Position(1, 0, 0), sc, true);
@@ -383,7 +386,7 @@ pub struct SerializedChunk {
 
 impl SerializedChunk {
     // TODO use memory pool alloc: &Arc<ChunkBufferPool<u8>> ?
-    pub fn new(chunk: BorrowedChunk) -> Self {
+    pub fn new(chunk: BorrowedChunk, _: &Arc<ChunkBufferPool<u8>>) -> Self {
         // use hash of position as the unique id
         let mut hasher = DefaultHasher::new();
         chunk.pos.hash(&mut hasher);
@@ -523,6 +526,10 @@ impl SerializedChunk {
         }
 
         (buffer, materials)
+    }
+
+    pub fn take_borrowed_chunk(&mut self) -> Option<BorrowedChunk> {
+        self.borrowed_chunk.take()
     }
 }
 
