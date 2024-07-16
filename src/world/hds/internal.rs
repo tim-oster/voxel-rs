@@ -1,4 +1,4 @@
-use std::{ptr, slice};
+use std::{mem, ptr, slice};
 use std::alloc::{Allocator, Global};
 
 use rustc_hash::FxHashMap;
@@ -56,8 +56,8 @@ impl<T: Bits, A: Allocator> ChunkBuffer<T, A> {
 pub trait Bits: Clone + Copy {
     type T: Clone + Copy;
 
-    const ZERO: Self::T;
-    const BYTES: usize;
+    const ZERO: Self::T = unsafe { mem::zeroed() };
+    const BYTES: usize = mem::align_of::<Self::T>();
 
     #[cfg(target_endian = "little")]
     unsafe fn write_bytes(dst: *mut Self::T, src: &[u8]) {
@@ -77,31 +77,15 @@ pub trait Bits: Clone + Copy {
 impl Bits for u8 {
     type T = Self;
 
-    const ZERO: Self::T = 0u8;
-    const BYTES: usize = 1;
-
     unsafe fn write_bytes(dst: *mut Self::T, src: &[u8]) {
         if src.is_empty() {
             return;
         }
-
         ptr::copy(src.as_ptr(), dst, src.len());
     }
 }
-
-impl Bits for u16 {
-    type T = Self;
-
-    const ZERO: Self::T = 0u16;
-    const BYTES: usize = 2;
-}
-
-impl Bits for u32 {
-    type T = Self;
-
-    const ZERO: Self::T = 0u32;
-    const BYTES: usize = 4;
-}
+impl Bits for u16 { type T = Self; }
+impl Bits for u32 { type T = Self; }
 
 #[cfg(test)]
 #[cfg(target_endian = "little")]
