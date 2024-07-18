@@ -309,7 +309,7 @@ impl<T: Send + 'static> ChunkProcessor<T> {
     /// a queued up job for this position in the queue, that job is cancelled. Note that it is still
     /// possible for both jobs to return a result for that position in case the first chunk's job
     /// is currently being processed when the second chunk is enqueued.
-    pub fn enqueue<Fn: FnOnce() -> T + Send + 'static>(&mut self, pos: ChunkPos, prioritize: bool, exec: Fn) {
+    pub fn enqueue<Fn: FnOnce() -> T + Send + 'static>(&self, pos: ChunkPos, prioritize: bool, exec: Fn) {
         self.dequeue(&pos);
 
         let tx = self.tx.clone();
@@ -326,7 +326,7 @@ impl<T: Send + 'static> ChunkProcessor<T> {
     /// chunk has no effect. The result is still produced and consumable.
     /// This function should be used to prevent unnecessary work, but the caller must double check
     /// if the result is correct and usable.
-    pub fn dequeue(&mut self, pos: &ChunkPos) {
+    pub fn dequeue(&self, pos: &ChunkPos) {
         if let Some(handle) = self.chunk_jobs.borrow_mut().remove(pos) {
             handle.cancel();
         }
@@ -334,7 +334,7 @@ impl<T: Send + 'static> ChunkProcessor<T> {
 
     /// Returns all produced results up to `limit`. This is a non-blocking operation
     /// so it might return 0 results immediately.
-    pub fn get_results(&mut self, limit: u32) -> Vec<ChunkResult<T>> {
+    pub fn get_results(&self, limit: u32) -> Vec<ChunkResult<T>> {
         let mut results = Vec::new();
 
         for _ in 0..limit {
@@ -401,7 +401,7 @@ mod chunk_processor_tests {
     fn enqueue() {
         // only one worker to process one at a time
         let js = Rc::new(JobSystem::new(1));
-        let mut cp = ChunkProcessor::new(js.clone());
+        let cp = ChunkProcessor::new(js.clone());
 
         // push job to allow for other jobs to be enqueued
         let signal = Arc::new(AtomicBool::new(false));
@@ -459,7 +459,7 @@ mod chunk_processor_tests {
     fn has_pending() {
         // only one worker to process one at a time
         let js = Rc::new(JobSystem::new(1));
-        let mut cp = ChunkProcessor::new(js.clone());
+        let cp = ChunkProcessor::new(js.clone());
 
         // push one job to block other jobs from being processed, that waits until the signal is set
         let signal_started = Arc::new(AtomicBool::new(false));

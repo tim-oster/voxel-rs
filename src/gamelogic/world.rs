@@ -103,7 +103,7 @@ impl World {
         }
     }
 
-    pub fn update_fixed(&mut self, entity: &mut Entity, delta_time: f32) {
+    pub fn update_fixed(&self, entity: &mut Entity, delta_time: f32) {
         self.physics.step(delta_time, &self.world_svo, entity);
     }
 

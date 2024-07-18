@@ -73,7 +73,7 @@ impl Svo {
 
     /// Enqueues the borrowed chunk to be serialized into the GPU SVO structure. All moved chunk
     /// ownerships can be reclaimed by calling [`Svo::update`].
-    pub fn set_chunk(&mut self, chunk: BorrowedChunk) {
+    pub fn set_chunk(&self, chunk: BorrowedChunk) {
         let alloc = self.chunk_buffer_pool.clone();
         self.processor.enqueue(chunk.pos, true, move || target_impl::SerializedChunk::new(chunk, &alloc));
     }

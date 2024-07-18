@@ -106,6 +106,7 @@ impl Game {
                 frame_time_accumulator += frame.stats.delta_time;
 
                 // consume accumulated time for fixed physics updates
+                #[allow(clippy::while_float)]
                 while frame_time_accumulator >= fixed_frame_time {
                     state.update_fixed(frame, fixed_frame_time);
                     frame_time_accumulator -= fixed_frame_time;

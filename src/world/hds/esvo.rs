@@ -51,25 +51,25 @@ pub struct SerializationResult {
 ///
 /// - **Octree** = defined by one octant as the root of the tree
 /// - **Octant** = a cube that can be subdivided into 8 equal sub-cubes/child octants, each containing more octants or
-/// one leaf value
+///   one leaf value
 /// - **Leaf** = end nodes of the tree - they contain the actual value
 /// - **Absolute Pointer** = SVOs use a linear byte buffer to encode their data. For one octant to be able to reference
-/// a child octant, pointers are required. Absolute pointers contain the absolute position inside the buffer. This is
-/// used at the boundaries of the root octree and leaf values in this implementation.
+///   a child octant, pointers are required. Absolute pointers contain the absolute position inside the buffer. This is
+///   used at the boundaries of the root octree and leaf values in this implementation.
 /// - **Relative Pointer** = in contrast to absolute pointers, relative pointers encode the target index relative to
-/// their own position. This makes encoding of coherent data efficient as it is not required to keep track of all
-/// absolute positions.
+///   their own position. This makes encoding of coherent data efficient as it is not required to keep track of all
+///   absolute positions.
 ///
 /// ### Optimisations
 ///
 /// - On [`Esvo::serialize`], the root octree is always fully serialized and all its octants have relative pointers
-/// to each other. Leaves however are only serialized once. The root octree uses absolute pointers to index them. This
-/// allows for efficient "leaf moving" by swapping the pointers in the root octree.
+///   to each other. Leaves however are only serialized once. The root octree uses absolute pointers to index them. This
+///   allows for efficient "leaf moving" by swapping the pointers in the root octree.
 /// - Removing leaves frees up already allocated space. The implementation keeps track of that space and reuses it
-/// efficiently for new leaves.
+///   efficiently for new leaves.
 /// - [`Esvo::write_to`] can be used to copy the whole serialized buffer to a target buffer. This only needs to be done
-/// once, after that a call to [`Esvo::write_changes_to`] with the same buffer suffices and only copies the changed
-/// buffer ranges.
+///   once, after that a call to [`Esvo::write_changes_to`] with the same buffer suffices and only copies the changed
+///   buffer ranges.
 ///
 /// ### Binary format
 ///

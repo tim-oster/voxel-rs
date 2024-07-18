@@ -102,7 +102,7 @@ impl TextureArrayBuilder {
         let mip_levels = self.mip_levels.min(width.min(height).ilog2() as u8);
 
         let textures = self.textures.clone();
-        let mut texture = TextureArray::new(
+        let texture = TextureArray::new(
             width,
             height,
             self.content.len() as u32,
@@ -236,7 +236,7 @@ impl TextureArray {
     }
 
     #[allow(clippy::unused_self)]
-    pub fn sub_image_3d(&mut self, depth: u32, width: u32, height: u32, data: &[u8]) {
+    pub fn sub_image_3d(&self, depth: u32, width: u32, height: u32, data: &[u8]) {
         unsafe {
             gl::TexSubImage3D(
                 gl::TEXTURE_2D_ARRAY,

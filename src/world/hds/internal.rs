@@ -68,6 +68,9 @@ pub trait Bits: Clone + Copy {
 
         let len = src.len().checked_div(Self::BYTES).unwrap();
         let ptr: *const Self::T = src.as_ptr().cast();
+
+        assert!(ptr.is_aligned_to(Self::BYTES), "pointer must be aligned");
+
         let slc = slice::from_raw_parts(ptr, len);
 
         ptr::copy(slc.as_ptr(), dst, len);
