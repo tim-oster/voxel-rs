@@ -58,6 +58,7 @@ impl GlError {
 /// `ShaderProgramBuilder` allows for loading multiple GLSL source files and compiling them into one
 /// OpenGL shader program.
 pub struct ShaderProgramBuilder {
+    defines: FxHashMap<String, String>,
     shaders: FxHashMap<ShaderType, Shader>,
     include_cache: FxHashMap<String, String>,
 }
@@ -65,9 +66,15 @@ pub struct ShaderProgramBuilder {
 impl ShaderProgramBuilder {
     pub fn new() -> Self {
         Self {
+            defines: FxHashMap::default(),
             shaders: FxHashMap::default(),
             include_cache: FxHashMap::default(),
         }
+    }
+
+    pub fn with_define(&mut self, key: &str, val: &str) -> &mut Self {
+        self.defines.insert(String::from(key), String::from(val));
+        self
     }
 
     /// Reads the given file at `path` and assigns it to a shader of type `type`.
@@ -221,14 +228,14 @@ impl ShaderProgramBuilder {
         }
 
         let mut src = src;
-        Self::inject_preprocessor_defines(&mut src, type_);
+        self.inject_preprocessor_defines(&mut src, type_);
 
         let shader = Shader::new(type_, &src)?;
         self.shaders.insert(type_, shader);
         Ok(self)
     }
 
-    fn inject_preprocessor_defines(src: &mut String, type_: ShaderType) {
+    fn inject_preprocessor_defines(&self, src: &mut String, type_: ShaderType) {
         let mut offset = 0;
         if let Some(version_start) = src.find("#version") {
             if let Some(line_end) = src[version_start..].find('\n') {
@@ -236,12 +243,20 @@ impl ShaderProgramBuilder {
             }
         }
 
-        let inject = formatdoc! {r#"
+        let mut inject = formatdoc! {r#"
             #define SHADER_TYPE_VERTEX      0
             #define SHADER_TYPE_FRAGMENT    1
             #define SHADER_TYPE_COMPUTE     2
             #define SHADER_COMPILE_TYPE     SHADER_TYPE_{}
         "#, type_.string()};
+
+        for (i, (k, v)) in self.defines.iter().enumerate() {
+            if i == 0 {
+                inject.push('\n');
+            }
+            inject.push_str(format!("#define {k} {v}\n").as_str());
+        }
+
         src.insert_str(offset, &inject);
     }
 
@@ -320,7 +335,9 @@ mod shader_program_builder_tests {
             }
         "#});
 
-        ShaderProgramBuilder::inject_preprocessor_defines(&mut code, ShaderType::Vertex);
+        let mut builder = ShaderProgramBuilder::new();
+        builder.with_define("TEST_DEFINE", "3");
+        builder.inject_preprocessor_defines(&mut code, ShaderType::Vertex);
 
         assert_eq!(code, String::from(indoc! {r#"
             #version 450
@@ -328,6 +345,8 @@ mod shader_program_builder_tests {
             #define SHADER_TYPE_FRAGMENT    1
             #define SHADER_TYPE_COMPUTE     2
             #define SHADER_COMPILE_TYPE     SHADER_TYPE_VERTEX
+
+            #define TEST_DEFINE 3
 
             void main() {
                 gl_Position = vec4(position, 1.0);

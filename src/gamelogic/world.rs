@@ -74,7 +74,7 @@ impl World {
         };
         let chunk_allocator = Arc::new(ChunkStorageAllocator::new());
         let chunk_generator = Generator::new(1, world_cfg.clone());
-        let graphics_svo = graphics::Svo::new(&blocks::new_registry());
+        let graphics_svo = graphics::Svo::new(&blocks::new_registry(), worldsvo::SVO_TYPE);
 
         Self {
             job_system: Rc::clone(&job_system),
@@ -258,7 +258,7 @@ impl World {
                     self.job_system.wait_until_processed();
 
                     let chunk_generator = Generator::new(1, self.world_generator_cfg.clone());
-                    let graphics_svo = graphics::Svo::new(&blocks::new_registry());
+                    let graphics_svo = graphics::Svo::new(&blocks::new_registry(), worldsvo::SVO_TYPE);
 
                     self.chunk_loader = ChunkLoader::new(self.chunk_loader.get_radius(), 0, 8);
                     self.world = world::World::new();

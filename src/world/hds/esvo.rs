@@ -1,7 +1,7 @@
+use std::{ptr, slice};
 use std::alloc::{Allocator, Global};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::ptr;
 use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -103,7 +103,7 @@ pub struct Esvo<T: Serializable, A: Allocator = Global> {
     octree: Octree<T>,
     change_set: FxHashSet<OctantChange>,
 
-    buffer: RangeBuffer<u32, A>,
+    buffer: RangeBuffer<u8, A>,
     leaf_info: FxHashMap<u64, LeafInfo>,
     root_info: Option<LeafInfo>,
 
@@ -131,7 +131,7 @@ impl<T: Serializable> Esvo<T> {
 
 impl<T: Serializable, A: Allocator> Esvo<T, A> {
     /// Static size of the serialized data required for wrapping the root octant into a traversable format.
-    const PREAMBLE_LENGTH: u32 = 5;
+    const PREAMBLE_LENGTH_IN_U32: u32 = 5;
 
     pub fn new_in(alloc: A) -> Self {
         Self::with_capacity_in(0, alloc)
@@ -168,7 +168,7 @@ impl<T: Serializable, A: Allocator> Esvo<T, A> {
             params.dst[(params.idx / 2) as usize] |= mask;
 
             // absolute buffer position of the leaf value
-            params.dst[(4 + params.idx) as usize] = info.buf_offset as u32 + Self::PREAMBLE_LENGTH;
+            params.dst[(4 + params.idx) as usize] = info.buf_offset as u32 + Self::PREAMBLE_LENGTH_IN_U32;
             // override accumulated depth, if octree is expanded due to leaf value
             params.result.depth = params.result.depth.max(info.serialization.depth + 1);
         })
@@ -176,19 +176,19 @@ impl<T: Serializable, A: Allocator> Esvo<T, A> {
 
     /// Writes a "fake" octant with the SVO root octant as its first child octant to build the entry point into
     /// the data structure.
-    unsafe fn write_preamble(info: LeafInfo, dst: *mut u32) -> *mut u32 {
-        dst.offset(0).write((info.serialization.child_mask as u32) << 8);
-        dst.offset(1).write(0);
-        dst.offset(2).write(0);
-        dst.offset(3).write(0);
+    unsafe fn write_preamble(info: LeafInfo, dst: *mut u8) -> *mut u8 {
+        dst.offset(0).write_u32((info.serialization.child_mask as u32) << 8);
+        dst.offset(4).write_u32(0);
+        dst.offset(8).write_u32(0);
+        dst.offset(12).write_u32(0);
         // preamble is always written first, so PREAMBLE_LENGTH can be used as the absolut position of the root octree
-        dst.offset(4).write(info.buf_offset as u32 + Self::PREAMBLE_LENGTH);
+        dst.offset(16).write_u32(info.buf_offset as u32 + Self::PREAMBLE_LENGTH_IN_U32);
         // return to pointer to after preamble for next writes
-        dst.offset(Self::PREAMBLE_LENGTH as isize)
+        dst.offset(Self::PREAMBLE_LENGTH_IN_U32 as isize * 4)
     }
 }
 
-impl<T: Serializable, A: Allocator> WorldSvo<T, u32> for Esvo<T, A> {
+impl<T: Serializable, A: Allocator> WorldSvo<T> for Esvo<T, A> {
     /// Clears all data from the SVO but does not free up memory.
     fn clear(&mut self) {
         self.octree.reset();
@@ -251,10 +251,10 @@ impl<T: Serializable, A: Allocator> WorldSvo<T, u32> for Esvo<T, A> {
                     let content = child.get_leaf_value_mut().unwrap();
                     let result = content.serialize(&mut tmp_buffer.data, 0);
                     if result.depth > 0 {
-                        let offset = self.buffer.insert(id, &tmp_buffer.data);
+                        let offset_bytes = self.buffer.insert(id, tmp_buffer.data.to_u8_slice());
                         tmp_buffer.reset();
 
-                        self.leaf_info.insert(id, LeafInfo { buf_offset: offset, serialization: result });
+                        self.leaf_info.insert(id, LeafInfo { buf_offset: offset_bytes / 4, serialization: result });
                     }
                 }
 
@@ -267,9 +267,9 @@ impl<T: Serializable, A: Allocator> WorldSvo<T, u32> for Esvo<T, A> {
 
         // rebuild root octree
         let result = self.serialize_root(&mut tmp_buffer);
-        let offset = self.buffer.insert(u64::MAX, &tmp_buffer.data);
+        let offset_bytes = self.buffer.insert(u64::MAX, tmp_buffer.data.to_u8_slice());
         tmp_buffer.reset();
-        self.root_info = Some(LeafInfo { buf_offset: offset, serialization: result });
+        self.root_info = Some(LeafInfo { buf_offset: offset_bytes / 4, serialization: result });
 
         // return tmp buffer for reuse
         self.tmp_octant_buffer = Some(tmp_buffer);
@@ -288,7 +288,7 @@ impl<T: Serializable, A: Allocator> WorldSvo<T, u32> for Esvo<T, A> {
 
     /// Writes the full serialized SVO buffer to the `dst` pointer. Returns the number of elements written. Must be
     /// called after [`Esvo::serialize`].
-    unsafe fn write_to(&self, dst: *mut u32) -> usize {
+    unsafe fn write_to(&self, dst: *mut u8) -> usize {
         if self.root_info.is_none() {
             return 0;
         }
@@ -301,13 +301,13 @@ impl<T: Serializable, A: Allocator> WorldSvo<T, u32> for Esvo<T, A> {
         ptr::copy(self.buffer.bytes.as_ptr(), dst, len);
 
         let dst = dst.add(len);
-        ((dst as usize) - start) / 4
+        (dst as usize) - start
     }
 
     /// Writes all changes after the last reset to the given buffer. The implementation assumes that the same buffer,
     /// that was used in the initial call to [`Esvo::write_to`] and previous calls to this method, is reused. If `reset`
     /// is true, the change tracker is reset. Must be called after [`Esvo::serialize`].
-    unsafe fn write_changes_to(&mut self, dst: *mut u32, dst_len: usize, reset: bool) {
+    unsafe fn write_changes_to(&mut self, dst: *mut u8, dst_len: usize, reset: bool) {
         if self.root_info.is_none() {
             return;
         }
@@ -512,7 +512,7 @@ mod esvo_tests {
     use rustc_hash::FxHashMap;
 
     use crate::world::chunk::{BlockId, ChunkPos};
-    use crate::world::hds::esvo::{ChunkBuffer, Esvo, LeafInfo, RangeBuffer, SerializationResult, SerializedChunk};
+    use crate::world::hds::esvo::{ChunkBuffer, Esvo, LeafInfo, RangeBuffer, SerializationResult, SerializedChunk, U32Slicer};
     use crate::world::hds::internal::Range;
     use crate::world::hds::octree::{LeafId, Octree, Position};
     use crate::world::hds::WorldSvo;
@@ -674,19 +674,19 @@ mod esvo_tests {
             // outer octree, first node body
             0, preamble_length, 0, 0,
             0, 0, 0, 0,
-        ];
+        ].to_u8_vec();
         assert_eq!(esvo.buffer, RangeBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
-            updated_ranges: vec![Range { start: 0, length: 168 }],
+            updated_ranges: vec![Range { start: 0, length: 672 }],
             octant_to_range: FxHashMap::from_iter([
-                (100, Range { start: 0, length: 156 }),
-                (u64::MAX, Range { start: 156, length: 12 }),
+                (100, Range { start: 0, length: 624 }),
+                (u64::MAX, Range { start: 624, length: 48 }),
             ]),
         });
 
         let mut buffer = Vec::new();
-        buffer.resize(200, 0);
+        buffer.resize(800, 0);
         let size = unsafe { esvo.write_to(buffer.as_mut_ptr()) };
         assert_eq!(buffer[..size], [
             vec![
@@ -696,7 +696,7 @@ mod esvo_tests {
                 0,
                 0,
                 156 + preamble_length,
-            ],
+            ].to_u8_vec(),
             expected,
         ].concat());
     }
@@ -734,21 +734,21 @@ mod esvo_tests {
             0, 0, 0, 0,
             // value 2
             20,
-        ];
+        ].to_u8_vec();
         assert_eq!(esvo.buffer, RangeBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
-            updated_ranges: vec![Range { start: 0, length: 14 }],
+            updated_ranges: vec![Range { start: 0, length: 56 }],
             octant_to_range: FxHashMap::from_iter([
-                (10, Range { start: 0, length: 1 }),
-                (20, Range { start: 13, length: 1 }),
-                (u64::MAX, Range { start: 1, length: 12 }),
+                (10, Range { start: 0, length: 4 }),
+                (20, Range { start: 52, length: 4 }),
+                (u64::MAX, Range { start: 4, length: 48 }),
             ]),
         });
         esvo.buffer.updated_ranges.clear();
 
         let mut buffer = Vec::new();
-        buffer.resize(200, 0);
+        buffer.resize(800, 0);
         let size = unsafe { esvo.write_to(buffer.as_mut_ptr()) };
         assert_eq!(buffer[..size], [
             vec![
@@ -758,7 +758,7 @@ mod esvo_tests {
                 0,
                 0,
                 1 + preamble_length,
-            ],
+            ].to_u8_vec(),
             expected,
         ].concat());
 
@@ -792,14 +792,14 @@ mod esvo_tests {
             0,
             // value 2
             20,
-        ];
+        ].to_u8_vec();
         assert_eq!(esvo.buffer, RangeBuffer {
             bytes: expected.clone(),
-            free_ranges: vec![Range { start: 12, length: 1 }],
-            updated_ranges: vec![Range { start: 0, length: 12 }],
+            free_ranges: vec![Range { start: 48, length: 4 }],
+            updated_ranges: vec![Range { start: 0, length: 48 }],
             octant_to_range: FxHashMap::from_iter([
-                (20, Range { start: 13, length: 1 }),
-                (u64::MAX, Range { start: 0, length: 12 }),
+                (20, Range { start: 52, length: 4 }),
+                (u64::MAX, Range { start: 0, length: 48 }),
             ]),
         });
 
@@ -812,7 +812,7 @@ mod esvo_tests {
                 0,
                 (1 << 8) << 8 << 16,
                 preamble_length,
-            ],
+            ].to_u8_vec(),
             expected,
         ].concat());
     }
@@ -1185,5 +1185,63 @@ mod esvo_tests {
             leaf_mask: 2 | 4 | 16,
             depth: 1,
         });
+    }
+}
+
+trait U32Writer {
+    unsafe fn write_u32(self, val: u32);
+}
+
+#[cfg(target_endian = "little")]
+impl U32Writer for *mut u8 {
+    unsafe fn write_u32(self, val: u32) {
+        let bytes = val.to_le_bytes();
+        ptr::copy(bytes.as_ptr().cast(), self, bytes.len());
+    }
+}
+
+trait U32Slicer {
+    fn to_u8_slice(&self) -> &[u8];
+    fn to_u8_vec(&self) -> Vec<u8>;
+}
+
+#[cfg(target_endian = "little")]
+impl U32Slicer for Vec<u32> {
+    fn to_u8_slice(&self) -> &[u8] {
+        let len = self.len().checked_mul(4).unwrap();
+        let ptr: *const u8 = self.as_slice().as_ptr().cast();
+        unsafe { slice::from_raw_parts(ptr, len) }
+    }
+
+    fn to_u8_vec(&self) -> Vec<u8> {
+        self.to_u8_slice().to_vec()
+    }
+}
+
+#[cfg(test)]
+#[cfg(target_endian = "little")]
+mod u32_slicer_tests {
+    use crate::world::hds::esvo::U32Slicer;
+
+    #[test]
+    fn test_to_u8_slice() {
+        assert_eq!(Vec::<u32>::new().to_u8_slice(), &[] as &[u8]);
+
+        let input = vec![1u32, 2u32];
+        assert_eq!(input.to_u8_slice(), &[
+            1u8, 0u8, 0u8, 0u8,
+            2u8, 0u8, 0u8, 0u8,
+        ]);
+    }
+
+    #[test]
+    fn test_to_u8_vec() {
+        assert_eq!(Vec::<u32>::new().to_u8_vec(), Vec::<u8>::new());
+
+        let input = vec![1u32, 2u32];
+        assert_eq!(input.to_u8_vec(), vec![
+            1u8, 0u8, 0u8, 0u8,
+            2u8, 0u8, 0u8, 0u8,
+        ]);
     }
 }

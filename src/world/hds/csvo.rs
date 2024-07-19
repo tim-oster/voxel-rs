@@ -1,6 +1,6 @@
-use std::{mem, ptr};
 use std::alloc::{Allocator, Global};
 use std::hash::{DefaultHasher, Hash, Hasher};
+use std::ptr;
 use std::sync::Arc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -10,8 +10,6 @@ use crate::world::hds::{ChunkBufferPool, WorldSvo};
 use crate::world::hds::internal::{pick_leaf_for_lod, RangeBuffer};
 use crate::world::hds::octree::{LeafId, OctantId, Octree, Position};
 use crate::world::world::BorrowedChunk;
-
-// TODO use common root implementation?
 
 /// `OctantChange` describes if an octant was added (and where), or if it was removed.
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -72,11 +70,12 @@ impl<A: Allocator> Csvo<A> {
             }
             if depth == 1 {
                 if let Some(content) = child.get_leaf_value() {
-                    let leaf_info = self.leaf_info.get(&content.pos_hash).unwrap();
-                    assert_eq!(leaf_info.buf_offset & (1 << 31), 0, "32 bit pointers must not have the 32nd bit set");
+                    if let Some(leaf_info) = self.leaf_info.get(&content.pos_hash) {
+                        assert_eq!(leaf_info.buf_offset & (1 << 31), 0, "32 bit pointers must not have the 32nd bit set");
 
-                    let pointer = leaf_info.buf_offset as u32 | (1 << 31);
-                    children.push((idx, pointer.to_be_bytes().to_vec()));
+                        let pointer = leaf_info.buf_offset as u32 | (1 << 31);
+                        children.push((idx, pointer.to_be_bytes().to_vec()));
+                    }
                 }
                 continue;
             }
@@ -135,7 +134,7 @@ impl<A: Allocator> Csvo<A> {
     }
 }
 
-impl<A: Allocator> WorldSvo<SerializedChunk, u8> for Csvo<A> {
+impl<A: Allocator> WorldSvo<SerializedChunk> for Csvo<A> {
     /// Clears all data from the SVO but does not free up memory.
     fn clear(&mut self) {
         self.octree.reset();
@@ -195,18 +194,18 @@ impl<A: Allocator> WorldSvo<SerializedChunk, u8> for Csvo<A> {
                     let child = &mut self.octree.octants[leaf_id.parent as usize].children[leaf_id.idx as usize];
                     let content = child.get_leaf_value_mut().unwrap();
 
-                    // TODO change
-                    assert!(!(content.depth != self.child_depth && self.child_depth != 0), "all children must have the same depth");
-                    self.child_depth = content.depth;
+                    // NOTE: in edge cases, this could be problematic if the last chunk of a certain depth was removed and only chunks
+                    // with a shallower depth remain. In this context, this cannot happen.
+                    self.child_depth = self.child_depth.max(content.lod);
 
                     if let Some(buffer) = content.buffer.take() {
                         // TODO reuse some buffer for this?
 
                         let materials = content.materials.take().unwrap();
-                        let material_bytes = materials.len() * mem::size_of::<BlockId>();
+                        let material_bytes = materials.len() * size_of::<BlockId>();
                         let mut merged = Vec::with_capacity(1 + 4 + material_bytes + buffer.len());
 
-                        merged.push(if content.lod != 0 { content.lod } else { content.depth });
+                        merged.push(content.lod);
                         merged.extend_from_slice(&(material_bytes as u32).to_be_bytes());
                         for material in materials {
                             merged.extend_from_slice(&material.to_be_bytes());
@@ -377,7 +376,6 @@ mod csvo_tests {
 pub struct SerializedChunk {
     pos: ChunkPos,
     pos_hash: u64,
-    depth: u8,
     lod: u8,
     borrowed_chunk: Option<BorrowedChunk>,
     buffer: Option<Vec<u8>>,
@@ -409,8 +407,7 @@ impl SerializedChunk {
         Self {
             pos: chunk.pos,
             pos_hash,
-            depth: storage.depth(),
-            lod: chunk.lod,
+            lod: if chunk.lod != 0 { chunk.lod } else { storage.depth() },
             borrowed_chunk: Some(chunk),
             buffer,
             materials,

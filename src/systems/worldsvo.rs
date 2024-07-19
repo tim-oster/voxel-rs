@@ -4,22 +4,24 @@ use std::sync::Arc;
 use cgmath::Point3;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use esvo as target_impl;
-use esvo::Esvo as target_type;
+use csvo as target_impl;
+use csvo::Csvo as target_type;
 
 use crate::graphics;
 use crate::graphics::framebuffer::Framebuffer;
+use crate::graphics::svo::SvoType;
 use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult};
 use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
 use crate::systems::physics::Raycaster;
 use crate::world::chunk::{BlockPos, ChunkPos};
 use crate::world::hds;
-use crate::world::hds::{ChunkBufferPool, esvo, WorldSvo};
+use crate::world::hds::{ChunkBufferPool, csvo, WorldSvo};
 use crate::world::hds::octree::LeafId;
 use crate::world::memory::{AllocatorStats, StatsAllocator};
 use crate::world::world::BorrowedChunk;
 
-type BufferType = u32;
+type BufferType = u8;
+pub const SVO_TYPE: SvoType = SvoType::Csvo;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`world::chunk::Chunk`]s.
 /// Adding chunks will serialize them in the background and attach them the GPU SVO. Removing
@@ -35,9 +37,9 @@ pub struct Svo {
     processor: ChunkProcessor<target_impl::SerializedChunk>,
 
     world_svo_alloc: StatsAllocator,
-    world_svo: Box<dyn WorldSvo<target_impl::SerializedChunk, BufferType>>,
+    world_svo: Box<dyn WorldSvo<target_impl::SerializedChunk>>,
 
-    graphics_svo: graphics::Svo<BufferType>,
+    graphics_svo: graphics::Svo,
     chunk_buffer_pool: Arc<ChunkBufferPool<BufferType>>,
 
     leaf_ids: FxHashMap<ChunkPos, LeafId>,
@@ -53,7 +55,7 @@ pub struct AllocStats {
 }
 
 impl Svo {
-    pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo<BufferType>, render_distance: u32) -> Self {
+    pub fn new(job_system: Rc<JobSystem>, graphics_svo: graphics::Svo, render_distance: u32) -> Self {
         let world_svo_alloc = StatsAllocator::new();
 
         Self {
@@ -138,7 +140,7 @@ impl Svo {
     /// Iterates through all chunks and "shifts" them, if necessary, to their new position in SVO
     /// space by replacing the previous chunk in the new position. Also removes all chunks, that
     /// are out of SVO bounds.
-    fn shift_chunks<T, F>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut dyn WorldSvo<T, F>) {
+    fn shift_chunks<T>(coord_space: &SvoCoordSpace, leaf_ids: &mut FxHashMap<ChunkPos, LeafId>, world_svo: &mut dyn WorldSvo<T>) {
         let mut overridden_leaves = FxHashMap::default();
         let mut removed = FxHashSet::default();
 
