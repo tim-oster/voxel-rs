@@ -27,8 +27,7 @@ uint read_uint(uint ptr) {
     uint mod = ptr % 4;
 
     uint lshift = (4 - mod) * 8;
-    uint mask = int(1 << lshift) - 1;
-    if (lshift==32) mask=0xffffffff;// TODO
+    uint mask = bitfieldInsert(0u, 0xffffffffu, 0, int(lshift));
     uint v0 = descriptors[index] >> (mod * 8) & mask;
     uint v1 = descriptors[index + 1] << lshift & ~mask;
 
@@ -81,11 +80,7 @@ uint read_next_ptr(uint ptr, uint depth, uint idx, out bool crossed_boundary) {
 
         uint ptr_offset = read_uint(ptr + 2 + offset);
         // remove bits that are outside this poitner's size
-
-        if (child_mask == 1) ptr_offset &= 0xffu;
-        if (child_mask == 2) ptr_offset &= 0xffffu;
-
-        //ptr_offset &= (1u << ((1u << (child_mask - 1)) * 8)) - 1; // TODO incorrect?
+        ptr_offset &= bitfieldInsert(0u, 0xffffffffu, 0, int(1u << (child_mask - 1)) * 8);
 
         if ((ptr_offset & (1u << 31)) != 0) { // only works on 32b pointers
             // absolute pointer
@@ -112,7 +107,23 @@ uint read_next_ptr(uint ptr, uint depth, uint idx, out bool crossed_boundary) {
     }
 
     // leaf nodes
-    return ptr + 1 + offset;
+    return ptr + 1 + 2 + offset;// skip 1 byte header mask + 2 bytes material section offset
+}
+
+uint read_leaf(uint material_section_ptr, uint pre_leaf_ptr, uint ptr, uint idx) {
+    uint material_section_offset = read_ushort(pre_leaf_ptr + 1);
+
+    int leaf_index = int(ptr - (pre_leaf_ptr + 3));
+    int bit_mark = leaf_index * 8 + int(idx);
+
+    uint mask = bitfieldInsert(0u, 0xffffffffu, 0, min(bit_mark, 32));
+    uint v0 = read_uint(pre_leaf_ptr + 3) & mask;
+
+    mask = bitfieldInsert(0u, 0xffffffffu, 0, max(bit_mark - 32, 0));
+    uint v1 = read_uint(pre_leaf_ptr + 3 + 4) & mask;
+
+    uint preceding_leaves = bitCount(v0) + bitCount(v1);
+    return read_uint(material_section_ptr + material_section_offset * 4 + preceding_leaves * 4);
 }
 
 // TODO reread all comments
@@ -236,9 +247,13 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     if (t_min < 1.5 * t_coef.y - t_bias.y) idx ^= 2, pos.y = 1.5;
     if (t_min < 1.5 * t_coef.z - t_bias.z) idx ^= 4, pos.z = 1.5;
 
-    // TODO new
+    // Keep track of the csvo depth to determine which node type is used. On boundaries, depth might skip numbers due
+    // to level of detail changes.
     uint depth = 127 - ((floatBitsToUint(octree_scale) >> 23) & 0xff);// get max depth from scale float exponent
+    // Pointer to current sub-chunks material section.
     uint material_section_ptr = INVALID_PTR;
+    // Pointer to latest encountered pre leaf node.
+    uint pre_leaf_pointer = INVALID_PTR;
 
     // Start stepping through the octree until a voxel is hit or max steps are reached.
     for (int i = 0; i < MAX_STEPS; ++i) {
@@ -261,6 +276,10 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
         bool is_child = next_ptr != INVALID_PTR;
         bool is_leaf = is_child && depth < 2;
 
+        if (depth == 2) {
+            pre_leaf_pointer = ptr;
+        }
+
         OCTREE_RAYTRACE_DEBUG_FN(t_min/octree_scale, ptr, octant_idx, depth, scale, is_child, is_leaf, crossed_boundary, next_ptr);
 
         // check if a child octant was hit
@@ -276,7 +295,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 // calculate leaf intersection data and return
 
                 // fetch leaf value
-                uint value = 1;// TODO determine
+                uint value = read_leaf(material_section_ptr, pre_leaf_pointer, ptr, octant_idx);
 
                 // Use current pos + scale_exp2 to get the lower bound, i.e. the entry distance for the ray.
                 vec3 t_corner = (pos + scale_exp2) * t_coef - t_bias;

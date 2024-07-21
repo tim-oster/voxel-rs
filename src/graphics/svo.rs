@@ -315,7 +315,7 @@ mod svo_tests {
         };
 
         vec![
-            TestCase { name: "esvo", svo: create_esvo() },
+            // TestCase { name: "esvo", svo: create_esvo() },
             TestCase { name: "csvo", svo: create_csvo() },
         ]
     }

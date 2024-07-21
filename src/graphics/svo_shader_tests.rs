@@ -781,7 +781,7 @@ mod tests {
 
             assert_eq!(buffer_out.stack_ptr, 10);
             assert_eq!(&buffer_out.stack[..11], &[
-                StackFrame { t_min: 0.0, ptr: 19, idx: 0, parent_octant_idx: 6, scale: 22, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(1), next_ptr: 0 },
+                StackFrame { t_min: 0.0, ptr: 21, idx: 0, parent_octant_idx: 6, scale: 22, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(1), next_ptr: 0 },
                 StackFrame { t_min: 0.0, ptr: 9, idx: 0, parent_octant_idx: 5, scale: 21, is_child: AlignedBool(0), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 4294967295 },
                 StackFrame { t_min: 16.0, ptr: 9, idx: 1, parent_octant_idx: 5, scale: 21, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 12 },
                 StackFrame { t_min: 16.0, ptr: 12, idx: 0, parent_octant_idx: 4, scale: 20, is_child: AlignedBool(0), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 4294967295 },
@@ -789,9 +789,9 @@ mod tests {
                 StackFrame { t_min: 24.0, ptr: 15, idx: 0, parent_octant_idx: 3, scale: 19, is_child: AlignedBool(0), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 4294967295 },
                 StackFrame { t_min: 28.0, ptr: 15, idx: 1, parent_octant_idx: 3, scale: 19, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 17 },
                 StackFrame { t_min: 28.0, ptr: 17, idx: 0, parent_octant_idx: 2, scale: 18, is_child: AlignedBool(0), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 4294967295 },
-                StackFrame { t_min: 30.0, ptr: 17, idx: 1, parent_octant_idx: 2, scale: 18, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 18 },
-                StackFrame { t_min: 30.0, ptr: 18, idx: 0, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(0), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 4294967295 },
-                StackFrame { t_min: 31.0, ptr: 18, idx: 1, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(1), is_leaf: AlignedBool(1), crossed_boundary: AlignedBool(0), next_ptr: 19 },
+                StackFrame { t_min: 30.0, ptr: 17, idx: 1, parent_octant_idx: 2, scale: 18, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 20 },
+                StackFrame { t_min: 30.0, ptr: 20, idx: 0, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(0), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 4294967295 },
+                StackFrame { t_min: 31.0, ptr: 20, idx: 1, parent_octant_idx: 1, scale: 17, is_child: AlignedBool(1), is_leaf: AlignedBool(1), crossed_boundary: AlignedBool(0), next_ptr: 23 },
             ]);
             assert_eq!(buffer_out.result, OctreeResult {
                 t: 31.0,
@@ -959,7 +959,6 @@ mod tests {
             }
         }
 
-        // TODO
         /// Tests if uv calculation and texture lookup works properly on every side of a voxel. This
         /// uses a special texture that maps a simple 2d coordinate system with a resolution of 4x4
         /// onto each side along the uv space.
@@ -1075,7 +1074,6 @@ mod tests {
             }
         }
 
-        // TODO
         /// Tests if translucency is properly accounted for during ray casting. Assert that identical,
         /// adjacent voxels are skipped and make sure that `cast_translucent` flag is respected.
         #[test]
@@ -1203,16 +1201,16 @@ mod tests {
 
             assert_eq!(buffer_out.stack_ptr, 9);
             assert_eq!(&buffer_out.stack[..10], &[
-                StackFrame { t_min: 0.0, ptr: 21558, idx: 7, parent_octant_idx: 9, scale: 22, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 21570 },
-                StackFrame { t_min: 0.0, ptr: 21570, idx: 7, parent_octant_idx: 8, scale: 21, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 21573 },
-                StackFrame { t_min: 0.0, ptr: 21573, idx: 7, parent_octant_idx: 7, scale: 20, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 21576 },
-                StackFrame { t_min: 0.0, ptr: 21576, idx: 7, parent_octant_idx: 6, scale: 19, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(1), next_ptr: 0 },
+                StackFrame { t_min: 0.0, ptr: 21814, idx: 7, parent_octant_idx: 9, scale: 22, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 21826 },
+                StackFrame { t_min: 0.0, ptr: 21826, idx: 7, parent_octant_idx: 8, scale: 21, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 21829 },
+                StackFrame { t_min: 0.0, ptr: 21829, idx: 7, parent_octant_idx: 7, scale: 20, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 21832 },
+                StackFrame { t_min: 0.0, ptr: 21832, idx: 7, parent_octant_idx: 6, scale: 19, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(1), next_ptr: 0 },
                 StackFrame { t_min: 0.0, ptr: 20485, idx: 0, parent_octant_idx: 5, scale: 18, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 20494 },
-                StackFrame { t_min: 0.0, ptr: 20494, idx: 4, parent_octant_idx: 4, scale: 17, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 20630 },
-                StackFrame { t_min: 0.0, ptr: 20630, idx: 7, parent_octant_idx: 3, scale: 16, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 20690 },
-                StackFrame { t_min: 0.0, ptr: 20690, idx: 0, parent_octant_idx: 2, scale: 15, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 20691 },
-                StackFrame { t_min: 0.0, ptr: 20691, idx: 6, parent_octant_idx: 1, scale: 14, is_child: AlignedBool(0), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 4294967295 },
-                StackFrame { t_min: 0.9593506, ptr: 20691, idx: 4, parent_octant_idx: 1, scale: 14, is_child: AlignedBool(1), is_leaf: AlignedBool(1), crossed_boundary: AlignedBool(0), next_ptr: 20694 },
+                StackFrame { t_min: 0.0, ptr: 20494, idx: 4, parent_octant_idx: 4, scale: 17, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 20662 },
+                StackFrame { t_min: 0.0, ptr: 20662, idx: 7, parent_octant_idx: 3, scale: 16, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 20736 },
+                StackFrame { t_min: 0.0, ptr: 20736, idx: 0, parent_octant_idx: 2, scale: 15, is_child: AlignedBool(1), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 20739 },
+                StackFrame { t_min: 0.0, ptr: 20739, idx: 6, parent_octant_idx: 1, scale: 14, is_child: AlignedBool(0), is_leaf: AlignedBool(0), crossed_boundary: AlignedBool(0), next_ptr: 4294967295 },
+                StackFrame { t_min: 0.9593506, ptr: 20739, idx: 4, parent_octant_idx: 1, scale: 14, is_child: AlignedBool(1), is_leaf: AlignedBool(1), crossed_boundary: AlignedBool(0), next_ptr: 20744 },
             ]);
             assert_eq!(buffer_out.result, OctreeResult {
                 t: assert_float_eq!(buffer_out.result.t, 0.9593506),
@@ -1228,6 +1226,9 @@ mod tests {
 
     #[cfg(test)]
     mod csvo_bit_magic_tests {
+        use std::ops::Sub;
+        use std::slice;
+
         fn read_u8(buffer: &[u32], ptr: usize) -> u8 {
             let index = ptr / 4;
             let modulo = ptr % 4;
@@ -1317,6 +1318,22 @@ mod tests {
             return (Some(ptr as u32 + 1 + offset), false);
         }
 
+        fn read_leaf(buffer: &[u32], material_section_ptr: usize, pre_leaf_ptr: usize, ptr: usize, idx: u8) -> u32 {
+            let material_section_offset = read_u16(buffer, pre_leaf_ptr + 1) as usize;
+
+            let leaf_index = (ptr - (pre_leaf_ptr + 3)) as isize;
+            let bit_mark = leaf_index * 8 + idx as isize;
+
+            let mask = unsafe { 1_usize.unchecked_shl(bit_mark.min(32) as u32) - 1 } as u32;
+            let v0 = read_u32(buffer, pre_leaf_ptr + 3) & mask;
+            let mask = unsafe { 1_usize.unchecked_shl(bit_mark.sub(32).max(0) as u32) - 1 } as u32;
+            let v1 = read_u32(buffer, pre_leaf_ptr + 3 + 4) & mask;
+
+            let preceding_leaves = (u32::count_ones(v0) + u32::count_ones(v1)) as usize;
+
+            read_u32(buffer, material_section_ptr + material_section_offset + preceding_leaves * 4)
+        }
+
         #[test]
         fn test_read_scalars() {
             let data = vec![
@@ -1402,6 +1419,42 @@ mod tests {
                 0b00000000_00000000_10001000_00000100,
             ];
             assert_eq!(read_next_ptr(&data, 0, 3, 0), (Some(0b00001000_00000100_00000010_00000001), true));
+        }
+
+        #[test]
+        fn test_read_leaf() {
+            fn to_u32_vec(data: Vec<u8>) -> Vec<u32> {
+                let len = data.len().checked_div(4).unwrap();
+                let ptr: *const u32 = data.as_slice().as_ptr().cast();
+                unsafe { slice::from_raw_parts(ptr, len) }.to_vec()
+            }
+
+            let data = to_u32_vec(vec![
+                // material section start
+                0, 0, 0, 0, // arbitrary filler
+                // material subsection
+                11, 0, 0, 0,
+                22, 0, 0, 0,
+                33, 0, 0, 0,
+                44, 0, 0, 0,
+                55, 0, 0, 0,
+                // pre-leaf node
+                0b10101110, // header mask
+                4, 0, // material section offset
+                0b00000010, // leaf 1
+                0b00000100, // leaf 2
+                0b00001000, // leaf 3
+                0b00010000, // leaf 4
+                0b00100000, // leaf 5
+                0, 0, 0, // padding to full u32
+                0, 0, 0, 0, // additional u32 for padding
+            ]);
+
+            assert_eq!(read_leaf(&data, 0, 24, 27, 1), 11);
+            assert_eq!(read_leaf(&data, 0, 24, 28, 2), 22);
+            assert_eq!(read_leaf(&data, 0, 24, 29, 3), 33);
+            assert_eq!(read_leaf(&data, 0, 24, 30, 4), 44);
+            assert_eq!(read_leaf(&data, 0, 24, 31, 5), 55);
         }
     }
 }

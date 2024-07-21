@@ -327,7 +327,7 @@ mod csvo_tests {
         esvo.set_leaf(Position(1, 0, 0), sc, true);
         esvo.serialize();
 
-        assert_eq!(esvo.root_info, Some(LeafInfo { buf_offset: 43 }));
+        assert_eq!(esvo.root_info, Some(LeafInfo { buf_offset: 49 }));
 
         let expected = vec![
             // chunk LOD
@@ -340,19 +340,16 @@ mod csvo_tests {
             3, 0, 0, 0,
 
             // chunk voxels
-            0b_00_01_01_00, 0b00_00_00_01, 0, 7, 14,
+            0b_00_01_01_00, 0b00_00_00_01, 0, 9, 18,
             0b00_00_01_00, 0, 0,
             2, 0,
-            2,
-            2,
+            2, 0, 0, 2,
             16, 0, 0,
             4, 0,
-            4,
-            4,
+            4, 1, 0, 4,
             0, 1, 0,
             16, 0,
-            16,
-            16,
+            16, 2, 0, 16,
 
             // root octant
             0b00_00_11_00, 0,
@@ -361,10 +358,10 @@ mod csvo_tests {
         assert_eq!(esvo.buffer, RangeBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
-            updated_ranges: vec![Range { start: 0, length: 49 }],
+            updated_ranges: vec![Range { start: 0, length: 55 }],
             octant_to_range: FxHashMap::from_iter([
-                (2435999049025295583, Range { start: 0, length: 43 }),
-                (u64::MAX, Range { start: 43, length: 6 }),
+                (2435999049025295583, Range { start: 0, length: 49 }),
+                (u64::MAX, Range { start: 49, length: 6 }),
             ]),
         });
 
@@ -372,7 +369,7 @@ mod csvo_tests {
         buffer.resize(200, 0);
         let size = unsafe { esvo.write_to(buffer.as_mut_ptr()) };
         assert_eq!(buffer[..size], [
-            vec![43, 0, 0, 0],
+            vec![49, 0, 0, 0],
             expected,
         ].concat());
     }
@@ -407,7 +404,7 @@ impl SerializedChunk {
                 depth = chunk.lod;
             }
 
-            let (b, m) = Self::serialize_octant(storage, root_id, depth);
+            let (b, m) = Self::serialize_octant(storage, root_id, depth, 0);
             (buffer, materials) = (Some(b), Some(m));
         }
 
@@ -421,7 +418,7 @@ impl SerializedChunk {
         }
     }
 
-    pub fn serialize_octant<A: Allocator>(octree: &Octree<BlockId, A>, octant_id: OctantId, depth: u8) -> (Vec<u8>, Vec<BlockId>) {
+    pub fn serialize_octant<A: Allocator>(octree: &Octree<BlockId, A>, octant_id: OctantId, depth: u8, material_offset: u16) -> (Vec<u8>, Vec<BlockId>) {
         let octant = &octree.octants[octant_id as usize];
 
         if depth == 1 {
@@ -463,7 +460,7 @@ impl SerializedChunk {
             // decrease lod and calculate buffer offset before recursively serializing the child octant
             let child_id = child.get_octant_value().unwrap();
 
-            let (buffer, child_materials) = Self::serialize_octant(octree, child_id, depth - 1);
+            let (buffer, child_materials) = Self::serialize_octant(octree, child_id, depth - 1, material_offset + materials.len() as u16);
             children.push((idx, buffer));
             materials.extend(child_materials);
         }
@@ -474,7 +471,11 @@ impl SerializedChunk {
 
             buffer.push(0);
 
-            for (i, (idx, data)) in children.into_iter().enumerate() {
+            if !children.is_empty() {
+                buffer.extend(material_offset.to_le_bytes());
+            }
+
+            for (idx, data) in children {
                 buffer[0] |= 1 << idx;
                 buffer.extend(data);
             }
@@ -550,11 +551,11 @@ mod serialized_chunk_tests {
         octree.expand_to(4);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth());
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth(), 0);
         assert_eq!(result, vec![
             1, 0, 0,    // inode
             1, 0,       // plnode
-            1, 1,       // lnode
+            1, 0, 0, 1, // lnode
         ]);
         assert_eq!(materials, vec![1]);
     }
@@ -569,12 +570,12 @@ mod serialized_chunk_tests {
         octree.expand_to(4);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth());
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth(), 0);
         assert_eq!(result, vec![
-            1, 0, 0,                    // inode
-            1 | (1 << 7), 0, 3,         // plnode
-            1 | (1 << 7), 1, 1 << 7,    // lnode
-            1 | (1 << 7), 2, 1 << 6,    // lnode
+            1, 0, 0,                       // inode
+            1 | (1 << 7), 0, 5,            // plnode
+            1 | (1 << 7), 0, 0, 1, 1 << 7, // lnode
+            1 | (1 << 7), 2, 0, 2, 1 << 6, // lnode
         ]);
         assert_eq!(materials, vec![1, 2, 1, 2]);
     }
@@ -587,21 +588,18 @@ mod serialized_chunk_tests {
         octree.set_leaf(Position(0, 0, 31), 3 as BlockId);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth());
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth(), 0);
         assert_eq!(result, vec![
-            0b_00_01_01_00, 0b00_00_00_01, 0, 7, 14,
+            0b_00_01_01_00, 0b00_00_00_01, 0, 9, 18,
             0b00_00_01_00, 0, 0,
             2, 0,
-            2,
-            2,
+            2, 0, 0, 2,
             0b00_01_00_00, 0, 0,
             4, 0,
-            4,
-            4,
+            4, 1, 0, 4,
             0, 0b00_00_00_01, 0,
             16, 0,
-            16,
-            16,
+            16, 2, 0, 16,
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
     }
@@ -614,40 +612,34 @@ mod serialized_chunk_tests {
         octree.set_leaf(Position(0, 0, 31), 3 as BlockId);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 1);
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 1, 0);
         assert_eq!(result, vec![
-            0b_00_01_01_00, 0b00_00_00_01, 0, 4, 8,
+            0b_00_01_01_00, 0b00_00_00_01, 0, 6, 12,
             2, 0,
-            2,
-            2,
+            2, 0, 0, 2,
             4, 0,
-            4,
-            4,
+            4, 1, 0, 4,
             16, 0,
-            16,
-            16,
+            16, 2, 0, 16,
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 2);
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 2, 0);
         assert_eq!(result, vec![
-            0b00010110, 0, 2, 4,
-            2,
-            2,
-            4,
-            4,
-            16,
-            16,
+            0b00010110, 0, 4, 8,
+            2, 0, 0, 2,
+            4, 1, 0, 4,
+            16, 2, 0, 16,
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 3);
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 3, 0);
         assert_eq!(result, vec![
-            0b00010110, 2, 4, 16,
+            0b00010110, 0, 0, 2, 4, 16,
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 4);
+        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 4, 0);
         assert_eq!(result, vec![
             22,
         ]);
