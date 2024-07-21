@@ -23,11 +23,13 @@ struct Result {
 struct StackFrame {
     float t_min;
     uint ptr;
-    int idx;
+    uint idx;
     uint parent_octant_idx;
     int scale;
     int is_child;
     int is_leaf;
+    int crossed_boundary;
+    uint next_ptr;
 };
 
 layout (std430, binding = 12) buffer buffer_out {
@@ -39,11 +41,11 @@ layout (std430, binding = 12) buffer buffer_out {
 uniform sampler2DArray u_texture;
 
 // override debug function to capture raytracing frames
-#define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf) \
-    add_dbg_frame(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf)
+#define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf, crossed_boundary, next_ptr) \
+    add_dbg_frame(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf, crossed_boundary, next_ptr)
 
 // Creates a new frame on the stack by incrementing the stack pointer and storing all values in it.
-void add_dbg_frame(float t_min, uint ptr, int idx, uint parent_octant_idx, int scale, bool is_child, bool is_leaf) {
+void add_dbg_frame(float t_min, uint ptr, uint idx, uint parent_octant_idx, int scale, bool is_child, bool is_leaf, bool crossed_boundary, uint next_ptr) {
     out_stack_ptr += 1;
     out_stack[out_stack_ptr].t_min = t_min;
     out_stack[out_stack_ptr].ptr = ptr;
@@ -52,6 +54,8 @@ void add_dbg_frame(float t_min, uint ptr, int idx, uint parent_octant_idx, int s
     out_stack[out_stack_ptr].scale = scale;
     out_stack[out_stack_ptr].is_child = int(is_child);
     out_stack[out_stack_ptr].is_leaf = int(is_leaf);
+    out_stack[out_stack_ptr].crossed_boundary = int(crossed_boundary);
+    out_stack[out_stack_ptr].next_ptr = next_ptr;
 }
 
 #include "svo.glsl"

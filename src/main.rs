@@ -1,5 +1,6 @@
 #![feature(allocator_api, test)]
 #![feature(pointer_is_aligned_to)]
+#![feature(unchecked_shifts)]
 #![allow(dead_code, unused_variables)]
 
 #![warn(clippy::all, clippy::nursery, clippy::pedantic)]

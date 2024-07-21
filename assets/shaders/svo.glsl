@@ -41,7 +41,7 @@ struct OctreeResult {
 
 #if !defined(OCTREE_RAYTRACE_DEBUG_FN)
 // NOP implementation if the debug function has not been defined until here
-#define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf);
+#define OCTREE_RAYTRACE_DEBUG_FN(t_min, ptr, idx, parent_octant_idx, scale, is_child, is_leaf, crossed_boundary, next_ptr);
 #endif
 
 // Material contains rendering properties for which textures to load per side and what parameters to use for lighting.

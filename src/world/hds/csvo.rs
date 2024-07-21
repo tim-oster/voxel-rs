@@ -74,7 +74,7 @@ impl<A: Allocator> Csvo<A> {
                         assert_eq!(leaf_info.buf_offset & (1 << 31), 0, "32 bit pointers must not have the 32nd bit set");
 
                         let pointer = leaf_info.buf_offset as u32 | (1 << 31);
-                        children.push((idx, pointer.to_be_bytes().to_vec()));
+                        children.push((idx, pointer.to_le_bytes().to_vec()));
                     }
                 }
                 continue;
@@ -113,10 +113,10 @@ impl<A: Allocator> Csvo<A> {
 
                 match header_tag {
                     1 => buffer.push(offsets[i] as u8),
-                    2 => buffer.extend((offsets[i] as u16).to_be_bytes()),
+                    2 => buffer.extend((offsets[i] as u16).to_le_bytes()),
                     3 => {
                         assert_eq!(offsets[i] & (1 << 31), 0, "32 bit pointers must not have the 32nd bit set");
-                        buffer.extend(offsets[i].to_be_bytes());
+                        buffer.extend(offsets[i].to_le_bytes());
                     }
                     _ => unreachable!(),
                 }
@@ -126,7 +126,7 @@ impl<A: Allocator> Csvo<A> {
             }
         }
 
-        let header_bytes = header_mask.to_be_bytes();
+        let header_bytes = header_mask.to_le_bytes();
         buffer[0] = header_bytes[0];
         buffer[1] = header_bytes[1];
 
@@ -206,9 +206,9 @@ impl<A: Allocator> WorldSvo<SerializedChunk> for Csvo<A> {
                         let mut merged = Vec::with_capacity(1 + 4 + material_bytes + buffer.len());
 
                         merged.push(content.lod);
-                        merged.extend_from_slice(&(material_bytes as u32).to_be_bytes());
+                        merged.extend_from_slice(&(material_bytes as u32).to_le_bytes());
                         for material in materials {
-                            merged.extend_from_slice(&material.to_be_bytes());
+                            merged.extend_from_slice(&material.to_le_bytes());
                         }
                         merged.extend(buffer);
 
@@ -253,11 +253,13 @@ impl<A: Allocator> WorldSvo<SerializedChunk> for Csvo<A> {
 
         let start = dst as usize;
         let info = self.root_info.unwrap();
+        ptr::copy(info.buf_offset.to_le_bytes().as_ptr(), dst, 4);
+        let dst = dst.add(4);
 
         let len = self.buffer.bytes.len();
         ptr::copy(self.buffer.bytes.as_ptr(), dst, len);
-
         let dst = dst.add(len);
+
         (dst as usize) - start
     }
 
@@ -273,6 +275,8 @@ impl<A: Allocator> WorldSvo<SerializedChunk> for Csvo<A> {
         }
 
         let info = self.root_info.unwrap();
+        ptr::copy(info.buf_offset.to_le_bytes().as_ptr(), dst, 4);
+        let dst = dst.add(4);
 
         for changed_range in &self.buffer.updated_ranges {
             let offset = changed_range.start as isize;
@@ -330,29 +334,29 @@ mod csvo_tests {
             5,
 
             // chunk materials
-            0, 0, 0, 12,
-            0, 0, 0, 1,
-            0, 0, 0, 2,
-            0, 0, 0, 3,
+            12, 0, 0, 0,
+            1, 0, 0, 0,
+            2, 0, 0, 0,
+            3, 0, 0, 0,
 
             // chunk voxels
-            0b00_00_00_01, 0b_00_01_01_00, 0, 7, 14,
-            0, 0b00_00_01_00, 0,
+            0b_00_01_01_00, 0b00_00_00_01, 0, 7, 14,
+            0b00_00_01_00, 0, 0,
             2, 0,
             2,
             2,
-            0, 16, 0,
+            16, 0, 0,
             4, 0,
             4,
             4,
-            1, 0, 0,
+            0, 1, 0,
             16, 0,
             16,
             16,
 
             // root octant
-            0, 0b00_00_11_00,
-            1 << 7, 0, 0, 0, // 0 with absolute pointer flag as u32 bytes
+            0b00_00_11_00, 0,
+            0, 0, 0, 1 << 7, // 0 with absolute pointer flag as u32 bytes
         ];
         assert_eq!(esvo.buffer, RangeBuffer {
             bytes: expected.clone(),
@@ -367,7 +371,10 @@ mod csvo_tests {
         let mut buffer = Vec::new();
         buffer.resize(200, 0);
         let size = unsafe { esvo.write_to(buffer.as_mut_ptr()) };
-        assert_eq!(buffer[..size], expected);
+        assert_eq!(buffer[..size], [
+            vec![43, 0, 0, 0],
+            expected,
+        ].concat());
     }
 }
 
@@ -397,7 +404,7 @@ impl SerializedChunk {
         if let Some(root_id) = storage.root {
             let mut depth = storage.depth();
             if chunk.lod != 0 && chunk.lod < depth {
-                depth -= chunk.lod;
+                depth = chunk.lod;
             }
 
             let (b, m) = Self::serialize_octant(storage, root_id, depth);
@@ -505,10 +512,10 @@ impl SerializedChunk {
 
                 match header_tag {
                     1 => buffer.push(offsets[i] as u8),
-                    2 => buffer.extend((offsets[i] as u16).to_be_bytes()),
+                    2 => buffer.extend((offsets[i] as u16).to_le_bytes()),
                     3 => {
                         assert_eq!(offsets[i] & (1 << 31), 0, "32 bit pointers must not have the 32nd bit set");
-                        buffer.extend(offsets[i].to_be_bytes());
+                        buffer.extend(offsets[i].to_le_bytes());
                     }
                     _ => unreachable!(),
                 }
@@ -517,7 +524,7 @@ impl SerializedChunk {
                 buffer.extend(data);
             }
 
-            let header_bytes = header_mask.to_be_bytes();
+            let header_bytes = header_mask.to_le_bytes();
             buffer[0] = header_bytes[0];
             buffer[1] = header_bytes[1];
         }
@@ -545,7 +552,7 @@ mod serialized_chunk_tests {
 
         let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth());
         assert_eq!(result, vec![
-            0, 1, 0,    // inode
+            1, 0, 0,    // inode
             1, 0,       // plnode
             1, 1,       // lnode
         ]);
@@ -564,7 +571,7 @@ mod serialized_chunk_tests {
 
         let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth());
         assert_eq!(result, vec![
-            0, 1, 0,                    // inode
+            1, 0, 0,                    // inode
             1 | (1 << 7), 0, 3,         // plnode
             1 | (1 << 7), 1, 1 << 7,    // lnode
             1 | (1 << 7), 2, 1 << 6,    // lnode
@@ -582,16 +589,16 @@ mod serialized_chunk_tests {
 
         let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth());
         assert_eq!(result, vec![
-            0b00_00_00_01, 0b_00_01_01_00, 0, 7, 14,
-            0, 0b00_00_01_00, 0,
+            0b_00_01_01_00, 0b00_00_00_01, 0, 7, 14,
+            0b00_00_01_00, 0, 0,
             2, 0,
             2,
             2,
-            0, 0b00_01_00_00, 0,
+            0b00_01_00_00, 0, 0,
             4, 0,
             4,
             4,
-            0b00_00_00_01, 0, 0,
+            0, 0b00_00_00_01, 0,
             16, 0,
             16,
             16,
@@ -609,7 +616,7 @@ mod serialized_chunk_tests {
 
         let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 1);
         assert_eq!(result, vec![
-            0b00_00_00_01, 0b_00_01_01_00, 0, 4, 8,
+            0b_00_01_01_00, 0b00_00_00_01, 0, 4, 8,
             2, 0,
             2,
             2,

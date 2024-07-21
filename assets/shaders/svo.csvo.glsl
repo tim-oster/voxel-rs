@@ -2,18 +2,9 @@
 // https://www.khronos.org/opengl/wiki/Shader_Storage_Buffer_Object
 layout (std430, binding = 0) readonly buffer RootNode {
     float octree_scale;// Size of one leaf node in an octree from [0;1]. Calculated by `2^(-octree_depth)`.
+    uint root_ptr;// Pointer to the root octant.
     uint descriptors[];// Serialized octree bytes. See `src/world/svo.rs` for details on the format.
 };
-
-// Resolve the pointer to the given octant from the current ptr. Actual format is explained in `src/world/svo.rs`.
-/*inline*/ uint get_octant_ptr(uint ptr, uint idx) {
-    uint next_ptr = descriptors[ptr + 4 + idx];
-    if ((next_ptr & (1u << 31)) != 0) {
-        // use as relative offset if relative bit is set
-        next_ptr = ptr + 4 + idx + (next_ptr & 0x7fffffffu);
-    }
-    return next_ptr;
-}
 
 #define MAX_STEPS 1000
 // The algorithm relies on the IEEE 754 floating point bit representation. Since it using single precision (f32),
@@ -22,12 +13,109 @@ layout (std430, binding = 0) readonly buffer RootNode {
 // The smallest ray increment can only be exp2(-22) because of the fractional bit size of single precision floats.
 // Hence an epsilon value of exp2(-23) can be used for floating point operations.
 #define EPSILON 0.00000011920929// = exp2(-MAX_SCALE)
+// Placeholder to indicate that a pointer points to no valid address.
+#define INVALID_PTR 0xffffffff// max uint value
 
 // Stacks to implement PUSH & POP for step into and out of the child octants.
 // Decalred outside of function scope as it seems to use a different memory region on the GPU and is faster.
 uint[MAX_SCALE + 1] ptr_stack;
-uint[MAX_SCALE + 1] parent_octant_idx_stack;
+uint[MAX_SCALE + 1] depth_stack;
 float[MAX_SCALE + 1] t_max_stack;
+
+uint read_uint(uint ptr) {
+    uint index = ptr / 4;
+    uint mod = ptr % 4;
+
+    uint lshift = (4 - mod) * 8;
+    uint mask = int(1 << lshift) - 1;
+    if (lshift==32) mask=0xffffffff;// TODO
+    uint v0 = descriptors[index] >> (mod * 8) & mask;
+    uint v1 = descriptors[index + 1] << lshift & ~mask;
+
+    return v0 | v1;
+}
+
+uint read_ushort(uint ptr) {
+    uint val = read_uint(ptr);
+    return val & 0xffffu;
+}
+
+uint read_byte(uint ptr) {
+    uint index = ptr / 4;
+    uint mod = ptr % 4;
+    return descriptors[index] >> (mod * 8) & 0xff;
+}
+
+uint read_next_ptr(uint ptr, uint depth, uint idx, out bool crossed_boundary) {
+    crossed_boundary = false;
+
+    if (depth > 3) {
+        // internal nodes
+        uint header_mask = read_ushort(ptr);
+        uint child_mask = header_mask >> (idx * 2) & 3u;
+
+        if (child_mask == 0) return INVALID_PTR;
+
+        uint offset_mask = (1 << (idx * 2)) - 1;
+        uint preceding_mask = header_mask & offset_mask;
+
+        uint offset = 0;
+        offset += (1 << ((preceding_mask >> (0 * 2)) & 3u)) >> 1;
+        offset += (1 << ((preceding_mask >> (1 * 2)) & 3u)) >> 1;
+        offset += (1 << ((preceding_mask >> (2 * 2)) & 3u)) >> 1;
+        offset += (1 << ((preceding_mask >> (3 * 2)) & 3u)) >> 1;
+        offset += (1 << ((preceding_mask >> (4 * 2)) & 3u)) >> 1;
+        offset += (1 << ((preceding_mask >> (5 * 2)) & 3u)) >> 1;
+        offset += (1 << ((preceding_mask >> (6 * 2)) & 3u)) >> 1;
+        offset += (1 << ((preceding_mask >> (7 * 2)) & 3u)) >> 1;
+
+        uint ptr_bytes = 0;
+        ptr_bytes += (1 << ((header_mask >> (0 * 2)) & 3u)) >> 1;
+        ptr_bytes += (1 << ((header_mask >> (1 * 2)) & 3u)) >> 1;
+        ptr_bytes += (1 << ((header_mask >> (2 * 2)) & 3u)) >> 1;
+        ptr_bytes += (1 << ((header_mask >> (3 * 2)) & 3u)) >> 1;
+        ptr_bytes += (1 << ((header_mask >> (4 * 2)) & 3u)) >> 1;
+        ptr_bytes += (1 << ((header_mask >> (5 * 2)) & 3u)) >> 1;
+        ptr_bytes += (1 << ((header_mask >> (6 * 2)) & 3u)) >> 1;
+        ptr_bytes += (1 << ((header_mask >> (7 * 2)) & 3u)) >> 1;
+
+        uint ptr_offset = read_uint(ptr + 2 + offset);
+        // remove bits that are outside this poitner's size
+
+        if (child_mask == 1) ptr_offset &= 0xffu;
+        if (child_mask == 2) ptr_offset &= 0xffffu;
+
+        //ptr_offset &= (1u << ((1u << (child_mask - 1)) * 8)) - 1; // TODO incorrect?
+
+        if ((ptr_offset & (1u << 31)) != 0) { // only works on 32b pointers
+            // absolute pointer
+            crossed_boundary = true;
+            return ptr_offset ^ (1u << 31);
+        }
+
+        return ptr + 2 + ptr_bytes + ptr_offset;
+    }
+
+    uint header_mask = read_byte(ptr);
+    uint child_mask = header_mask >> idx & 1u;
+
+    if (child_mask == 0) return INVALID_PTR;
+
+    uint offset_mask = (1 << idx) - 1;
+    uint offset = bitCount(header_mask & offset_mask);
+
+    if (depth == 3) {
+        // pre-leaf nodes
+        uint ptr_bytes = bitCount(header_mask);
+        uint ptr_offset = read_byte(ptr + 1 + offset);
+        return ptr + 1 + ptr_bytes + ptr_offset;
+    }
+
+    // leaf nodes
+    return ptr + 1 + offset;
+}
+
+// TODO reread all comments
 
 // Intersects the given ray (defined by ro & rd) against the octree in SVO format. It uses a modified implementation of
 // the raytracer described in Laine and Karras "Efficient sparse voxel octrees". In contrast to their implementation,
@@ -65,8 +153,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     // on the mantissa/fractional bits of the float bits.
     ro += 1;
 
-    uint ptr = 0;// current pointer inside the SVO data structure
-    uint parent_octant_idx = 0;// the child index [0;7] of the current octant's parent octant
+    // current pointer inside the SVO data structure
+    uint ptr = root_ptr;
 
     // Scale is the mantissa bit of the current ray step size. A more intuitive representation would be a
     // scale that increments from 0..22 as the algorithm descends into the octree, but choosing the inverted form allows
@@ -148,6 +236,10 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
     if (t_min < 1.5 * t_coef.y - t_bias.y) idx ^= 2, pos.y = 1.5;
     if (t_min < 1.5 * t_coef.z - t_bias.z) idx ^= 4, pos.z = 1.5;
 
+    // TODO new
+    uint depth = 127 - ((floatBitsToUint(octree_scale) >> 23) & 0xff);// get max depth from scale float exponent
+    uint material_section_ptr = INVALID_PTR;
+
     // Start stepping through the octree until a voxel is hit or max steps are reached.
     for (int i = 0; i < MAX_STEPS; ++i) {
         if (max_dst >= 0 && t_min > max_dst) {
@@ -162,17 +254,14 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
 
         // lookup the descriptor for the current octant
         uint octant_idx = idx ^ octant_mask;// undo mirroring
-        uint bit = 1u << octant_idx;
 
         // lookup the descriptor for the current octant
-        uint descriptor = descriptors[ptr + (parent_octant_idx / 2)];
-        if ((parent_octant_idx % 2) != 0) {
-            descriptor >>= 16;
-        }
-        bool is_child = (descriptor & (bit << 8)) != 0;
-        bool is_leaf = (descriptor & bit) != 0;
+        bool crossed_boundary = false;
+        uint next_ptr = read_next_ptr(ptr, depth, octant_idx, crossed_boundary);
+        bool is_child = next_ptr != INVALID_PTR;
+        bool is_leaf = is_child && depth < 2;
 
-        OCTREE_RAYTRACE_DEBUG_FN(t_min/octree_scale, ptr, idx, parent_octant_idx, scale, is_child, is_leaf);
+        OCTREE_RAYTRACE_DEBUG_FN(t_min/octree_scale, ptr, octant_idx, depth, scale, is_child, is_leaf, crossed_boundary, next_ptr);
 
         // check if a child octant was hit
         if (is_child && t_min <= t_max) {
@@ -186,12 +275,8 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                 // phase: HIT
                 // calculate leaf intersection data and return
 
-                // fetch pointer for leaf value
-                uint next_ptr = get_octant_ptr(ptr, parent_octant_idx);
-                next_ptr = next_ptr + 4 + octant_idx;
-
                 // fetch leaf value
-                uint value = descriptors[next_ptr];
+                uint value = 1;// TODO determine
 
                 // Use current pos + scale_exp2 to get the lower bound, i.e. the entry distance for the ray.
                 vec3 t_corner = (pos + scale_exp2) * t_coef - t_bias;
@@ -283,17 +368,27 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
                     // "push" current values onto the stack
                     if (tc_max < h) {
                         ptr_stack[scale] = ptr;
-                        parent_octant_idx_stack[scale] = parent_octant_idx;
+                        depth_stack[scale] = depth;
                         t_max_stack[scale] = t_max;
                     }
                     h = tc_max;
 
-                    // fetch next octant pointer
-                    ptr = get_octant_ptr(ptr, parent_octant_idx);
+                    // reduce depth by one so that leaf level can be deduced later on
+                    --depth;
+                    ptr = next_ptr;
+
+                    // detect octree boundary crossing to resolve materials
+                    if (crossed_boundary) {
+                        uint child_lod = read_byte(ptr);
+                        uint material_bytes = read_uint(ptr + 1);
+                        ptr += 5;
+                        material_section_ptr = ptr;
+                        ptr += material_bytes;
+                        depth = child_lod;
+                    }
 
                     // descend into next scale & update values
                     --scale;
-                    parent_octant_idx = octant_idx;
                     scale_exp2 = half_scale;
 
                     // Use center values to determine the next idx & pos using the same logic as done during the setup
@@ -368,7 +463,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
 
             // "pop" values from the stack at the new scale
             ptr = ptr_stack[scale];
-            parent_octant_idx = parent_octant_idx_stack[scale];
+            depth = depth_stack[scale];
             t_max = t_max_stack[scale];
 
             // Floor all positions to given scale to truncate previous information from when the ray was within a child

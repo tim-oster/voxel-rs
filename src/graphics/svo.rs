@@ -170,8 +170,8 @@ impl Svo {
     pub fn update<T: WorldSvo<U> + ?Sized, U>(&mut self, svo: &mut T) {
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
-            let max_depth_bytes = max_depth_exp.to_bits().to_le_bytes();
-            ptr::copy(max_depth_bytes.as_ptr(), self.world_buffer.cast(), max_depth_bytes.len());
+            let max_depth_exp_bytes = max_depth_exp.to_bits().to_le_bytes();
+            ptr::copy(max_depth_exp_bytes.as_ptr(), self.world_buffer.cast(), max_depth_exp_bytes.len());
 
             // wait for last draw call to finish so that updates and draws do not race and produce temporary "holes" in the world
             self.render_fence.borrow().wait();

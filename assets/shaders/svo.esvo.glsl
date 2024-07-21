@@ -172,7 +172,7 @@ void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sa
         bool is_child = (descriptor & (bit << 8)) != 0;
         bool is_leaf = (descriptor & bit) != 0;
 
-        OCTREE_RAYTRACE_DEBUG_FN(t_min/octree_scale, ptr, idx, parent_octant_idx, scale, is_child, is_leaf);
+        OCTREE_RAYTRACE_DEBUG_FN(t_min/octree_scale, ptr, octant_idx, parent_octant_idx, scale, is_child, is_leaf, false, 0);
 
         // check if a child octant was hit
         if (is_child && t_min <= t_max) {
