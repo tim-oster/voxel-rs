@@ -4,9 +4,6 @@ use std::sync::Arc;
 use cgmath::Point3;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use csvo as target_impl;
-use csvo::Csvo as target_type;
-
 use crate::graphics;
 use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::svo::SvoType;
@@ -15,12 +12,26 @@ use crate::systems::jobs::{ChunkProcessor, ChunkResult, JobSystem};
 use crate::systems::physics::Raycaster;
 use crate::world::chunk::{BlockPos, ChunkPos};
 use crate::world::hds;
-use crate::world::hds::{ChunkBufferPool, csvo, WorldSvo};
+use crate::world::hds::{ChunkBufferPool, WorldSvo};
+#[cfg(feature = "use-csvo")]
+use crate::world::hds::csvo as target_impl;
+#[cfg(feature = "use-csvo")]
+use crate::world::hds::csvo::Csvo as target_type;
+#[cfg(feature = "use-esvo")]
+use crate::world::hds::esvo as target_impl;
+#[cfg(feature = "use-esvo")]
+use crate::world::hds::esvo::Esvo as target_type;
 use crate::world::hds::octree::LeafId;
 use crate::world::memory::{AllocatorStats, StatsAllocator};
 use crate::world::world::BorrowedChunk;
 
+#[cfg(feature = "use-esvo")]
+type BufferType = u32;
+#[cfg(feature = "use-esvo")]
+pub const SVO_TYPE: SvoType = SvoType::Esvo;
+#[cfg(feature = "use-csvo")]
 type BufferType = u8;
+#[cfg(feature = "use-csvo")]
 pub const SVO_TYPE: SvoType = SvoType::Csvo;
 
 /// Svo takes ownership of a [`graphics::Svo`] and populates it with world [`world::chunk::Chunk`]s.
