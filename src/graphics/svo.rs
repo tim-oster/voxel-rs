@@ -1,5 +1,6 @@
-use std::alloc::Allocator;
 use std::cell::RefCell;
+use std::ops::Deref;
+use std::ptr;
 
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix, Vector3};
 
@@ -12,8 +13,29 @@ use crate::graphics::shader::{ShaderError, ShaderProgram, ShaderProgramBuilder};
 use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, PickerResult, PickerTask};
 use crate::graphics::svo_registry::{MaterialInstance, VoxelRegistry};
 use crate::graphics::texture_array::{TextureArray, TextureArrayError};
-use crate::world;
-use crate::world::svo::SerializedChunk;
+use crate::world::hds::WorldSvo;
+
+#[derive(Debug, Copy, Clone)]
+pub enum SvoType {
+    Esvo,
+    Csvo,
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct SvoTypeProperties {
+    pub shader_type_define: &'static str,
+}
+
+impl Deref for SvoType {
+    type Target = SvoTypeProperties;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Esvo => &SvoTypeProperties { shader_type_define: "1" },
+            Self::Csvo => &SvoTypeProperties { shader_type_define: "2" },
+        }
+    }
+}
 
 /// Buffer indices are constants for all buffer ids used in the SVO shaders.
 #[allow(dead_code)]
@@ -32,10 +54,9 @@ pub mod buffer_indices {
 /// Note that all coordinates passed must be in SVO coordinate space (\[0;size\] along all axes).
 pub struct Svo {
     tex_array: Resource<TextureArray, TextureArrayError>,
-    // _material_buffer needs to be stored to drop it together with all other resources
-    _material_buffer: Buffer<MaterialInstance>,
+    material_buffer: Buffer<MaterialInstance>,
     world_shader: Resource<ShaderProgram, ShaderError>,
-    world_buffer: MappedBuffer<u32>,
+    world_buffer: MappedBuffer<u8>,
     // screen_quad is used to render a full-screen quad on which the per-pixel raytracer for the SVO
     // is executed
     screen_quad: ScreenQuad,
@@ -77,50 +98,60 @@ pub struct RenderParams {
     pub aspect_ratio: f32,
     /// `selected_voxel` is the position of the voxel to be highlighted.
     pub selected_voxel: Option<Point3<f32>>,
-    /// `render_shadows` enables secondary ray casting to check for sun light occlusion.
+    /// `render_shadows` enables secondary ray casting to check for sunlight occlusion.
     pub render_shadows: bool,
     /// `shadow_distance` defines the maximum distance to the primary hit, until which secondary rays are cast.
     pub shadow_distance: f32,
 }
 
 impl Svo {
-    pub fn new(registry: &VoxelRegistry) -> Self {
+    pub fn new(registry: &VoxelRegistry, typ: SvoType) -> Self {
+        let svo_type = typ.shader_type_define;
+
         let tex_array = registry.build_texture_array().unwrap();
         let material_buffer = registry.build_material_buffer(&tex_array);
-        material_buffer.bind_as_storage_buffer(buffer_indices::MATERIALS);
 
         let world_shader = Resource::new(
-            || ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/world.glsl")?.build()
+            || ShaderProgramBuilder::new()
+                .with_define("SVO_TYPE", svo_type)
+                .load_shader_bundle("assets/shaders/world.glsl")?
+                .build()
         ).unwrap();
-
-        let world_buffer = MappedBuffer::<u32>::new(100 * 1000 * 1000 / 4); // 100 MB
-        world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);
 
         let picker_shader = Resource::new(
-            || ShaderProgramBuilder::new().load_shader_bundle("assets/shaders/picker.glsl")?.build()
+            || ShaderProgramBuilder::new()
+                .with_define("SVO_TYPE", svo_type)
+                .load_shader_bundle("assets/shaders/picker.glsl")?
+                .build()
         ).unwrap();
 
-        let picker_in_buffer = MappedBuffer::<PickerTask>::new(100);
-        picker_in_buffer.bind_as_storage_buffer(buffer_indices::PICKER_IN);
-
-        let picker_out_buffer = MappedBuffer::<PickerResult>::new(100);
-        picker_out_buffer.bind_as_storage_buffer(buffer_indices::PICKER_OUT);
-
-        Self {
+        let instance = Self {
             tex_array,
-            _material_buffer: material_buffer,
+            material_buffer,
             world_shader,
-            world_buffer,
+            world_buffer: MappedBuffer::new(300 * 1000 * 1000), // 300 MB
             screen_quad: ScreenQuad::new(),
             render_fence: RefCell::new(Fence::new()),
 
             picker_shader,
-            picker_in_buffer,
-            picker_out_buffer,
+            picker_in_buffer: MappedBuffer::<PickerTask>::new(100),
+            picker_out_buffer: MappedBuffer::<PickerResult>::new(100),
             picker_fence: RefCell::new(Fence::new()),
 
             stats: Stats { used_bytes: 0, capacity_bytes: 0, depth: 0 },
-        }
+        };
+
+        // default bind after instantiation
+        instance.bind_buffers_globally();
+
+        instance
+    }
+
+    pub fn bind_buffers_globally(&self) {
+        self.material_buffer.bind_as_storage_buffer(buffer_indices::MATERIALS);
+        self.world_buffer.bind_as_storage_buffer(buffer_indices::WORLD);
+        self.picker_in_buffer.bind_as_storage_buffer(buffer_indices::PICKER_IN);
+        self.picker_out_buffer.bind_as_storage_buffer(buffer_indices::PICKER_OUT);
     }
 
     pub fn reload_resources(&mut self) {
@@ -136,16 +167,17 @@ impl Svo {
     }
 
     /// Writes all changes from the given `svo` to the GPU buffer.
-    pub fn update<A: Allocator>(&mut self, svo: &mut world::svo::Svo<SerializedChunk, A>) {
+    pub fn update<T: WorldSvo<U> + ?Sized, U>(&mut self, svo: &mut T) {
         unsafe {
             let max_depth_exp = (-(svo.depth() as f32)).exp2();
-            self.world_buffer.write(max_depth_exp.to_bits());
+            let max_depth_exp_bytes = max_depth_exp.to_bits().to_le_bytes();
+            ptr::copy(max_depth_exp_bytes.as_ptr(), self.world_buffer.cast(), max_depth_exp_bytes.len());
 
             // wait for last draw call to finish so that updates and draws do not race and produce temporary "holes" in the world
             self.render_fence.borrow().wait();
 
             let len = self.world_buffer.len() - 1;
-            svo.write_changes_to(self.world_buffer.offset(1), len, true);
+            svo.write_changes_to(self.world_buffer.offset(4), len, true);
 
             self.stats = Stats {
                 used_bytes: svo.size_in_bytes(),
@@ -229,32 +261,63 @@ mod svo_tests {
 
     use cgmath::{InnerSpace, Point3, Vector3};
 
-    use crate::{assert_float_eq, gl_assert_no_error, world};
+    use crate::{assert_float_eq, gl_assert_no_error};
     use crate::core::GlContext;
     use crate::graphics::framebuffer::{diff_images, Framebuffer};
     use crate::graphics::macros::assert_vec3_eq;
-    use crate::graphics::svo::{RenderParams, Svo};
+    use crate::graphics::svo::{RenderParams, Svo, SvoType};
     use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
+    use crate::world::hds::{ChunkBuffer, csvo, esvo, WorldSvo};
+    use crate::world::hds::octree::Position;
     use crate::world::memory::{Pool, StatsAllocator};
-    use crate::world::octree::Position;
-    use crate::world::svo::{ChunkBuffer, SerializedChunk};
     use crate::world::world::BorrowedChunk;
 
-    fn create_world_svo<F>(builder: F) -> world::svo::Svo<SerializedChunk>
-        where F: FnOnce(&mut Chunk) {
-        let storage_alloc = ChunkStorageAllocator::new();
-        let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, storage_alloc.allocate());
-        builder(&mut chunk);
+    struct TestCase {
+        name: &'static str,
+        svo: Svo,
+    }
 
-        let buffer_alloc = Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new());
+    fn create_test_cases<F>(chunk_builder: F) -> Vec<TestCase>
+    where
+        F: Fn(&mut Chunk),
+    {
+        let create_chunk = || {
+            let storage_alloc = ChunkStorageAllocator::new();
+            let mut chunk = Chunk::new(ChunkPos::new(0, 0, 0), 5, storage_alloc.allocate());
+            chunk_builder(&mut chunk);
+            chunk
+        };
+        let create_esvo = || {
+            let buffer_alloc = Arc::new(Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new()));
+            let chunk = esvo::SerializedChunk::new(BorrowedChunk::from(create_chunk()), &buffer_alloc);
 
-        let chunk = SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(buffer_alloc));
-        let mut svo = world::svo::Svo::<SerializedChunk>::new();
-        svo.set_leaf(Position(0, 0, 0), chunk, true);
-        svo.serialize();
-        svo
+            let mut svo = esvo::Esvo::<esvo::SerializedChunk>::new();
+            svo.set_leaf(Position(0, 0, 0), chunk, true);
+            svo.serialize();
+
+            let mut esvo = Svo::new(&create_voxel_registry(), SvoType::Esvo);
+            esvo.update(&mut svo);
+            esvo
+        };
+        let create_csvo = || {
+            let buffer_alloc = Arc::new(Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new()));
+            let chunk = csvo::SerializedChunk::new(BorrowedChunk::from(create_chunk()), &buffer_alloc);
+
+            let mut svo = csvo::Csvo::new();
+            svo.set_leaf(Position(0, 0, 0), chunk, true);
+            svo.serialize();
+
+            let mut csvo = Svo::new(&create_voxel_registry(), SvoType::Csvo);
+            csvo.update(&mut svo);
+            csvo
+        };
+
+        vec![
+            TestCase { name: "esvo", svo: create_esvo() },
+            TestCase { name: "csvo", svo: create_csvo() },
+        ]
     }
 
     fn create_voxel_registry() -> VoxelRegistry {
@@ -280,7 +343,8 @@ mod svo_tests {
     fn render() {
         let (width, height) = (640, 490);
         let _context = GlContext::new_headless(width, height); // do not drop context
-        let mut world_svo = create_world_svo(|chunk| {
+
+        let cases = create_test_cases(|chunk| {
             for x in 0..5 {
                 for z in 0..5 {
                     chunk.set_block(x, 0, z, 1);
@@ -297,83 +361,90 @@ mod svo_tests {
             chunk.set_block(1, 3, 3, 2);
             chunk.set_block(3, 3, 3, 2);
         });
+        for tc in cases {
+            tc.svo.bind_buffers_globally();
 
-        let mut svo = Svo::new(&create_voxel_registry());
-        svo.update(&mut world_svo);
+            let fb = Framebuffer::new(width as i32, height as i32, false, false);
+            fb.bind();
+            fb.clear(0.0, 0.0, 0.0, 1.0);
 
-        let fb = Framebuffer::new(width as i32, height as i32, false, false);
+            let cam_pos = Point3::new(2.5, 2.5, 7.5);
+            tc.svo.render(&RenderParams {
+                ambient_intensity: 0.3,
+                light_dir: Vector3::new(-1.0, -1.0, -1.0).normalize(),
+                cam_pos,
+                cam_fwd: -Vector3::unit_z(),
+                cam_up: Vector3::unit_y(),
+                fov_y_rad: 72.0f32.to_radians(),
+                aspect_ratio: width as f32 / height as f32,
+                selected_voxel: Some(Point3::new(1.0, 1.0, 3.0)),
+                render_shadows: true,
+                shadow_distance: 500.0,
+            }, &fb);
 
-        fb.bind();
-        fb.clear(0.0, 0.0, 0.0, 1.0);
+            fb.unbind();
+            gl_assert_no_error!();
 
-        let cam_pos = Point3::new(2.5, 2.5, 7.5);
-        svo.render(&RenderParams {
-            ambient_intensity: 0.3,
-            light_dir: Vector3::new(-1.0, -1.0, -1.0).normalize(),
-            cam_pos,
-            cam_fwd: -Vector3::unit_z(),
-            cam_up: Vector3::unit_y(),
-            fov_y_rad: 72.0f32.to_radians(),
-            aspect_ratio: width as f32 / height as f32,
-            selected_voxel: Some(Point3::new(1.0, 1.0, 3.0)),
-            render_shadows: true,
-            shadow_distance: 500.0,
-        }, &fb);
-        fb.unbind();
-        gl_assert_no_error!();
+            let actual = fb.as_image();
+            actual.save_with_format("assets/tests/graphics_svo_render_actual.png", image::ImageFormat::Png).unwrap();
 
-        let actual = fb.as_image();
-        actual.save_with_format("assets/tests/graphics_svo_render_actual.png", image::ImageFormat::Png).unwrap();
+            let expected = image::open("assets/tests/graphics_svo_render_expected.png").unwrap();
+            let diff_percent = diff_images(&actual, &expected);
+            let threshold = env::var("TEST_SVO_RENDER_THRESHOLD").map_or(0.001, |x| x.parse::<f64>().unwrap());
 
-        let expected = image::open("assets/tests/graphics_svo_render_expected.png").unwrap();
-        let diff_percent = diff_images(&actual, &expected);
-        let threshold = env::var("TEST_SVO_RENDER_THRESHOLD").map_or(0.001, |x| x.parse::<f64>().unwrap());
-        assert!(diff_percent < threshold, "difference: {:.5} < {:.5}", diff_percent, threshold);
+            println!("test case {}", tc.name);
+            assert!(diff_percent < threshold, "difference for test case {}: {:.5} < {:.5}", tc.name, diff_percent, threshold);
+            println!("passed");
+        }
     }
 
     /// Tests if multiple raycasts return the expected results.
     #[test]
     fn raycast() {
         let _context = GlContext::new_headless(1, 1); // do not drop context
-        let mut world_svo = create_world_svo(|chunk| {
+
+        let cases = create_test_cases(|chunk| {
             chunk.set_block(0, 0, 0, 1);
             chunk.set_block(1, 0, 0, 1);
         });
+        for tc in cases {
+            tc.svo.bind_buffers_globally();
 
-        let mut svo = Svo::new(&create_voxel_registry());
-        svo.update(&mut world_svo);
+            let mut batch = PickerBatch::new();
+            batch.add_ray(Point3::new(0.5, 1.5, 0.5), Vector3::new(0.0, -1.0, 0.0), 1.0);
+            batch.add_ray(Point3::new(0.5, 0.5, 0.5), Vector3::new(1.0, 0.0, 0.0), 1.0);
+            batch.add_ray(Point3::new(0.5, 0.5, -2.0), Vector3::new(0.0, 0.0, 1.0), 1.0);
 
-        let mut batch = PickerBatch::new();
-        batch.add_ray(Point3::new(0.5, 1.5, 0.5), Vector3::new(0.0, -1.0, 0.0), 1.0);
-        batch.add_ray(Point3::new(0.5, 0.5, 0.5), Vector3::new(1.0, 0.0, 0.0), 1.0);
-        batch.add_ray(Point3::new(0.5, 0.5, -2.0), Vector3::new(0.0, 0.0, 1.0), 1.0);
+            let mut result = PickerBatchResult::new();
+            tc.svo.raycast(&mut batch, &mut result);
 
-        let mut result = PickerBatchResult::new();
-        svo.raycast(&mut batch, &mut result);
+            gl_assert_no_error!();
 
-        gl_assert_no_error!();
-        assert_eq!(result, PickerBatchResult {
-            rays: vec![
-                RayResult {
-                    dst: assert_float_eq!(result.rays[0].dst, 0.5, 0.0001),
-                    inside_voxel: false,
-                    pos: assert_vec3_eq!(result.rays[0].pos, Point3::new(0.5, 1.0, 0.5), 0.0001),
-                    normal: Vector3::new(0.0, 1.0, 0.0),
-                },
-                RayResult {
-                    dst: assert_float_eq!(result.rays[1].dst, 0.5, 0.0001),
-                    inside_voxel: true,
-                    pos: assert_vec3_eq!(result.rays[1].pos, Point3::new(1.0, 0.5, 0.5), 0.0001),
-                    normal: Vector3::new(-1.0, 0.0, 0.0),
-                },
-                RayResult {
-                    dst: -1.0,
-                    inside_voxel: false,
-                    pos: Point3::new(0.0, 0.0, 0.0),
-                    normal: Vector3::new(0.0, 0.0, 0.0),
-                },
-            ],
-            aabbs: vec![],
-        });
+            println!("test case {}", tc.name);
+            assert_eq!(result, PickerBatchResult {
+                rays: vec![
+                    RayResult {
+                        dst: assert_float_eq!(result.rays[0].dst, 0.5, 0.0001),
+                        inside_voxel: false,
+                        pos: assert_vec3_eq!(result.rays[0].pos, Point3::new(0.5, 1.0, 0.5), 0.0001),
+                        normal: Vector3::new(0.0, 1.0, 0.0),
+                    },
+                    RayResult {
+                        dst: assert_float_eq!(result.rays[1].dst, 0.5, 0.0001),
+                        inside_voxel: true,
+                        pos: assert_vec3_eq!(result.rays[1].pos, Point3::new(1.0, 0.5, 0.5), 0.0001),
+                        normal: Vector3::new(-1.0, 0.0, 0.0),
+                    },
+                    RayResult {
+                        dst: -1.0,
+                        inside_voxel: false,
+                        pos: Point3::new(0.0, 0.0, 0.0),
+                        normal: Vector3::new(0.0, 0.0, 0.0),
+                    },
+                ],
+                aabbs: vec![],
+            });
+            println!("passed");
+        }
     }
 }

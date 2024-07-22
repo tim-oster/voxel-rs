@@ -70,8 +70,7 @@ impl World {
     }
 
     fn mark_chunk_as_changed(&mut self, pos: &ChunkPos) {
-        if !self.changed_chunks_set.contains(pos) {
-            self.changed_chunks_set.insert(*pos);
+        if self.changed_chunks_set.insert(*pos) {
             self.changed_chunks.push_back(*pos);
         }
     }

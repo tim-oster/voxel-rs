@@ -21,15 +21,21 @@ indoc = "2.0.4"
 tempfile = "3.8.1"
 rustc-hash = "1.1.0"
 dhat = "0.3.2"
+fastanvil = "0.31.0"
+fastnbt = "2"
+clap = { version = "4.5.9", features = ["derive"] }
 
 [build-dependencies]
 walkdir = "2.4.0"
-rustc-hash = "1.1.0"
+rustc-hash = "2.0.0"
 
 [profile.release-dhat]
 inherits = "release"
 debug = 1
 
 [features]
+default = ["use-esvo"]
 dhat-heap = []
 bundle-assets = []
+use-esvo = []
+use-csvo = []

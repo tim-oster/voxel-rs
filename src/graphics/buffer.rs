@@ -154,7 +154,7 @@ impl<T> MappedBuffer<T> {
     }
 
     pub fn size_in_bytes(&self) -> usize {
-        mem::size_of::<T>() * self.len
+        size_of::<T>() * self.len
     }
 
     pub fn len(&self) -> usize {

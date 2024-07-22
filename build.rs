@@ -90,7 +90,7 @@ fn generate_asset_bundle(manifest_dir: &Path, dst_path: &Path, asset_list: Vec<A
         var_names.push(var_name);
     }
 
-    out_file.write_all(&[b'\n'])?;
+    out_file.write_all(b"\n")?;
     out_file.write_all(format!(
         "const BUNDLED_ASSETS: [(&str, &[u8]); {}] = [\n",
         asset_list.len(),
