@@ -1,5 +1,3 @@
-// https://www.khronos.org/opengl/wiki/Interface_Block_(GLSL)#Buffer_backed
-// https://www.khronos.org/opengl/wiki/Shader_Storage_Buffer_Object
 layout (std430, binding = 0) readonly buffer RootNode {
     float octree_scale;// Size of one leaf node in an octree from [0;1]. Calculated by `2^(-octree_depth)`.
     uint root_ptr;// Pointer to the root octant.
@@ -22,6 +20,8 @@ uint[MAX_SCALE + 1] ptr_stack;
 uint[MAX_SCALE + 1] depth_stack;
 float[MAX_SCALE + 1] t_max_stack;
 
+// Reads 4 bytes from the current byte pointer position. This works on the underlying uint buffer and properly reads
+// accross uint bounds.
 uint read_uint(uint ptr) {
     uint index = ptr / 4;
     uint mod = ptr % 4;
@@ -34,17 +34,22 @@ uint read_uint(uint ptr) {
     return v0 | v1;
 }
 
+// Reads 2 bytes from the current byte pointer position. This works on the underlying uint buffer and properly reads
+// accross uint bounds.
 uint read_ushort(uint ptr) {
     uint val = read_uint(ptr);
     return val & 0xffffu;
 }
 
+// Reads 1 byte from at the current byte pointer position.
 uint read_byte(uint ptr) {
     uint index = ptr / 4;
     uint mod = ptr % 4;
     return descriptors[index] >> (mod * 8) & 0xff;
 }
 
+// Resolves the next pointer for the given ptr to a children header mask and the idx. Depth determines which CSVO node
+// type is used for reading. If crossed_boundary is set to true, an absolute 4 byte pointer was resolved.
 uint read_next_ptr(uint ptr, uint depth, uint idx, out bool crossed_boundary) {
     crossed_boundary = false;
 
@@ -110,6 +115,7 @@ uint read_next_ptr(uint ptr, uint depth, uint idx, out bool crossed_boundary) {
     return ptr + 1 + 2 + offset;// skip 1 byte header mask + 2 bytes material section offset
 }
 
+// Resolves the value for a leaf by constructing the correct material section pointer and reading it.
 uint read_leaf(uint material_section_ptr, uint pre_leaf_ptr, uint ptr, uint idx) {
     uint material_section_offset = read_ushort(pre_leaf_ptr + 1);
 
@@ -126,8 +132,6 @@ uint read_leaf(uint material_section_ptr, uint pre_leaf_ptr, uint ptr, uint idx)
     return read_uint(material_section_ptr + material_section_offset * 4 + preceding_leaves * 4);
 }
 
-// TODO reread all comments
-
 // Intersects the given ray (defined by ro & rd) against the octree in SVO format. It uses a modified implementation of
 // the raytracer described in Laine and Karras "Efficient sparse voxel octrees". In contrast to their implementation,
 // contour and level of detail were removed in favor of a dynamically loadable, and more memory efficient data
@@ -142,10 +146,8 @@ uint read_leaf(uint material_section_ptr, uint pre_leaf_ptr, uint ptr, uint idx)
 //  out res             returns ray hit result - no hit occurred when res.t == -1
 //
 // List of sources:
-//  - Samuli Laine and Tero Karras. 2010 "Efficient sparse voxel octrees"
-//      - https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010i3d_paper.pdf
-//  - Samuli Laine and Tero Karras. 2010 "Efficient sparse voxel octrees – Analysis, Extensions, and Implementation"
-//      - https://research.nvidia.com/sites/default/files/pubs/2010-02_Efficient-Sparse-Voxel/laine2010tr1_paper.pdf
+//  - Branislav Mados et al. 2022 "CSVO: Clustered Sparse Voxel Octrees"
+//      - https://www.mdpi.com/2073-8994/14/10/2114
 void intersect_octree(vec3 ro, vec3 rd, float max_dst, bool cast_translucent, sampler2DArray textures, out OctreeResult res) {
     // rescale inputs to be [0;1]
     ro *= octree_scale;
