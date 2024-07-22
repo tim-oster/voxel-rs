@@ -12,6 +12,15 @@ use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{AABBDef, Entity};
 use crate::world::chunk::ChunkPos;
 
+pub struct GameArgs {
+    pub mc_world: Option<String>,
+    pub player_pos: Point3<f32>,
+    pub player_euler_rot: Vector3<f32>,
+    pub detach_input: bool,
+    pub render_distance: u32,
+    pub fov_y_deg: f32,
+}
+
 /// Game runs the actual game loop and handles communication and calling to the different game
 /// systems.
 pub struct Game {
@@ -38,7 +47,7 @@ struct State {
 }
 
 impl Game {
-    pub fn new() -> Self {
+    pub fn new(args: GameArgs) -> Self {
         let mut window = Window::new(&Config {
             width: 1920,
             height: 1080,
@@ -49,17 +58,18 @@ impl Game {
             buffering: Buffering::Single,
             target_fps: None,
         });
-        window.request_grab_cursor(true);
+
+        window.request_grab_cursor(!args.detach_input);
 
         let mut player = Entity::new(
-            Point3::new(-644.0, 116.0, 120.0),
+            args.player_pos,
             AABBDef::new(Vector3::new(-0.4, -1.7, -0.4), Vector3::new(0.8, 1.8, 0.8)),
         );
-        player.euler_rotation = Vector3::new(0.0, -90f32.to_radians(), 0.0);
+        player.euler_rotation = args.player_euler_rot;
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let world = World::new(Rc::clone(&job_system), 15, Some("assets/worlds/benchmark"));
+        let world = World::new(Rc::clone(&job_system), args.fov_y_deg, args.render_distance, args.mc_world);
         let gameplay = Gameplay::new();
 
         Self {

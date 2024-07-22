@@ -48,7 +48,7 @@ pub struct World {
 }
 
 impl World {
-    pub fn new(job_system: Rc<JobSystem>, loading_radius: u32, mc_world_path: Option<&str>) -> Self {
+    pub fn new(job_system: Rc<JobSystem>, fov_y_deg: f32, loading_radius: u32, mc_world_path: Option<String>) -> Self {
         let world_cfg = worldgen::Config {
             sea_level: 70,
             continentalness: Noise {
@@ -83,7 +83,7 @@ impl World {
             storage: {
                 #[allow(clippy::option_if_let_else)]
                 if let Some(path) = mc_world_path {
-                    Box::new(MinecraftStorage::new(job_system.clone(), chunk_allocator.clone(), path))
+                    Box::new(MinecraftStorage::new(job_system.clone(), chunk_allocator.clone(), &path))
                 } else {
                     Box::new(NopStorage::new())
                 }
@@ -94,7 +94,7 @@ impl World {
             world_svo: worldsvo::Svo::new(job_system, graphics_svo, loading_radius),
             world_fbo: Framebuffer::new(1920, 1080, false, false),
             physics: Physics::new(),
-            camera: Camera::new(80.0, 1.0, 0.01, 1024.0),
+            camera: Camera::new(fov_y_deg, 1.0, 0.01, 1024.0),
             selected_voxel: None,
             ambient_intensity: 0.3,
             sun_direction: Vector3::new(-1.0, -1.0, -1.0).normalize(),
@@ -115,7 +115,7 @@ impl World {
     }
 
     pub fn handle_window_resize(&mut self, width: i32, height: i32, aspect_ratio: f32) {
-        self.camera.update_projection(72.0, aspect_ratio, 0.01, 1024.0);
+        self.camera.update_projection(self.camera.get_fov_y_deg(), aspect_ratio, 0.01, 1024.0);
         self.world_fbo = Framebuffer::new(width, height, false, false);
     }
 
@@ -432,7 +432,7 @@ mod tests {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let mut world = World::new(Rc::clone(&job_system), 15, None);
+        let mut world = World::new(Rc::clone(&job_system), 72.0, 15, None);
         world.handle_window_resize(width as i32, height as i32, aspect_ratio);
 
         loop {
