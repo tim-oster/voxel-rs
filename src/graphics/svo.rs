@@ -270,9 +270,8 @@ mod svo_tests {
     use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
-    use crate::world::hds::{ChunkBuffer, csvo, esvo, WorldSvo};
+    use crate::world::hds::{ChunkBufferPool, csvo, esvo, WorldSvo};
     use crate::world::hds::octree::Position;
-    use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;
 
     struct TestCase {
@@ -291,7 +290,7 @@ mod svo_tests {
             chunk
         };
         let create_esvo = || {
-            let buffer_alloc = Arc::new(Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new()));
+            let buffer_alloc = Arc::new(ChunkBufferPool::default());
             let chunk = esvo::SerializedChunk::new(BorrowedChunk::from(create_chunk()), &buffer_alloc);
 
             let mut svo = esvo::Esvo::<esvo::SerializedChunk>::new();
@@ -303,7 +302,7 @@ mod svo_tests {
             esvo
         };
         let create_csvo = || {
-            let buffer_alloc = Arc::new(Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new()));
+            let buffer_alloc = Arc::new(ChunkBufferPool::default());
             let chunk = csvo::SerializedChunk::new(BorrowedChunk::from(create_chunk()), &buffer_alloc);
 
             let mut svo = csvo::Csvo::new();

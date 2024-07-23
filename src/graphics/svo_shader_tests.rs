@@ -17,9 +17,8 @@ mod tests {
     use crate::graphics::svo_registry::MaterialInstance;
     use crate::graphics::texture_array::{TextureArray, TextureArrayBuilder, TextureArrayError};
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
-    use crate::world::hds::{ChunkBuffer, csvo, esvo, WorldSvo};
+    use crate::world::hds::{ChunkBufferPool, csvo, esvo, WorldSvo};
     use crate::world::hds::octree::Position;
-    use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;
 
     #[repr(C)]
@@ -87,16 +86,16 @@ mod tests {
 
         let mut svo: Box<dyn SvoWrapper> = match svo_type {
             SvoType::Esvo => {
-                let buffer_alloc = Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new());
-                let chunk = esvo::SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(buffer_alloc));
+                let buffer_alloc = Arc::new(ChunkBufferPool::default());
+                let chunk = esvo::SerializedChunk::new(BorrowedChunk::from(chunk), &buffer_alloc);
                 let mut svo = esvo::Esvo::<esvo::SerializedChunk>::new();
                 svo.set_leaf(svo_pos, chunk, true);
                 svo.serialize();
                 Box::new(svo)
             }
             SvoType::Csvo => {
-                let buffer_alloc = Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new());
-                let chunk = csvo::SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(buffer_alloc));
+                let buffer_alloc = Arc::new(ChunkBufferPool::default());
+                let chunk = csvo::SerializedChunk::new(BorrowedChunk::from(chunk), &buffer_alloc);
                 let mut svo = csvo::Csvo::new();
                 svo.set_leaf(svo_pos, chunk, true);
                 svo.serialize();
