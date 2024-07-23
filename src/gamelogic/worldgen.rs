@@ -297,7 +297,7 @@ impl ChunkGenerator for Generator {
         let chunk_y = chunk.pos.y * 32;
         chunk.fill_with(|x, y, z| {
             let height = col.height_map[(z * 32 + x) as usize] as i32;
-            let height = (height - chunk_y).min(31);
+            let height = height - chunk_y;
 
             let y = y as i32;
             if y <= height {
