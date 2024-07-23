@@ -60,7 +60,7 @@ uint read_next_ptr(uint ptr, uint depth, uint idx, out bool crossed_boundary) {
 
         if (child_mask == 0) return INVALID_PTR;
 
-        uint offset_mask = (1 << (idx * 2)) - 1;
+        uint offset_mask = (1 << (idx * 2)) - 1;// bitfieldInsert not required because this uses at most 16 out of 32 bits
         uint preceding_mask = header_mask & offset_mask;
 
         uint offset = 0;
