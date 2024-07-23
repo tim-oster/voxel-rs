@@ -10,6 +10,7 @@ use crate::gamelogic::world::World;
 use crate::global_allocated_bytes;
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{AABBDef, Entity};
+use crate::systems::worldsvo;
 use crate::world::chunk::ChunkPos;
 
 pub struct GameArgs {
@@ -192,10 +193,11 @@ impl State {
             .collapsed(false, Condition::Once)
             .build(|| {
                 frame.ui.text(format!(
-                    "fps: {}, frame: {:.2}ms, update: {:.2}ms",
+                    "fps: {}, frame: {:.2}ms, update: {:.2}ms ({})",
                     frame.stats.frames_per_second,
                     frame.stats.avg_frame_time_per_second * 1000.0,
                     frame.stats.avg_update_time_per_second * 1000.0,
+                    worldsvo::SVO_TYPE.name,
                 ));
                 frame.ui.text(format!(
                     "physics fps: {}, every: {:.2}ms",

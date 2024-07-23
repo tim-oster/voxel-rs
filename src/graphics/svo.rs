@@ -23,6 +23,7 @@ pub enum SvoType {
 
 #[derive(Debug, Copy, Clone)]
 pub struct SvoTypeProperties {
+    pub name: &'static str,
     pub shader_type_define: &'static str,
 }
 
@@ -31,8 +32,8 @@ impl Deref for SvoType {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            Self::Esvo => &SvoTypeProperties { shader_type_define: "1" },
-            Self::Csvo => &SvoTypeProperties { shader_type_define: "2" },
+            Self::Esvo => &SvoTypeProperties { name: "ESVO", shader_type_define: "1" },
+            Self::Csvo => &SvoTypeProperties { name: "CSVO", shader_type_define: "2" },
         }
     }
 }
