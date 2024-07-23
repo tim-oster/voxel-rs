@@ -34,7 +34,7 @@ inherits = "release"
 debug = 1
 
 [features]
-default = ["use-esvo"]
+default = ["use-csvo"]
 dhat-heap = []
 bundle-assets = []
 use-esvo = []
