@@ -5,6 +5,7 @@ use cgmath::{Point3, Vector3};
 use imgui::Condition;
 
 use crate::core::{Buffering, Config, Frame, Window};
+use crate::gamelogic::benchmark;
 use crate::gamelogic::gameplay::Gameplay;
 use crate::gamelogic::world::World;
 use crate::global_allocated_bytes;
@@ -269,6 +270,7 @@ impl State {
                 frame.ui.separator();
 
                 let svo_stats = self.world.world_svo.get_stats();
+                benchmark::track_svo_gpu_bytes(svo_stats.used_bytes);
                 frame.ui.text(format!(
                     "gpu svo size: {:.3}mb / {:.3}mb, depth: {}",
                     svo_stats.used_bytes as f32 / 1024f32 / 1024f32,
@@ -292,6 +294,8 @@ impl State {
         let now = Instant::now();
         if now > self.plot_refresh {
             self.plot_refresh += Duration::from_secs_f32(1.0 / 60.0);
+
+            benchmark::track_fps(frame.stats.frames_per_second, frame.stats.avg_frame_time_per_second);
 
             self.plot_fps.add(frame.stats.frames_per_second as f32);
             self.plot_frame_time.add(frame.stats.avg_frame_time_per_second);

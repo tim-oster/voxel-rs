@@ -75,6 +75,21 @@ impl World {
         }
     }
 
+    pub fn mark_all_chunks_as_changed(&mut self) {
+        let chunks = self.chunks.keys().cloned().collect::<Vec<ChunkPos>>();
+        for pos in chunks {
+            self.mark_chunk_as_changed(&pos);
+        }
+    }
+
+    pub fn has_changed_chunks(&self) -> bool {
+        !self.changed_chunks_set.is_empty()
+    }
+
+    pub fn has_borrowed_chunks(&self) -> bool {
+        !self.borrowed_chunks.is_empty()
+    }
+
     /// Sets a chunk at the chunk's position and marks that position as changed. Any previous
     /// chunk at that position is overridden. If the chunk at that position was borrowed, it is
     /// also overridden.

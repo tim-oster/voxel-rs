@@ -241,7 +241,6 @@ impl<A: Allocator> WorldSvo<SerializedChunk> for Csvo<A> {
         }
 
         // rebuild root octree
-        // TODO use tmp_buffer here?
         let buffer = self.serialize_root(&self.octree, self.octree.root.unwrap(), self.octree.depth());
         let offset = self.buffer.insert(u64::MAX, &buffer);
         self.root_info = Some(LeafInfo { buf_offset: offset });
@@ -550,6 +549,10 @@ impl SerializedChunk {
 
     pub fn take_borrowed_chunk(&mut self) -> Option<BorrowedChunk> {
         self.borrowed_chunk.take()
+    }
+
+    pub fn has_data(&self) -> bool {
+        self.buffer.is_some() && self.materials.is_some()
     }
 }
 

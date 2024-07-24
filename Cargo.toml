@@ -24,6 +24,7 @@ dhat = "0.3.2"
 fastanvil = "0.31.0"
 fastnbt = "2"
 clap = { version = "4.5.9", features = ["derive"] }
+dashmap = "6.0.1"
 
 [build-dependencies]
 walkdir = "2.4.0"
@@ -39,3 +40,4 @@ dhat-heap = []
 bundle-assets = []
 use-esvo = []
 use-csvo = []
+benchmark = []

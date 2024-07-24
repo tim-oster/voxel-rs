@@ -385,6 +385,10 @@ impl SerializedChunk {
     pub fn take_borrowed_chunk(&mut self) -> Option<BorrowedChunk> {
         self.borrowed_chunk.take()
     }
+
+    pub fn has_data(&self) -> bool {
+        self.buffer.is_some()
+    }
 }
 
 impl Serializable for SerializedChunk {

@@ -1,6 +1,8 @@
 #![feature(allocator_api, test)]
 #![feature(pointer_is_aligned_to)]
 #![feature(unchecked_shifts)]
+#![feature(duration_millis_float)]
+#![feature(once_cell_get_mut)]
 #![allow(dead_code, unused_variables)]
 
 #![warn(clippy::all, clippy::nursery, clippy::pedantic)]
@@ -33,6 +35,7 @@ use cgmath::{Point3, Vector3};
 use clap::ArgAction;
 use clap::Parser;
 
+use crate::gamelogic::benchmark;
 use crate::gamelogic::game::{Game, GameArgs};
 
 mod core;
@@ -111,4 +114,6 @@ fn main() {
         fov_y_deg: args.fov,
     });
     game.run();
+
+    benchmark::print();
 }

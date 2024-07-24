@@ -4,6 +4,7 @@ use std::sync::Arc;
 use cgmath::Point3;
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use crate::gamelogic::benchmark;
 use crate::graphics;
 use crate::graphics::framebuffer::Framebuffer;
 use crate::graphics::svo::SvoType;
@@ -88,7 +89,13 @@ impl Svo {
     /// ownerships can be reclaimed by calling [`Svo::update`].
     pub fn set_chunk(&self, chunk: BorrowedChunk) {
         let alloc = self.chunk_buffer_pool.clone();
-        self.processor.enqueue(chunk.pos, true, move || target_impl::SerializedChunk::new(chunk, &alloc));
+        self.processor.enqueue(chunk.pos, true, move || {
+            benchmark::trace_if(
+                "serialize_chunk",
+                || target_impl::SerializedChunk::new(chunk, &alloc),
+                |chunk| chunk.has_data(),
+            )
+        });
     }
 
     pub fn remove_chunk(&mut self, pos: &ChunkPos) {

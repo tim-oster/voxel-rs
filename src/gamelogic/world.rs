@@ -1,14 +1,15 @@
 use std::ops::{Add, Sub};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use cgmath::{EuclideanSpace, InnerSpace, Point3, Vector3};
 use imgui::{Condition, TreeNodeFlags};
 
 use crate::{graphics, systems};
 use crate::core::Frame;
+use crate::gamelogic::{benchmark, worldgen};
+use crate::gamelogic::benchmark::Trace;
 use crate::gamelogic::content::blocks;
-use crate::gamelogic::worldgen;
 use crate::gamelogic::worldgen::{Generator, Noise, SplinePoint};
 use crate::graphics::camera::Camera;
 use crate::graphics::framebuffer::Framebuffer;
@@ -157,8 +158,17 @@ impl World {
                     self.world_generator.enqueue_chunk(chunk.pos, chunk.value.1);
                     continue;
                 }
+
+                let pos = chunk.pos;
                 let chunk = chunk.value.0.unwrap();
-                self.world.set_chunk(chunk);
+
+                // set chunk to world but shortcut the change detection mechanism to avoid unnecessary iterations
+                self.world.set_chunk_unchanged(chunk);
+
+                if cfg!(not(feature = "benchmark")) {
+                    let chunk = self.world.borrow_chunk(&pos).unwrap();
+                    self.world_svo.set_chunk(chunk);
+                }
             }
         }
         for chunk in self.world_generator.get_generated_chunks(400) {
@@ -168,8 +178,10 @@ impl World {
                 // set chunk to world but shortcut the change detection mechanism to avoid unnecessary iterations
                 self.world.set_chunk_unchanged(chunk);
 
-                let chunk = self.world.borrow_chunk(&pos).unwrap();
-                self.world_svo.set_chunk(chunk);
+                if cfg!(not(feature = "benchmark")) {
+                    let chunk = self.world.borrow_chunk(&pos).unwrap();
+                    self.world_svo.set_chunk(chunk);
+                }
             }
         }
         for pos in self.world.get_changed_chunks(400) {
@@ -187,6 +199,26 @@ impl World {
         let chunks = self.world_svo.update(&current_chunk_pos);
         for chunk in chunks {
             self.world.return_chunk(chunk);
+        }
+
+        if cfg!(feature = "benchmark") {
+            static STARTED_RENDERING: once_cell::race::OnceBool = once_cell::race::OnceBool::new();
+            static FINISHED_RENDERING: once_cell::race::OnceBool = once_cell::race::OnceBool::new();
+            static TRACE: RwLock<Option<Trace>> = RwLock::new(None);
+
+            if !self.storage.has_pending_jobs() && !self.world_generator.has_pending_jobs() {
+                if STARTED_RENDERING.set(true).is_ok() {
+                    self.world.mark_all_chunks_as_changed();
+                    *TRACE.write().unwrap() = Some(benchmark::start_trace("full world serializing"));
+                }
+            }
+
+            if STARTED_RENDERING.get().unwrap_or(false)
+                && !FINISHED_RENDERING.get().unwrap_or(false)
+                && !self.world.has_changed_chunks() && !self.world.has_borrowed_chunks() && !self.world_svo.has_pending_jobs() {
+                FINISHED_RENDERING.set(true).unwrap();
+                benchmark::stop_trace(TRACE.write().unwrap().take().unwrap());
+            }
         }
     }
 
