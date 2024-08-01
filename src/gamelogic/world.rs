@@ -49,7 +49,7 @@ pub struct World {
 }
 
 impl World {
-    pub fn new(job_system: Rc<JobSystem>, fov_y_deg: f32, loading_radius: u32, mc_world_path: Option<String>) -> Self {
+    pub fn new(job_system: Rc<JobSystem>, fov_y_deg: f32, render_shadows: bool, loading_radius: u32, mc_world_path: Option<String>) -> Self {
         let world_cfg = worldgen::Config {
             sea_level: 70,
             continentalness: Noise {
@@ -99,7 +99,7 @@ impl World {
             selected_voxel: None,
             ambient_intensity: 0.3,
             sun_direction: Vector3::new(-1.0, -1.0, -1.0).normalize(),
-            render_shadows: true,
+            render_shadows,
             shadow_distance: 500.0,
         }
     }
@@ -208,8 +208,9 @@ impl World {
 
             if !self.storage.has_pending_jobs() && !self.world_generator.has_pending_jobs() {
                 if STARTED_RENDERING.set(true).is_ok() {
+                    println!("all chunks loaded");
                     self.world.mark_all_chunks_as_changed();
-                    *TRACE.write().unwrap() = Some(benchmark::start_trace("full world serializing"));
+                    *TRACE.write().unwrap() = Some(benchmark::start_trace("serialize_world"));
                 }
             }
 
@@ -218,6 +219,7 @@ impl World {
                 && !self.world.has_changed_chunks() && !self.world.has_borrowed_chunks() && !self.world_svo.has_pending_jobs() {
                 FINISHED_RENDERING.set(true).unwrap();
                 benchmark::stop_trace(TRACE.write().unwrap().take().unwrap());
+                benchmark::reset_fps();
             }
         }
     }

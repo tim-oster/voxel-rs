@@ -3,6 +3,8 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use dashmap::DashMap;
+#[cfg(feature = "benchmark")]
+use serde_json::{json, Map};
 
 struct Samples<const N: usize> {
     samples: [f32; N],
@@ -26,6 +28,12 @@ impl<const N: usize> Samples<N> {
             self.ptr %= N;
             self.wrapped = true;
         }
+    }
+
+    fn reset(&mut self) {
+        self.samples = [0.0; N];
+        self.ptr = 0;
+        self.wrapped = false;
     }
 
     fn avg(&self) -> f32 {
@@ -100,6 +108,16 @@ pub fn track_fps(fps: i32, frame_time: f32) {
 pub fn track_fps(fps: i32, frame_time: f32) {}
 
 #[cfg(feature = "benchmark")]
+pub fn reset_fps() {
+    let bm = get_benchmark();
+    bm.fps_samples.reset();
+    bm.frame_time_samples.reset();
+}
+
+#[cfg(not(feature = "benchmark"))]
+pub fn reset_fps() {}
+
+#[cfg(feature = "benchmark")]
 pub fn track_svo_gpu_bytes(bytes: usize) {
     let bm = get_benchmark();
     bm.svo_gpu_bytes.set(bytes);
@@ -163,15 +181,30 @@ pub fn trace_if<T, Fn: FnOnce() -> T, Cond: FnOnce(&T) -> bool>(name: &str, f: F
 
 #[cfg(feature = "benchmark")]
 pub fn print() {
-    // TODO use json?
     let bm = get_benchmark();
-    println!("fps - avg: {}, med: {}", bm.fps_samples.avg(), bm.fps_samples.median());
-    println!("frame time - avg: {}ms, med: {}ms", bm.frame_time_samples.avg() * 1000.0, bm.frame_time_samples.median() * 1000.0);
-    println!("max gpu svo bytes: {}mb", bm.svo_gpu_bytes.value.unwrap_or(0) as f32 / 1024f32 / 1024f32);
 
+    let mut traces = Map::new();
     for t in bm.traces.iter() {
-        println!("trace {} - avg: {}, med: {}", t.key(), t.avg(), t.median());
+        traces.insert(t.key().clone(), json!({
+            "avg": t.avg(),
+            "med": t.median(),
+        }));
     }
+
+    let results = json!({
+        "fps": {
+            "avg": bm.fps_samples.avg(),
+            "med": bm.fps_samples.median(),
+        },
+        "frame_time_ms": {
+            "avg": bm.frame_time_samples.avg() * 1000.0,
+            "med": bm.frame_time_samples.median() * 1000.0,
+        },
+        "svo_size_mb": bm.svo_gpu_bytes.value.unwrap_or(0) as f32 / 1024f32 / 1024f32,
+        "traces": traces,
+    });
+
+    println!("benchmark: {}", serde_json::to_string(&results).unwrap());
 }
 
 #[cfg(not(feature = "benchmark"))]

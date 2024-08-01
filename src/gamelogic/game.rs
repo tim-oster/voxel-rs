@@ -1,4 +1,6 @@
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use cgmath::{Point3, Vector3};
@@ -21,6 +23,7 @@ pub struct GameArgs {
     pub detach_input: bool,
     pub render_distance: u32,
     pub fov_y_deg: f32,
+    pub render_shadows: bool,
 }
 
 /// Game runs the actual game loop and handles communication and calling to the different game
@@ -71,7 +74,7 @@ impl Game {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let world = World::new(Rc::clone(&job_system), args.fov_y_deg, args.render_distance, args.mc_world);
+        let world = World::new(Rc::clone(&job_system), args.fov_y_deg, args.render_shadows, args.render_distance, args.mc_world);
         let gameplay = Gameplay::new();
 
         Self {
@@ -94,7 +97,7 @@ impl Game {
         }
     }
 
-    pub fn run(self) {
+    pub fn run(self, closer: Arc<AtomicBool>) {
         let mut window = self.window;
         let mut state = self.state;
 
@@ -104,6 +107,9 @@ impl Game {
         let mut fixed_frames = 0;
 
         loop {
+            if closer.load(Ordering::Relaxed) {
+                window.request_close();
+            }
             if window.should_close() {
                 break;
             }
