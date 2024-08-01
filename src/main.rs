@@ -122,7 +122,9 @@ fn main() {
     });
 
     let closer = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGBREAK, Arc::clone(&closer)).unwrap();
+    if cfg!(windows) {
+        signal_hook::flag::register(signal_hook::consts::SIGBREAK, Arc::clone(&closer)).unwrap();
+    }
     game.run(&closer);
 
     benchmark::print();
