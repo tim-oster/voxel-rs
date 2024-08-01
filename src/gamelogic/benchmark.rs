@@ -44,7 +44,7 @@ impl<const N: usize> Samples<N> {
     fn median(&self) -> f32 {
         let end = if self.wrapped { N } else { self.ptr };
 
-        let mut samples = self.samples.clone();
+        let mut samples = self.samples;
         let samples = &mut samples[..end];
         samples.sort_unstable_by(f32::total_cmp);
 
@@ -139,6 +139,7 @@ pub fn start_trace(name: &str) -> Trace {
 }
 
 #[cfg(feature = "benchmark")]
+#[allow(clippy::needless_pass_by_value)]
 pub fn stop_trace(trace: Trace) {
     let elapsed = trace.start.elapsed();
 
@@ -150,6 +151,7 @@ pub fn stop_trace(trace: Trace) {
 }
 
 #[cfg(not(feature = "benchmark"))]
+#[allow(clippy::needless_pass_by_value)]
 pub fn stop_trace(trace: Trace) {}
 
 #[cfg(feature = "benchmark")]

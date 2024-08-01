@@ -206,12 +206,10 @@ impl World {
             static FINISHED_RENDERING: once_cell::race::OnceBool = once_cell::race::OnceBool::new();
             static TRACE: RwLock<Option<Trace>> = RwLock::new(None);
 
-            if !self.storage.has_pending_jobs() && !self.world_generator.has_pending_jobs() {
-                if STARTED_RENDERING.set(true).is_ok() {
-                    println!("all chunks loaded");
-                    self.world.mark_all_chunks_as_changed();
-                    *TRACE.write().unwrap() = Some(benchmark::start_trace("serialize_world"));
-                }
+            if !self.storage.has_pending_jobs() && !self.world_generator.has_pending_jobs() && STARTED_RENDERING.set(true).is_ok() {
+                println!("all chunks loaded");
+                self.world.mark_all_chunks_as_changed();
+                *TRACE.write().unwrap() = Some(benchmark::start_trace("serialize_world"));
             }
 
             if STARTED_RENDERING.get().unwrap_or(false)
@@ -466,7 +464,7 @@ mod tests {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let mut world = World::new(Rc::clone(&job_system), 72.0, 15, None);
+        let mut world = World::new(Rc::clone(&job_system), 72.0, true, 15, None);
         world.handle_window_resize(width as i32, height as i32, aspect_ratio);
 
         loop {

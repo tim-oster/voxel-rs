@@ -76,7 +76,7 @@ impl World {
     }
 
     pub fn mark_all_chunks_as_changed(&mut self) {
-        let chunks = self.chunks.keys().cloned().collect::<Vec<ChunkPos>>();
+        let chunks = self.chunks.keys().copied().collect::<Vec<ChunkPos>>();
         for pos in chunks {
             self.mark_chunk_as_changed(&pos);
         }

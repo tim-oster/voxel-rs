@@ -93,7 +93,7 @@ impl Svo {
             benchmark::trace_if(
                 "serialize_chunk",
                 || target_impl::SerializedChunk::new(chunk, &alloc),
-                |chunk| chunk.has_data(),
+                target_impl::SerializedChunk::has_data,
             )
         });
     }

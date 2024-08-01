@@ -97,7 +97,7 @@ impl Game {
         }
     }
 
-    pub fn run(self, closer: Arc<AtomicBool>) {
+    pub fn run(self, closer: &Arc<AtomicBool>) {
         let mut window = self.window;
         let mut state = self.state;
 
