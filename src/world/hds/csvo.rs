@@ -416,8 +416,9 @@ impl SerializedChunk {
                 depth = chunk.lod;
             }
 
-            let (b, m) = Self::serialize_octant(alloc, storage, root_id, depth, 0);
-            (buffer, materials) = (Some(b), Some(m));
+            materials = Some(Vec::new());
+            let b = Self::serialize_octant(alloc, storage, root_id, depth, 0, materials.as_mut().unwrap());
+            buffer = Some(b);
         }
 
         Self {
@@ -430,12 +431,11 @@ impl SerializedChunk {
         }
     }
 
-    pub fn serialize_octant<A: Allocator>(alloc: &Arc<ChunkBufferPool<u8>>, octree: &Octree<BlockId, A>, octant_id: OctantId, depth: u8, material_offset: u16) -> (Pooled<ChunkBuffer<u8, StatsAllocator>>, Vec<BlockId>) {
+    pub fn serialize_octant<A: Allocator>(alloc: &Arc<ChunkBufferPool<u8>>, octree: &Octree<BlockId, A>, octant_id: OctantId, depth: u8, material_offset: u16, materials: &mut Vec<BlockId>) -> Pooled<ChunkBuffer<u8, StatsAllocator>> {
         let octant = &octree.octants[octant_id as usize];
 
         if depth == 1 {
             let mut leaf_mask = 0u8;
-            let mut materials = Vec::new();
 
             for (idx, child) in octant.children.iter().enumerate() {
                 if child.is_none() {
@@ -460,10 +460,9 @@ impl SerializedChunk {
 
             let mut buffer = alloc.allocate();
             buffer.push(leaf_mask);
-            return (buffer, materials);
+            return buffer;
         }
 
-        let mut materials = Vec::new();
         let mut children = Vec::new();
         for (idx, child) in octant.children.iter().enumerate() {
             if child.is_none() {
@@ -474,9 +473,8 @@ impl SerializedChunk {
             // decrease lod and calculate buffer offset before recursively serializing the child octant
             let child_id = child.get_octant_value().unwrap();
 
-            let (buffer, child_materials) = Self::serialize_octant(alloc, octree, child_id, depth - 1, material_offset + materials.len() as u16);
+            let buffer = Self::serialize_octant(alloc, octree, child_id, depth - 1, materials.len() as u16, materials);
             children.push((idx, buffer));
-            materials.extend(child_materials);
         }
 
         let mut buffer = alloc.allocate();
@@ -544,7 +542,7 @@ impl SerializedChunk {
             buffer[1] = header_bytes[1];
         }
 
-        (buffer, materials)
+        buffer
     }
 
     pub fn take_borrowed_chunk(&mut self) -> Option<BorrowedChunk> {
@@ -607,7 +605,8 @@ mod serialized_chunk_tests {
         octree.compact();
 
         let alloc = Arc::new(ChunkBufferPool::default());
-        let (result, materials) = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth(), 0);
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth(), 0, &mut materials);
         assert_eq!(result.data, vec![
             1, 0, 0,    // inode
             1, 0,       // plnode
@@ -627,7 +626,8 @@ mod serialized_chunk_tests {
         octree.compact();
 
         let alloc = Arc::new(ChunkBufferPool::default());
-        let (result, materials) = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth(), 0);
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth(), 0, &mut materials);
         assert_eq!(result.data, vec![
             1, 0, 0,                       // inode
             1 | (1 << 7), 0, 5,            // plnode
@@ -646,7 +646,8 @@ mod serialized_chunk_tests {
         octree.compact();
 
         let alloc = Arc::new(ChunkBufferPool::default());
-        let (result, materials) = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth(), 0);
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth(), 0, &mut materials);
         assert_eq!(result.data, vec![
             0b_00_01_01_00, 0b00_00_00_01, 0, 9, 18,
             0b00_00_01_00, 0, 0,
@@ -671,7 +672,8 @@ mod serialized_chunk_tests {
         octree.compact();
 
         let alloc = Arc::new(ChunkBufferPool::default());
-        let (result, materials) = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 1, 0);
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 1, 0, &mut materials);
         assert_eq!(result.data, vec![
             0b_00_01_01_00, 0b00_00_00_01, 0, 6, 12,
             2, 0,
@@ -683,7 +685,8 @@ mod serialized_chunk_tests {
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
 
-        let (result, materials) = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 2, 0);
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 2, 0, &mut materials);
         assert_eq!(result.data, vec![
             0b00010110, 0, 4, 8,
             2, 0, 0, 2,
@@ -692,13 +695,15 @@ mod serialized_chunk_tests {
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
 
-        let (result, materials) = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 3, 0);
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 3, 0, &mut materials);
         assert_eq!(result.data, vec![
             0b00010110, 0, 0, 2, 4, 16,
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
 
-        let (result, materials) = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 4, 0);
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 4, 0, &mut materials);
         assert_eq!(result.data, vec![
             22,
         ]);
