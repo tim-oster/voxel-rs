@@ -513,14 +513,50 @@ where
 
 #[cfg(test)]
 mod esvo_tests {
+    use std::sync::Arc;
+    use test::Bencher;
+
     use rustc_hash::FxHashMap;
 
-    use crate::world::chunk::{BlockId, ChunkPos};
+    use crate::world::chunk::{BlockId, Chunk, ChunkPos, ChunkStorageAllocator};
+    use crate::world::hds::{ChunkBufferPool, WorldSvo};
     use crate::world::hds::esvo::{ChunkBuffer, Esvo, LeafInfo, RangeBuffer, SerializationResult, SerializedChunk, U32Slicer};
     use crate::world::hds::internal::Range;
     use crate::world::hds::octree::{LeafId, Octree, Position};
-    use crate::world::hds::WorldSvo;
     use crate::world::memory::{Pool, StatsAllocator};
+    use crate::world::world::BorrowedChunk;
+
+    #[bench]
+    fn serialized_chunk_bench(b: &mut Bencher) {
+        let storage_pool = ChunkStorageAllocator::new();
+
+        let mut octree = storage_pool.allocate();
+        octree.construct_octants_with(5, |pos| {
+            if (pos.0 + pos.1 + pos.2) % 2 == 0 {
+                Some(1)
+            } else {
+                None
+            }
+        });
+        octree.compact();
+
+        let mut chunk = Some(Chunk::new(ChunkPos::new(0, 0, 0), 5, octree));
+        let buffer_pool = Arc::new(ChunkBufferPool::default());
+
+        let mut byte_size = 0;
+
+        b.iter(|| {
+            let bc = BorrowedChunk::from(chunk.take().unwrap());
+            let mut result = SerializedChunk::new(bc, &buffer_pool);
+            chunk = result.borrowed_chunk.take().unwrap().take();
+
+            byte_size = result.buffer.as_ref().unwrap().len();
+
+            result
+        });
+
+        println!("byte size: {byte_size}");
+    }
 
     /// Tests that serializing an SVO with `SerializedChunk` values produces the expected result buffer.
     #[test]

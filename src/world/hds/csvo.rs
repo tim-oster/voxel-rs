@@ -336,11 +336,11 @@ mod csvo_tests {
         chunk.storage.as_mut().unwrap().compact();
         let sc = SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(ChunkBufferPool::default()));
 
-        let mut esvo = Csvo::new();
-        esvo.set_leaf(Position(1, 0, 0), sc, true);
-        esvo.serialize();
+        let mut csvo = Csvo::new();
+        csvo.set_leaf(Position(1, 0, 0), sc, true);
+        csvo.serialize();
 
-        assert_eq!(esvo.root_info, Some(LeafInfo { buf_offset: 49 }));
+        assert_eq!(csvo.root_info, Some(LeafInfo { buf_offset: 49 }));
 
         let expected = vec![
             // chunk LOD
@@ -368,7 +368,7 @@ mod csvo_tests {
             0b00_00_11_00, 0,
             0, 0, 0, 1 << 7, // 0 with absolute pointer flag as u32 bytes
         ];
-        assert_eq!(esvo.buffer, RangeBuffer {
+        assert_eq!(csvo.buffer, RangeBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 55 }],
@@ -380,7 +380,7 @@ mod csvo_tests {
 
         let mut buffer = Vec::new();
         buffer.resize(200, 0);
-        let size = unsafe { esvo.write_to(buffer.as_mut_ptr()) };
+        let size = unsafe { csvo.write_to(buffer.as_mut_ptr()) };
         assert_eq!(buffer[..size], [
             vec![49, 0, 0, 0],
             expected,
@@ -559,11 +559,45 @@ impl SerializedChunk {
 #[cfg(test)]
 mod serialized_chunk_tests {
     use std::sync::Arc;
+    use test::Bencher;
 
-    use crate::world::chunk::BlockId;
+    use crate::world::chunk::{BlockId, Chunk, ChunkPos, ChunkStorageAllocator};
     use crate::world::hds::ChunkBufferPool;
     use crate::world::hds::csvo::SerializedChunk;
     use crate::world::hds::octree::{Octree, Position};
+    use crate::world::world::BorrowedChunk;
+
+    #[bench]
+    fn serialize_chunk_bench(b: &mut Bencher) {
+        let storage_pool = ChunkStorageAllocator::new();
+
+        let mut octree = storage_pool.allocate();
+        octree.construct_octants_with(5, |pos| {
+            if (pos.0 + pos.1 + pos.2) % 2 == 0 {
+                Some(1)
+            } else {
+                None
+            }
+        });
+        octree.compact();
+
+        let mut chunk = Some(Chunk::new(ChunkPos::new(0, 0, 0), 5, octree));
+        let buffer_pool = Arc::new(ChunkBufferPool::default());
+
+        let mut byte_size = 0;
+
+        b.iter(|| {
+            let bc = BorrowedChunk::from(chunk.take().unwrap());
+            let mut result = SerializedChunk::new(bc, &buffer_pool);
+            chunk = result.borrowed_chunk.take().unwrap().take();
+
+            byte_size = result.buffer.as_ref().unwrap().len();
+
+            result
+        });
+
+        println!("byte size: {byte_size}");
+    }
 
     #[test]
     fn serialize_octant_single_leaf() {

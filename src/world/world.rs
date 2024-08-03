@@ -23,6 +23,11 @@ impl BorrowedChunk {
             was_dropped: Arc::new(AtomicBool::new(false)),
         }
     }
+
+    pub fn take(mut self) -> Option<Chunk> {
+        self.was_dropped.store(true, Ordering::Relaxed);
+        self.chunk.take()
+    }
 }
 
 impl Drop for BorrowedChunk {
