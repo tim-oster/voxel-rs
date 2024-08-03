@@ -1223,7 +1223,108 @@ mod tests {
         }
     }
 
-    #[cfg(test)]
+    mod esvo_benchmarks {
+        use test::Bencher;
+
+        use cgmath::{Point3, Vector3};
+
+        use crate::graphics::svo::SvoType;
+        use crate::graphics::svo_shader_tests::tests::{cast_ray, setup_test};
+
+        #[bench]
+        fn hitting_nothing(b: &mut Bencher) {
+            let setup = setup_test(SvoType::Esvo, None, |chunk| {
+                for x in 0..32 {
+                    chunk.set_block(x, 0, 0, 1);
+                }
+                for y in 0..32 {
+                    chunk.set_block(0, y, 0, 1);
+                }
+                for z in 0..32 {
+                    chunk.set_block(0, 0, z, 1);
+                }
+            });
+
+            b.iter(|| {
+                cast_ray(&setup.shader, Point3::new(0.0, 1.5, 1.5), Vector3::new(1.0, 0.0, 0.0), 32.0, false)
+            });
+        }
+
+        #[bench]
+        fn hitting_opaque_voxel(b: &mut Bencher) {
+            let setup = setup_test(SvoType::Esvo, None, |chunk| chunk.set_block(31, 0, 0, 1));
+
+            b.iter(|| {
+                cast_ray(&setup.shader, Point3::new(0.0, 0.5, 0.5), Vector3::new(1.0, 0.0, 0.0), 32.0, false)
+            });
+        }
+
+        #[bench]
+        fn hitting_transparent_voxels(b: &mut Bencher) {
+            let setup = setup_test(SvoType::Esvo, None, |chunk| {
+                for x in 0..6 {
+                    chunk.set_block(x, 0, 0, 3);
+                }
+                chunk.set_block(6, 0, 0, 1);
+            });
+
+            b.iter(|| {
+                cast_ray(&setup.shader, Point3::new(-0.1, 0.25, 0.75), Vector3::new(1.0, 0.0, 0.0), 32.0, true)
+            });
+        }
+    }
+
+    mod csvo_benchmarks {
+        use test::Bencher;
+
+        use cgmath::{Point3, Vector3};
+
+        use crate::graphics::svo::SvoType;
+        use crate::graphics::svo_shader_tests::tests::{cast_ray, setup_test};
+
+        #[bench]
+        fn hitting_nothing(b: &mut Bencher) {
+            let setup = setup_test(SvoType::Csvo, None, |chunk| {
+                for x in 0..32 {
+                    chunk.set_block(x, 0, 0, 1);
+                }
+                for y in 0..32 {
+                    chunk.set_block(0, y, 0, 1);
+                }
+                for z in 0..32 {
+                    chunk.set_block(0, 0, z, 1);
+                }
+            });
+
+            b.iter(|| {
+                cast_ray(&setup.shader, Point3::new(0.0, 1.5, 1.5), Vector3::new(1.0, 0.0, 0.0), 32.0, false)
+            });
+        }
+
+        #[bench]
+        fn hitting_opaque_voxel(b: &mut Bencher) {
+            let setup = setup_test(SvoType::Csvo, None, |chunk| chunk.set_block(31, 0, 0, 1));
+
+            b.iter(|| {
+                cast_ray(&setup.shader, Point3::new(0.0, 0.5, 0.5), Vector3::new(1.0, 0.0, 0.0), 32.0, false)
+            });
+        }
+
+        #[bench]
+        fn hitting_transparent_voxels(b: &mut Bencher) {
+            let setup = setup_test(SvoType::Csvo, None, |chunk| {
+                for x in 0..6 {
+                    chunk.set_block(x, 0, 0, 3);
+                }
+                chunk.set_block(6, 0, 0, 1);
+            });
+
+            b.iter(|| {
+                cast_ray(&setup.shader, Point3::new(-0.1, 0.25, 0.75), Vector3::new(1.0, 0.0, 0.0), 32.0, true)
+            });
+        }
+    }
+
     mod csvo_bit_magic_tests {
         use std::ops::Sub;
         use std::slice;
