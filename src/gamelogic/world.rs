@@ -29,6 +29,7 @@ pub struct World {
     job_system: Rc<JobSystem>,
 
     chunk_loader: ChunkLoader,
+    no_lod: bool,
     pub chunk_storage_allocator: Arc<ChunkStorageAllocator>,
     pub storage: Box<dyn Storage>,
 
@@ -37,6 +38,8 @@ pub struct World {
     world_generator_cfg: worldgen::Config,
     pub world_svo: worldsvo::Svo,
     world_fbo: Framebuffer,
+
+    gpu_size_mb: usize,
 
     physics: Physics,
 
@@ -49,7 +52,7 @@ pub struct World {
 }
 
 impl World {
-    pub fn new(job_system: Rc<JobSystem>, fov_y_deg: f32, render_shadows: bool, loading_radius: u32, mc_world_path: Option<String>) -> Self {
+    pub fn new(job_system: Rc<JobSystem>, fov_y_deg: f32, render_shadows: bool, loading_radius: u32, no_lod: bool, mc_world_path: Option<String>, gpu_size_mb: usize) -> Self {
         let world_cfg = worldgen::Config {
             sea_level: 70,
             continentalness: Noise {
@@ -75,11 +78,12 @@ impl World {
         };
         let chunk_allocator = Arc::new(ChunkStorageAllocator::new());
         let chunk_generator = Generator::new(1, world_cfg.clone());
-        let graphics_svo = graphics::Svo::new(&blocks::new_registry(), worldsvo::SVO_TYPE);
+        let graphics_svo = graphics::Svo::new(&blocks::new_registry(), worldsvo::SVO_TYPE, gpu_size_mb);
 
         Self {
             job_system: Rc::clone(&job_system),
             chunk_loader: ChunkLoader::new(loading_radius, 0, 8),
+            no_lod,
             chunk_storage_allocator: chunk_allocator.clone(),
             storage: {
                 #[allow(clippy::option_if_let_else)]
@@ -94,6 +98,7 @@ impl World {
             world_generator_cfg: world_cfg,
             world_svo: worldsvo::Svo::new(job_system, graphics_svo, loading_radius),
             world_fbo: Framebuffer::new(1920, 1080, false, false),
+            gpu_size_mb,
             physics: Physics::new(),
             camera: Camera::new(fov_y_deg, 1.0, 0.01, 1024.0),
             selected_voxel: None,
@@ -132,8 +137,9 @@ impl World {
             let chunk_events = Self::sort_chunks_by_view_frustum(chunk_events, &self.camera);
             for event in &chunk_events {
                 match event {
-                    ChunkEvent::Load { pos, lod } => {
-                        self.storage.load(pos, *lod);
+                    ChunkEvent::Load { pos, mut lod } => {
+                        if self.no_lod { lod = 5; };
+                        self.storage.load(pos, lod);
                         loaded_count += 1;
                     }
                     ChunkEvent::Unload { pos } => {
@@ -142,8 +148,10 @@ impl World {
                         self.world.remove_chunk(pos);
                     }
                     ChunkEvent::LodChange { pos, lod } => {
-                        if let Some(chunk) = self.world.get_chunk_mut(pos) {
-                            chunk.lod = *lod;
+                        if !self.no_lod {
+                            if let Some(chunk) = self.world.get_chunk_mut(pos) {
+                                chunk.lod = *lod;
+                            }
                         }
                     }
                 }
@@ -290,7 +298,7 @@ impl World {
                     self.job_system.wait_until_processed();
 
                     let chunk_generator = Generator::new(1, self.world_generator_cfg.clone());
-                    let graphics_svo = graphics::Svo::new(&blocks::new_registry(), worldsvo::SVO_TYPE);
+                    let graphics_svo = graphics::Svo::new(&blocks::new_registry(), worldsvo::SVO_TYPE, self.gpu_size_mb);
 
                     self.chunk_loader = ChunkLoader::new(self.chunk_loader.get_radius(), 0, 8);
                     self.world = world::World::new();
@@ -464,7 +472,7 @@ mod tests {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let mut world = World::new(Rc::clone(&job_system), 72.0, true, 15, None);
+        let mut world = World::new(Rc::clone(&job_system), 72.0, true, 15, false, None, 800);
         world.handle_window_resize(width as i32, height as i32, aspect_ratio);
 
         loop {

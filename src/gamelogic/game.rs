@@ -24,6 +24,8 @@ pub struct GameArgs {
     pub render_distance: u32,
     pub fov_y_deg: f32,
     pub render_shadows: bool,
+    pub no_lod: bool,
+    pub gpu_buffer_size_mb: usize,
 }
 
 /// Game runs the actual game loop and handles communication and calling to the different game
@@ -74,7 +76,7 @@ impl Game {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let world = World::new(Rc::clone(&job_system), args.fov_y_deg, args.render_shadows, args.render_distance, args.mc_world);
+        let world = World::new(Rc::clone(&job_system), args.fov_y_deg, args.render_shadows, args.render_distance, args.no_lod, args.mc_world, args.gpu_buffer_size_mb);
         let gameplay = Gameplay::new();
 
         Self {

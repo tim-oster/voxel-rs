@@ -106,7 +106,7 @@ pub struct RenderParams {
 }
 
 impl Svo {
-    pub fn new(registry: &VoxelRegistry, typ: SvoType) -> Self {
+    pub fn new(registry: &VoxelRegistry, typ: SvoType, size_mb: usize) -> Self {
         let svo_type = typ.shader_type_define;
 
         let tex_array = registry.build_texture_array().unwrap();
@@ -130,7 +130,7 @@ impl Svo {
             tex_array,
             material_buffer,
             world_shader,
-            world_buffer: MappedBuffer::new(300 * 1000 * 1000), // 300 MB
+            world_buffer: MappedBuffer::new(size_mb * 1000 * 1000),
             screen_quad: ScreenQuad::new(),
             render_fence: RefCell::new(Fence::new()),
 
@@ -297,7 +297,7 @@ mod svo_tests {
             svo.set_leaf(Position(0, 0, 0), chunk, true);
             svo.serialize();
 
-            let mut esvo = Svo::new(&create_voxel_registry(), SvoType::Esvo);
+            let mut esvo = Svo::new(&create_voxel_registry(), SvoType::Esvo, 10);
             esvo.update(&mut svo);
             esvo
         };
@@ -309,7 +309,7 @@ mod svo_tests {
             svo.set_leaf(Position(0, 0, 0), chunk, true);
             svo.serialize();
 
-            let mut csvo = Svo::new(&create_voxel_registry(), SvoType::Csvo);
+            let mut csvo = Svo::new(&create_voxel_registry(), SvoType::Csvo, 10);
             csvo.update(&mut svo);
             csvo
         };

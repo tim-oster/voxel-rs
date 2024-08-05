@@ -101,9 +101,17 @@ struct Args {
     #[arg(long, action = ArgAction::Set, default_value = "true")]
     render_shadows: bool,
 
+    /// Defines if levels of detail are used for chunk serialization.
+    #[arg(long, action = ArgAction::Set, default_value = "false")]
+    no_lod: bool,
+
     /// Optional directory path to a minecraft world to load. Must be in anvil file format.
     #[arg(long)]
     mc_world: Option<String>,
+
+    /// Amount of megabyte to allocate for the GPU-side SVO buffer.
+    #[arg(long, default_value = "800")]
+    gpu_buffer_size: usize,
 }
 
 fn main() {
@@ -119,6 +127,8 @@ fn main() {
         render_distance: args.render_distance,
         fov_y_deg: args.fov,
         render_shadows: args.render_shadows,
+        no_lod: args.no_lod,
+        gpu_buffer_size_mb: args.gpu_buffer_size,
     });
 
     let closer = Arc::new(AtomicBool::new(false));

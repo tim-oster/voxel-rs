@@ -5,7 +5,7 @@ import subprocess
 import time
 
 
-def run_benchmark(svo_type, render_distance, render_shadows):
+def run_benchmark(svo_type, render_distance, render_shadows, no_lod):
     cmd = [
         "cargo",
         "run",
@@ -20,6 +20,8 @@ def run_benchmark(svo_type, render_distance, render_shadows):
         "--fov=80",
         "--mc-world=assets/worlds/benchmark",
         "--render-shadows=" + ("true" if render_shadows else "false"),
+        "--no-lod=" + ("true" if no_lod else "false"),
+        "--gpu-buffer-size=3000"
     ]
 
     process = subprocess.Popen(cmd, shell=False, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -32,7 +34,7 @@ def run_benchmark(svo_type, render_distance, render_shadows):
         if output == "all chunks loaded":
             break
 
-    time.sleep(10)
+    time.sleep(20)
 
     process.send_signal(signal.CTRL_BREAK_EVENT)
     process.wait()
@@ -84,6 +86,7 @@ def main():
     matrix = {
         "render_distance": [10, 20, 30, 40],
         "render_shadows": [True, False],
+        "no_lod": [True, False],
         "passes": list(range(4)),
         # put svo type last so that build cache is only discarded once
         "svo_type": ["esvo", "csvo"],
@@ -92,7 +95,7 @@ def main():
     results = []
     for i, case in enumerate(unique_combinations(matrix)):
         print("running case", case)
-        r = run_benchmark(case["svo_type"], case["render_distance"], case["render_shadows"])
+        r = run_benchmark(case["svo_type"], case["render_distance"], case["render_shadows"], case["no_lod"])
         results.append((case, r))
 
     if len(results) == 0:
