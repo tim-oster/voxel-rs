@@ -1,15 +1,19 @@
 use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use cgmath::{Point3, Vector3};
 use imgui::Condition;
 
 use crate::core::{Buffering, Config, Frame, Window};
+use crate::gamelogic::benchmark;
 use crate::gamelogic::gameplay::Gameplay;
 use crate::gamelogic::world::World;
 use crate::global_allocated_bytes;
 use crate::systems::jobs::JobSystem;
 use crate::systems::physics::{AABBDef, Entity};
+use crate::systems::worldsvo;
 use crate::world::chunk::ChunkPos;
 
 pub struct GameArgs {
@@ -19,6 +23,9 @@ pub struct GameArgs {
     pub detach_input: bool,
     pub render_distance: u32,
     pub fov_y_deg: f32,
+    pub render_shadows: bool,
+    pub no_lod: bool,
+    pub gpu_buffer_size_mb: usize,
 }
 
 /// Game runs the actual game loop and handles communication and calling to the different game
@@ -69,7 +76,7 @@ impl Game {
         player.caps.flying = true;
 
         let job_system = Rc::new(JobSystem::new(num_cpus::get() - 1));
-        let world = World::new(Rc::clone(&job_system), args.fov_y_deg, args.render_distance, args.mc_world);
+        let world = World::new(Rc::clone(&job_system), args.fov_y_deg, args.render_shadows, args.render_distance, args.no_lod, args.mc_world, args.gpu_buffer_size_mb);
         let gameplay = Gameplay::new();
 
         Self {
@@ -92,7 +99,7 @@ impl Game {
         }
     }
 
-    pub fn run(self) {
+    pub fn run(self, closer: &Arc<AtomicBool>) {
         let mut window = self.window;
         let mut state = self.state;
 
@@ -102,6 +109,9 @@ impl Game {
         let mut fixed_frames = 0;
 
         loop {
+            if closer.load(Ordering::Relaxed) {
+                window.request_close();
+            }
             if window.should_close() {
                 break;
             }
@@ -192,10 +202,11 @@ impl State {
             .collapsed(false, Condition::Once)
             .build(|| {
                 frame.ui.text(format!(
-                    "fps: {}, frame: {:.2}ms, update: {:.2}ms",
+                    "fps: {}, frame: {:.2}ms, update: {:.2}ms ({})",
                     frame.stats.frames_per_second,
                     frame.stats.avg_frame_time_per_second * 1000.0,
                     frame.stats.avg_update_time_per_second * 1000.0,
+                    worldsvo::SVO_TYPE.name,
                 ));
                 frame.ui.text(format!(
                     "physics fps: {}, every: {:.2}ms",
@@ -267,6 +278,7 @@ impl State {
                 frame.ui.separator();
 
                 let svo_stats = self.world.world_svo.get_stats();
+                benchmark::track_svo_gpu_bytes(svo_stats.used_bytes);
                 frame.ui.text(format!(
                     "gpu svo size: {:.3}mb / {:.3}mb, depth: {}",
                     svo_stats.used_bytes as f32 / 1024f32 / 1024f32,
@@ -290,6 +302,8 @@ impl State {
         let now = Instant::now();
         if now > self.plot_refresh {
             self.plot_refresh += Duration::from_secs_f32(1.0 / 60.0);
+
+            benchmark::track_fps(frame.stats.frames_per_second, frame.stats.avg_frame_time_per_second);
 
             self.plot_fps.add(frame.stats.frames_per_second as f32);
             self.plot_frame_time.add(frame.stats.avg_frame_time_per_second);

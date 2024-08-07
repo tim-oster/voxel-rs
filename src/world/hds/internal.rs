@@ -1,5 +1,6 @@
 use std::{mem, ptr, slice};
 use std::alloc::{Allocator, Global};
+use std::ops::{Deref, DerefMut};
 
 use rustc_hash::FxHashMap;
 
@@ -48,6 +49,20 @@ impl<T: Bits, A: Allocator> ChunkBuffer<T, A> {
 
     pub fn reset(&mut self) {
         self.data.clear();
+    }
+}
+
+impl<T: Bits, A: Allocator> Deref for ChunkBuffer<T, A> {
+    type Target = Vec<T, A>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.data
+    }
+}
+
+impl<T: Bits, A: Allocator> DerefMut for ChunkBuffer<T, A> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.data
     }
 }
 

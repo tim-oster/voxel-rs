@@ -23,6 +23,11 @@ impl BorrowedChunk {
             was_dropped: Arc::new(AtomicBool::new(false)),
         }
     }
+
+    pub fn take(mut self) -> Option<Chunk> {
+        self.was_dropped.store(true, Ordering::Relaxed);
+        self.chunk.take()
+    }
 }
 
 impl Drop for BorrowedChunk {
@@ -73,6 +78,21 @@ impl World {
         if self.changed_chunks_set.insert(*pos) {
             self.changed_chunks.push_back(*pos);
         }
+    }
+
+    pub fn mark_all_chunks_as_changed(&mut self) {
+        let chunks = self.chunks.keys().copied().collect::<Vec<ChunkPos>>();
+        for pos in chunks {
+            self.mark_chunk_as_changed(&pos);
+        }
+    }
+
+    pub fn has_changed_chunks(&self) -> bool {
+        !self.changed_chunks_set.is_empty()
+    }
+
+    pub fn has_borrowed_chunks(&self) -> bool {
+        !self.borrowed_chunks.is_empty()
     }
 
     /// Sets a chunk at the chunk's position and marks that position as changed. Any previous

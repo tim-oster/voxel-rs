@@ -23,6 +23,7 @@ pub enum SvoType {
 
 #[derive(Debug, Copy, Clone)]
 pub struct SvoTypeProperties {
+    pub name: &'static str,
     pub shader_type_define: &'static str,
 }
 
@@ -31,8 +32,8 @@ impl Deref for SvoType {
 
     fn deref(&self) -> &Self::Target {
         match self {
-            Self::Esvo => &SvoTypeProperties { shader_type_define: "1" },
-            Self::Csvo => &SvoTypeProperties { shader_type_define: "2" },
+            Self::Esvo => &SvoTypeProperties { name: "ESVO", shader_type_define: "1" },
+            Self::Csvo => &SvoTypeProperties { name: "CSVO", shader_type_define: "2" },
         }
     }
 }
@@ -105,7 +106,7 @@ pub struct RenderParams {
 }
 
 impl Svo {
-    pub fn new(registry: &VoxelRegistry, typ: SvoType) -> Self {
+    pub fn new(registry: &VoxelRegistry, typ: SvoType, size_mb: usize) -> Self {
         let svo_type = typ.shader_type_define;
 
         let tex_array = registry.build_texture_array().unwrap();
@@ -129,7 +130,7 @@ impl Svo {
             tex_array,
             material_buffer,
             world_shader,
-            world_buffer: MappedBuffer::new(300 * 1000 * 1000), // 300 MB
+            world_buffer: MappedBuffer::new(size_mb * 1000 * 1000),
             screen_quad: ScreenQuad::new(),
             render_fence: RefCell::new(Fence::new()),
 
@@ -269,9 +270,8 @@ mod svo_tests {
     use crate::graphics::svo_picker::{PickerBatch, PickerBatchResult, RayResult};
     use crate::graphics::svo_registry::{Material, VoxelRegistry};
     use crate::world::chunk::{Chunk, ChunkPos, ChunkStorageAllocator};
-    use crate::world::hds::{ChunkBuffer, csvo, esvo, WorldSvo};
+    use crate::world::hds::{ChunkBufferPool, csvo, esvo, WorldSvo};
     use crate::world::hds::octree::Position;
-    use crate::world::memory::{Pool, StatsAllocator};
     use crate::world::world::BorrowedChunk;
 
     struct TestCase {
@@ -290,26 +290,26 @@ mod svo_tests {
             chunk
         };
         let create_esvo = || {
-            let buffer_alloc = Arc::new(Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new()));
+            let buffer_alloc = Arc::new(ChunkBufferPool::default());
             let chunk = esvo::SerializedChunk::new(BorrowedChunk::from(create_chunk()), &buffer_alloc);
 
             let mut svo = esvo::Esvo::<esvo::SerializedChunk>::new();
             svo.set_leaf(Position(0, 0, 0), chunk, true);
             svo.serialize();
 
-            let mut esvo = Svo::new(&create_voxel_registry(), SvoType::Esvo);
+            let mut esvo = Svo::new(&create_voxel_registry(), SvoType::Esvo, 10);
             esvo.update(&mut svo);
             esvo
         };
         let create_csvo = || {
-            let buffer_alloc = Arc::new(Pool::new_in(Box::new(ChunkBuffer::new_in), None, StatsAllocator::new()));
+            let buffer_alloc = Arc::new(ChunkBufferPool::default());
             let chunk = csvo::SerializedChunk::new(BorrowedChunk::from(create_chunk()), &buffer_alloc);
 
             let mut svo = csvo::Csvo::new();
             svo.set_leaf(Position(0, 0, 0), chunk, true);
             svo.serialize();
 
-            let mut csvo = Svo::new(&create_voxel_registry(), SvoType::Csvo);
+            let mut csvo = Svo::new(&create_voxel_registry(), SvoType::Csvo, 10);
             csvo.update(&mut svo);
             csvo
         };

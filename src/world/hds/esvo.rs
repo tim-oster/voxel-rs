@@ -251,7 +251,7 @@ impl<T: Serializable, A: Allocator> WorldSvo<T> for Esvo<T, A> {
                     let content = child.get_leaf_value_mut().unwrap();
                     let result = content.serialize(&mut tmp_buffer.data, 0);
                     if result.depth > 0 {
-                        let offset_bytes = self.buffer.insert(id, tmp_buffer.data.to_u8_slice());
+                        let offset_bytes = self.buffer.insert(id, tmp_buffer.to_u8_slice());
                         tmp_buffer.reset();
 
                         self.leaf_info.insert(id, LeafInfo { buf_offset: offset_bytes / 4, serialization: result });
@@ -267,7 +267,7 @@ impl<T: Serializable, A: Allocator> WorldSvo<T> for Esvo<T, A> {
 
         // rebuild root octree
         let result = self.serialize_root(&mut tmp_buffer);
-        let offset_bytes = self.buffer.insert(u64::MAX, tmp_buffer.data.to_u8_slice());
+        let offset_bytes = self.buffer.insert(u64::MAX, tmp_buffer.to_u8_slice());
         tmp_buffer.reset();
         self.root_info = Some(LeafInfo { buf_offset: offset_bytes / 4, serialization: result });
 
@@ -385,6 +385,10 @@ impl SerializedChunk {
     pub fn take_borrowed_chunk(&mut self) -> Option<BorrowedChunk> {
         self.borrowed_chunk.take()
     }
+
+    pub fn has_data(&self) -> bool {
+        self.buffer.is_some()
+    }
 }
 
 impl Serializable for SerializedChunk {
@@ -397,7 +401,7 @@ impl Serializable for SerializedChunk {
     fn serialize(&mut self, dst: &mut Vec<u32>, _lod: u8) -> SerializationResult {
         if self.buffer.is_some() {
             let buffer = self.buffer.as_ref().unwrap();
-            dst.extend(buffer.data.iter());
+            dst.extend(buffer.iter());
 
             // Drop the buffer so that the allocator can reuse it. A SerializedChunk only needs it's buffer for the
             // serialization to the SVO. After that, it is indexed by an absolute pointer. If the content changes
@@ -509,14 +513,50 @@ where
 
 #[cfg(test)]
 mod esvo_tests {
+    use std::sync::Arc;
+    use test::Bencher;
+
     use rustc_hash::FxHashMap;
 
-    use crate::world::chunk::{BlockId, ChunkPos};
+    use crate::world::chunk::{BlockId, Chunk, ChunkPos, ChunkStorageAllocator};
+    use crate::world::hds::{ChunkBufferPool, WorldSvo};
     use crate::world::hds::esvo::{ChunkBuffer, Esvo, LeafInfo, RangeBuffer, SerializationResult, SerializedChunk, U32Slicer};
     use crate::world::hds::internal::Range;
     use crate::world::hds::octree::{LeafId, Octree, Position};
-    use crate::world::hds::WorldSvo;
     use crate::world::memory::{Pool, StatsAllocator};
+    use crate::world::world::BorrowedChunk;
+
+    #[bench]
+    fn serialized_chunk_bench(b: &mut Bencher) {
+        let storage_pool = ChunkStorageAllocator::new();
+
+        let mut octree = storage_pool.allocate();
+        octree.construct_octants_with(5, |pos| {
+            if (pos.0 + pos.1 + pos.2) % 2 == 0 {
+                Some(1)
+            } else {
+                None
+            }
+        });
+        octree.compact();
+
+        let mut chunk = Some(Chunk::new(ChunkPos::new(0, 0, 0), 5, octree));
+        let buffer_pool = Arc::new(ChunkBufferPool::default());
+
+        let mut byte_size = 0;
+
+        b.iter(|| {
+            let bc = BorrowedChunk::from(chunk.take().unwrap());
+            let mut result = SerializedChunk::new(bc, &buffer_pool);
+            chunk = result.borrowed_chunk.take().unwrap().take();
+
+            byte_size = result.buffer.as_ref().unwrap().len();
+
+            result
+        });
+
+        println!("byte size: {byte_size}");
+    }
 
     /// Tests that serializing an SVO with `SerializedChunk` values produces the expected result buffer.
     #[test]

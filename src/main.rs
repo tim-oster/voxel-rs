@@ -1,6 +1,8 @@
 #![feature(allocator_api, test)]
 #![feature(pointer_is_aligned_to)]
 #![feature(unchecked_shifts)]
+#![feature(duration_millis_float)]
+#![feature(once_cell_get_mut)]
 #![allow(dead_code, unused_variables)]
 
 #![warn(clippy::all, clippy::nursery, clippy::pedantic)]
@@ -29,10 +31,14 @@ extern crate gl;
 extern crate memoffset;
 extern crate test;
 
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
+
 use cgmath::{Point3, Vector3};
 use clap::ArgAction;
 use clap::Parser;
 
+use crate::gamelogic::benchmark;
 use crate::gamelogic::game::{Game, GameArgs};
 
 mod core;
@@ -91,9 +97,21 @@ struct Args {
     #[arg(long, default_value = "72")]
     fov: f32,
 
+    /// Defines if the shadow render pass is enabled.
+    #[arg(long, action = ArgAction::Set, default_value = "true")]
+    render_shadows: bool,
+
+    /// Defines if levels of detail are used for chunk serialization.
+    #[arg(long, action = ArgAction::Set, default_value = "false")]
+    no_lod: bool,
+
     /// Optional directory path to a minecraft world to load. Must be in anvil file format.
     #[arg(long)]
     mc_world: Option<String>,
+
+    /// Amount of megabyte to allocate for the GPU-side SVO buffer.
+    #[arg(long, default_value = "800")]
+    gpu_buffer_size: usize,
 }
 
 fn main() {
@@ -101,7 +119,6 @@ fn main() {
     let _profiler = dhat::Profiler::builder().trim_backtraces(Some(20)).build();
 
     let args = Args::parse();
-
     let game = Game::new(GameArgs {
         mc_world: args.mc_world,
         player_pos: Point3::new(args.pos[0], args.pos[1], args.pos[2]),
@@ -109,6 +126,17 @@ fn main() {
         detach_input: args.detach_input,
         render_distance: args.render_distance,
         fov_y_deg: args.fov,
+        render_shadows: args.render_shadows,
+        no_lod: args.no_lod,
+        gpu_buffer_size_mb: args.gpu_buffer_size,
     });
-    game.run();
+
+    let closer = Arc::new(AtomicBool::new(false));
+
+    #[cfg(windows)]
+    signal_hook::flag::register(signal_hook::consts::SIGBREAK, Arc::clone(&closer)).unwrap();
+
+    game.run(&closer);
+
+    benchmark::print();
 }

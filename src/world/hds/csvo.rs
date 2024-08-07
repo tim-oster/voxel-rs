@@ -6,9 +6,10 @@ use std::sync::Arc;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::world::chunk::{BlockId, ChunkPos};
-use crate::world::hds::{ChunkBufferPool, WorldSvo};
+use crate::world::hds::{ChunkBuffer, ChunkBufferPool, WorldSvo};
 use crate::world::hds::internal::{pick_leaf_for_lod, RangeBuffer};
 use crate::world::hds::octree::{LeafId, OctantId, Octree, Position};
+use crate::world::memory::{Pooled, StatsAllocator};
 use crate::world::world::BorrowedChunk;
 
 /// `OctantChange` describes if an octant was added (and where), or if it was removed.
@@ -32,6 +33,9 @@ pub struct Csvo<A: Allocator = Global> {
     buffer: RangeBuffer<u8, A>,
     leaf_info: FxHashMap<u64, LeafInfo>,
     root_info: Option<LeafInfo>,
+
+    /// Reusable buffer for serializing octants data to be copied into actual [`RangeBuffer`].
+    tmp_octant_buffer: Option<Vec<u8>>,
 }
 
 impl Csvo {
@@ -57,6 +61,7 @@ impl<A: Allocator> Csvo<A> {
             buffer: RangeBuffer::with_capacity_in(capacity, alloc),
             leaf_info: FxHashMap::default(),
             root_info: None,
+            tmp_octant_buffer: Some(Vec::new()),
         }
     }
 
@@ -186,6 +191,9 @@ impl<A: Allocator> WorldSvo<SerializedChunk> for Csvo<A> {
             return;
         }
 
+        // move tmp buffer into scope
+        let mut tmp_buffer = self.tmp_octant_buffer.take().unwrap();
+
         // rebuild & remove all changed leaf octants
         let changes = self.change_set.drain().collect::<Vec<OctantChange>>();
         for change in changes {
@@ -198,26 +206,28 @@ impl<A: Allocator> WorldSvo<SerializedChunk> for Csvo<A> {
                     // with a shallower depth remain. In this context, this cannot happen.
                     self.child_depth = self.child_depth.max(content.lod);
 
+                    // Drop the buffer so that the allocator can reuse it. A SerializedChunk only needs it's buffer for the
+                    // serialization to the SVO. After that, it is indexed by an absolute pointer. If the content changes
+                    // however, a new SerializedChunk is built and the old one discarded. Same goes for materials.
                     if let Some(buffer) = content.buffer.take() {
-                        // TODO reuse some buffer for this?
-
                         let materials = content.materials.take().unwrap();
                         let material_bytes = materials.len() * size_of::<BlockId>();
-                        let mut merged = Vec::with_capacity(1 + 4 + material_bytes + buffer.len());
 
-                        merged.push(content.lod);
-                        merged.extend_from_slice(&(material_bytes as u32).to_le_bytes());
-                        for material in materials {
-                            merged.extend_from_slice(&material.to_le_bytes());
+                        // LOD byte + 4 bytes for material bytes + actual materials + rest of buffer
+                        let required_capacity = 1 + 4 + material_bytes + buffer.len();
+                        if tmp_buffer.capacity() < required_capacity {
+                            tmp_buffer.reserve_exact(required_capacity - tmp_buffer.capacity());
                         }
-                        merged.extend(buffer);
 
-                        let offset = self.buffer.insert(id, &merged);
+                        tmp_buffer.push(content.lod);
+                        tmp_buffer.extend_from_slice(&(material_bytes as u32).to_le_bytes());
+                        for material in materials {
+                            tmp_buffer.extend_from_slice(&material.to_le_bytes());
+                        }
+                        tmp_buffer.extend(buffer.iter());
 
-                        // Drop the buffer so that the allocator can reuse it. A SerializedChunk only needs it's buffer for the
-                        // serialization to the SVO. After that, it is indexed by an absolute pointer. If the content changes
-                        // however, a new SerializedChunk is built and the old one discarded.
-                        content.buffer = None;
+                        let offset = self.buffer.insert(id, &tmp_buffer);
+                        tmp_buffer.clear();
 
                         self.leaf_info.insert(id, LeafInfo { buf_offset: offset });
                     }
@@ -234,6 +244,9 @@ impl<A: Allocator> WorldSvo<SerializedChunk> for Csvo<A> {
         let buffer = self.serialize_root(&self.octree, self.octree.root.unwrap(), self.octree.depth());
         let offset = self.buffer.insert(u64::MAX, &buffer);
         self.root_info = Some(LeafInfo { buf_offset: offset });
+
+        // return tmp buffer for reuse
+        self.tmp_octant_buffer = Some(tmp_buffer);
     }
 
     fn depth(&self) -> u8 {
@@ -323,11 +336,11 @@ mod csvo_tests {
         chunk.storage.as_mut().unwrap().compact();
         let sc = SerializedChunk::new(BorrowedChunk::from(chunk), &Arc::new(ChunkBufferPool::default()));
 
-        let mut esvo = Csvo::new();
-        esvo.set_leaf(Position(1, 0, 0), sc, true);
-        esvo.serialize();
+        let mut csvo = Csvo::new();
+        csvo.set_leaf(Position(1, 0, 0), sc, true);
+        csvo.serialize();
 
-        assert_eq!(esvo.root_info, Some(LeafInfo { buf_offset: 49 }));
+        assert_eq!(csvo.root_info, Some(LeafInfo { buf_offset: 49 }));
 
         let expected = vec![
             // chunk LOD
@@ -355,7 +368,7 @@ mod csvo_tests {
             0b00_00_11_00, 0,
             0, 0, 0, 1 << 7, // 0 with absolute pointer flag as u32 bytes
         ];
-        assert_eq!(esvo.buffer, RangeBuffer {
+        assert_eq!(csvo.buffer, RangeBuffer {
             bytes: expected.clone(),
             free_ranges: vec![],
             updated_ranges: vec![Range { start: 0, length: 55 }],
@@ -367,7 +380,7 @@ mod csvo_tests {
 
         let mut buffer = Vec::new();
         buffer.resize(200, 0);
-        let size = unsafe { esvo.write_to(buffer.as_mut_ptr()) };
+        let size = unsafe { csvo.write_to(buffer.as_mut_ptr()) };
         assert_eq!(buffer[..size], [
             vec![49, 0, 0, 0],
             expected,
@@ -382,13 +395,12 @@ pub struct SerializedChunk {
     pos_hash: u64,
     lod: u8,
     borrowed_chunk: Option<BorrowedChunk>,
-    buffer: Option<Vec<u8>>,
+    buffer: Option<Pooled<ChunkBuffer<u8, StatsAllocator>>>,
     materials: Option<Vec<BlockId>>,
 }
 
 impl SerializedChunk {
-    // TODO use memory pool alloc: &Arc<ChunkBufferPool<u8>> ?
-    pub fn new(chunk: BorrowedChunk, _: &Arc<ChunkBufferPool<u8>>) -> Self {
+    pub fn new(chunk: BorrowedChunk, alloc: &Arc<ChunkBufferPool<u8>>) -> Self {
         // use hash of position as the unique id
         let mut hasher = DefaultHasher::new();
         chunk.pos.hash(&mut hasher);
@@ -404,8 +416,9 @@ impl SerializedChunk {
                 depth = chunk.lod;
             }
 
-            let (b, m) = Self::serialize_octant(storage, root_id, depth, 0);
-            (buffer, materials) = (Some(b), Some(m));
+            materials = Some(Vec::new());
+            let b = Self::serialize_octant(alloc, storage, root_id, depth, 0, materials.as_mut().unwrap());
+            buffer = Some(b);
         }
 
         Self {
@@ -418,12 +431,11 @@ impl SerializedChunk {
         }
     }
 
-    pub fn serialize_octant<A: Allocator>(octree: &Octree<BlockId, A>, octant_id: OctantId, depth: u8, material_offset: u16) -> (Vec<u8>, Vec<BlockId>) {
+    pub fn serialize_octant<A: Allocator>(alloc: &Arc<ChunkBufferPool<u8>>, octree: &Octree<BlockId, A>, octant_id: OctantId, depth: u8, material_offset: u16, materials: &mut Vec<BlockId>) -> Pooled<ChunkBuffer<u8, StatsAllocator>> {
         let octant = &octree.octants[octant_id as usize];
 
         if depth == 1 {
             let mut leaf_mask = 0u8;
-            let mut materials = Vec::new();
 
             for (idx, child) in octant.children.iter().enumerate() {
                 if child.is_none() {
@@ -446,10 +458,11 @@ impl SerializedChunk {
                 leaf_mask |= 1 << idx;
             }
 
-            return (vec![leaf_mask], materials);
+            let mut buffer = alloc.allocate();
+            buffer.push(leaf_mask);
+            return buffer;
         }
 
-        let mut materials = Vec::new();
         let mut children = Vec::new();
         for (idx, child) in octant.children.iter().enumerate() {
             if child.is_none() {
@@ -460,12 +473,11 @@ impl SerializedChunk {
             // decrease lod and calculate buffer offset before recursively serializing the child octant
             let child_id = child.get_octant_value().unwrap();
 
-            let (buffer, child_materials) = Self::serialize_octant(octree, child_id, depth - 1, material_offset + materials.len() as u16);
+            let buffer = Self::serialize_octant(alloc, octree, child_id, depth - 1, materials.len() as u16, materials);
             children.push((idx, buffer));
-            materials.extend(child_materials);
         }
 
-        let mut buffer = Vec::new();
+        let mut buffer = alloc.allocate();
         if depth == 2 {
             // use leaf nodes
 
@@ -477,7 +489,7 @@ impl SerializedChunk {
 
             for (idx, data) in children {
                 buffer[0] |= 1 << idx;
-                buffer.extend(data);
+                buffer.extend(data.iter());
             }
         } else if depth == 3 {
             // use pre-leaf nodes
@@ -491,7 +503,7 @@ impl SerializedChunk {
                 buffer[0] |= 1 << idx;
                 buffer[1 + i] = running_offset;
                 running_offset += data.len() as u8;
-                buffer.extend(data);
+                buffer.extend(data.iter());
             }
         } else {
             // use internal nodes
@@ -522,7 +534,7 @@ impl SerializedChunk {
                 }
             }
             for (_, data) in children {
-                buffer.extend(data);
+                buffer.extend(data.iter());
             }
 
             let header_bytes = header_mask.to_le_bytes();
@@ -530,19 +542,60 @@ impl SerializedChunk {
             buffer[1] = header_bytes[1];
         }
 
-        (buffer, materials)
+        buffer
     }
 
     pub fn take_borrowed_chunk(&mut self) -> Option<BorrowedChunk> {
         self.borrowed_chunk.take()
     }
+
+    pub fn has_data(&self) -> bool {
+        self.buffer.is_some() && self.materials.is_some()
+    }
 }
 
 #[cfg(test)]
 mod serialized_chunk_tests {
-    use crate::world::chunk::BlockId;
+    use std::sync::Arc;
+    use test::Bencher;
+
+    use crate::world::chunk::{BlockId, Chunk, ChunkPos, ChunkStorageAllocator};
+    use crate::world::hds::ChunkBufferPool;
     use crate::world::hds::csvo::SerializedChunk;
     use crate::world::hds::octree::{Octree, Position};
+    use crate::world::world::BorrowedChunk;
+
+    #[bench]
+    fn serialize_chunk_bench(b: &mut Bencher) {
+        let storage_pool = ChunkStorageAllocator::new();
+
+        let mut octree = storage_pool.allocate();
+        octree.construct_octants_with(5, |pos| {
+            if (pos.0 + pos.1 + pos.2) % 2 == 0 {
+                Some(1)
+            } else {
+                None
+            }
+        });
+        octree.compact();
+
+        let mut chunk = Some(Chunk::new(ChunkPos::new(0, 0, 0), 5, octree));
+        let buffer_pool = Arc::new(ChunkBufferPool::default());
+
+        let mut byte_size = 0;
+
+        b.iter(|| {
+            let bc = BorrowedChunk::from(chunk.take().unwrap());
+            let mut result = SerializedChunk::new(bc, &buffer_pool);
+            chunk = result.borrowed_chunk.take().unwrap().take();
+
+            byte_size = result.buffer.as_ref().unwrap().len();
+
+            result
+        });
+
+        println!("byte size: {byte_size}");
+    }
 
     #[test]
     fn serialize_octant_single_leaf() {
@@ -551,8 +604,10 @@ mod serialized_chunk_tests {
         octree.expand_to(4);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth(), 0);
-        assert_eq!(result, vec![
+        let alloc = Arc::new(ChunkBufferPool::default());
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth(), 0, &mut materials);
+        assert_eq!(result.data, vec![
             1, 0, 0,    // inode
             1, 0,       // plnode
             1, 0, 0, 1, // lnode
@@ -570,8 +625,10 @@ mod serialized_chunk_tests {
         octree.expand_to(4);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth(), 0);
-        assert_eq!(result, vec![
+        let alloc = Arc::new(ChunkBufferPool::default());
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth(), 0, &mut materials);
+        assert_eq!(result.data, vec![
             1, 0, 0,                       // inode
             1 | (1 << 7), 0, 5,            // plnode
             1 | (1 << 7), 0, 0, 1, 1 << 7, // lnode
@@ -588,8 +645,10 @@ mod serialized_chunk_tests {
         octree.set_leaf(Position(0, 0, 31), 3 as BlockId);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth(), 0);
-        assert_eq!(result, vec![
+        let alloc = Arc::new(ChunkBufferPool::default());
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth(), 0, &mut materials);
+        assert_eq!(result.data, vec![
             0b_00_01_01_00, 0b00_00_00_01, 0, 9, 18,
             0b00_00_01_00, 0, 0,
             2, 0,
@@ -612,8 +671,10 @@ mod serialized_chunk_tests {
         octree.set_leaf(Position(0, 0, 31), 3 as BlockId);
         octree.compact();
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 1, 0);
-        assert_eq!(result, vec![
+        let alloc = Arc::new(ChunkBufferPool::default());
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 1, 0, &mut materials);
+        assert_eq!(result.data, vec![
             0b_00_01_01_00, 0b00_00_00_01, 0, 6, 12,
             2, 0,
             2, 0, 0, 2,
@@ -624,8 +685,9 @@ mod serialized_chunk_tests {
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 2, 0);
-        assert_eq!(result, vec![
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 2, 0, &mut materials);
+        assert_eq!(result.data, vec![
             0b00010110, 0, 4, 8,
             2, 0, 0, 2,
             4, 1, 0, 4,
@@ -633,14 +695,16 @@ mod serialized_chunk_tests {
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 3, 0);
-        assert_eq!(result, vec![
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 3, 0, &mut materials);
+        assert_eq!(result.data, vec![
             0b00010110, 0, 0, 2, 4, 16,
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
 
-        let (result, materials) = SerializedChunk::serialize_octant(&octree, octree.root.unwrap(), octree.depth() - 4, 0);
-        assert_eq!(result, vec![
+        let mut materials = Vec::new();
+        let result = SerializedChunk::serialize_octant(&alloc, &octree, octree.root.unwrap(), octree.depth() - 4, 0, &mut materials);
+        assert_eq!(result.data, vec![
             22,
         ]);
         assert_eq!(materials, vec![1, 2, 3]);
